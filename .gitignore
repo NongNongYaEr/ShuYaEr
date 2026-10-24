@@ -1,0 +1,16 @@
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local tools and logs
+.codex/
+.agents/
+*.log
+
+# Operating system files
+.DS_Store
+Thumbs.db
+desktop.ini
