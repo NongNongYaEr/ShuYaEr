@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 使用文档与常见问题
+    url: https://github.com/NongNongYaEr/tree-duck/blob/main/docs/README.md
+    about: 先查看启动、工程、素材与导出说明，或了解当前源码和版本准备进度。

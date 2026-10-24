@@ -1,0 +1,43 @@
+name: 功能建议
+description: 分享制作需求、工作流改进或新的功能想法。
+title: "[建议] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        先说说你想完成的制作任务，再描述希望怎样改进。一个建议尽量聚焦一个问题。
+        这里会公开展示，请不要附上未公开项目或账号、订单资料。
+  - type: input
+    id: task
+    attributes:
+      label: 你正在做什么
+      placeholder: 例如游戏场景中的植物制作、建筑藤蔓或样板整理
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 当前遇到的阻碍
+      description: 哪一步不方便？它怎样影响你的制作？
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: 希望怎样改善
+      description: 可以描述操作过程、期望结果或一个具体例子。
+    validations:
+      required: true
+  - type: textarea
+    id: workaround
+    attributes:
+      label: 目前的替代做法（可选）
+    validations:
+      required: false
+  - type: textarea
+    id: references
+    attributes:
+      label: 补充示例或参考（可选）
+      description: 可附公开的截图或参考链接，帮助说明需求。
+    validations:
+      required: false

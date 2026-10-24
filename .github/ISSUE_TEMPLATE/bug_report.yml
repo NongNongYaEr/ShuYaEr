@@ -1,0 +1,71 @@
+name: 软件故障反馈
+description: 报告启动、制作、保存、导出或文档中的问题。
+title: "[问题] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢你帮助改进树鸭儿。请先查看已有 Issues，有相同问题时可补充到原讨论。
+        这里会公开展示。账号、订单和会员问题请通过网站站内反馈处理；日志与截图请先移除个人和项目敏感信息。
+  - type: input
+    id: version
+    attributes:
+      label: 软件版本或文档页面
+      description: 填写实际使用的版本；文档问题请填写页面名称。
+      placeholder: 例如 V0.1 精简试用版，或“快速开始”文档
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 运行环境
+      description: 软件问题填写 Windows 版本等环境信息；纯文档问题可填“文档”。
+      placeholder: 例如 Windows 11 x64
+    validations:
+      required: true
+  - type: dropdown
+    id: workspace
+    attributes:
+      label: 问题发生在哪个部分
+      options:
+        - 启动与下载
+        - 整树造型
+        - 枝条工作台
+        - 藤蔓植物
+        - 工程保存与打开
+        - 资产导出
+        - 使用文档
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 从什么状态开始，按什么顺序操作？尽量使用可以公开的最小示例。
+      placeholder: |
+        1. 打开……
+        2. 选择……
+        3. 执行……后出现问题
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际发生了什么
+      description: 描述看到的表现，以及是否每次都能复现。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 你期望的结果
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 截图或相关报错（可选）
+      description: 可粘贴截图或相关报错文字；请先移除账号、订单、个人和项目敏感信息。
+    validations:
+      required: false
