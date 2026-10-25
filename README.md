@@ -7,6 +7,7 @@
 <p align="center">
   <a href="docs/quick-start.md"><strong>快速开始 ↗</strong></a>　·　
   <a href="docs/README.md">使用文档</a>　·　
+  <a href="docs/gallery.md">植物作品</a>　·　
   <a href="docs/feedback.md">反馈建议</a>　·　
   <a href="docs/source-status.md">源码与版本</a>
 </p>
@@ -36,6 +37,23 @@
 
 </details>
 
+## 先看看，植物能是什么样
+
+<table width="100%">
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/gallery.md"><img src="docs/images/camphor.png" width="580" alt="香樟样板在软件中的真实画面：展开的树冠与主干" /></a>
+      <p><strong>从整体树形开始。</strong>观察香樟的骨架与树冠轮廓。</p>
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/gallery.md"><img src="docs/images/jasmine.png" width="580" alt="茉莉样板在软件中的真实画面：绿叶与白色花朵" /></a>
+      <p><strong>再走近枝叶细节。</strong>观察茉莉的疏密与花叶组合。</p>
+    </td>
+  </tr>
+</table>
+
+现有植物样板的实际视口截图。[查看四种植物与藤蔓工作区 →](docs/gallery.md)
+
 ## 选一个入口，开始了解
 
 <table width="100%">
@@ -60,6 +78,8 @@
     </td>
   </tr>
 </table>
+
+接下来怎么推进？[查看开发计划](docs/roadmap.md)　·　想一起改进？[参与协作](CONTRIBUTING.md)
 
 ## 下载与资源，分清这三件事
 
