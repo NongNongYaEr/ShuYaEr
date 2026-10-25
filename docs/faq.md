@@ -73,7 +73,7 @@ GitHub 仓库 ZIP 包含该版本实际提交的内容；目前下载它只能�
 <details>
 <summary><strong>应该在哪里反馈问题？</strong></summary>
 
-启动、制作、保存、导出或文档问题，可提交 [软件故障反馈](https://github.com/NongNongYaEr/tree-duck/issues/new?template=bug_report.yml)。制作流程或功能方面的想法，可提交 [功能建议](https://github.com/NongNongYaEr/tree-duck/issues/new?template=feature_request.yml)。
+启动、制作、保存、导出或文档问题，可提交 [软件故障反馈](https://github.com/NongNongYaEr/ShuYaEr/issues/new?template=bug_report.yml)。制作流程或功能方面的想法，可提交 [功能建议](https://github.com/NongNongYaEr/ShuYaEr/issues/new?template=feature_request.yml)。
 
 账号、订单、付款和会员问题，通过软件所属网站的站内反馈处理；不要在公开 Issue 中填写订单或账号资料。详见 [反馈指南](feedback.md)。
 

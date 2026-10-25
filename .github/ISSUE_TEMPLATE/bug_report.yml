@@ -5,11 +5,11 @@ body:
   - type: markdown
     attributes:
       value: |
-        <img src="https://raw.githubusercontent.com/NongNongYaEr/tree-duck/main/docs/images/source-duck.png" width="56" alt="鸭鸭帮助定位软件问题" />
+        <img src="https://raw.githubusercontent.com/NongNongYaEr/ShuYaEr/main/docs/images/source-duck.png" width="56" alt="鸭鸭帮助定位软件问题" />
 
         ### 一起把问题说清楚
         依次填写版本、操作步骤和看到的结果，方便定位问题。
-        [先看常见问题](https://github.com/NongNongYaEr/tree-duck/blob/main/docs/faq.md) · [查看已有讨论](https://github.com/NongNongYaEr/tree-duck/issues)
+        [先看常见问题](https://github.com/NongNongYaEr/ShuYaEr/blob/main/docs/faq.md) · [查看已有讨论](https://github.com/NongNongYaEr/ShuYaEr/issues)
 
         这里会公开展示。账号、订单和会员问题请通过网站站内反馈处理；日志与截图请先移除个人和项目敏感信息。
   - type: markdown

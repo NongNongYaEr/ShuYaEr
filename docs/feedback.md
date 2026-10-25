@@ -15,18 +15,18 @@
       <h3>软件出了点问题</h3>
       <p>启动失败、制作异常、工程打不开、保存导出问题，或文档写错了。</p>
       <p><strong>准备：</strong>版本、操作步骤、实际结果。</p>
-      <p><a href="https://github.com/NongNongYaEr/tree-duck/issues/new?template=bug_report.yml"><strong>提交软件问题 ↗</strong></a></p>
+      <p><a href="https://github.com/NongNongYaEr/ShuYaEr/issues/new?template=bug_report.yml"><strong>提交软件问题 ↗</strong></a></p>
     </td>
     <td width="50%" valign="top">
       <h3>有个更顺手的想法</h3>
       <p>新的制作需求、希望减少的重复操作，或对现有工作流的改进。</p>
       <p><strong>准备：</strong>制作任务、遇到的阻碍、想法。</p>
-      <p><a href="https://github.com/NongNongYaEr/tree-duck/issues/new?template=feature_request.yml"><strong>提出功能建议 ↗</strong></a></p>
+      <p><a href="https://github.com/NongNongYaEr/ShuYaEr/issues/new?template=feature_request.yml"><strong>提出功能建议 ↗</strong></a></p>
     </td>
   </tr>
 </table>
 
-**提交前先找一找：** [常见问题](faq.md) · [已有讨论](https://github.com/NongNongYaEr/tree-duck/issues)。如果已有相同问题，可以在原讨论补充自己的复现信息。
+**提交前先找一找：** [常见问题](faq.md) · [已有讨论](https://github.com/NongNongYaEr/ShuYaEr/issues)。如果已有相同问题，可以在原讨论补充自己的复现信息。
 
 GitHub Issues 用于公开的软件问题与功能讨论，需要登录 GitHub 才能提交。账号、订单、付款和会员问题，通过软件所属网站的站内反馈处理；正式站点入口公布后补充。
 
@@ -56,4 +56,4 @@ GitHub Issues 用于公开的软件问题与功能讨论，需要登录 GitHub �
 
 ---
 
-[查看已有讨论 ↗](https://github.com/NongNongYaEr/tree-duck/issues)　·　[文档目录](README.md)　·　[项目首页](../README.md)
+[查看已有讨论 ↗](https://github.com/NongNongYaEr/ShuYaEr/issues)　·　[文档目录](README.md)　·　[项目首页](../README.md)

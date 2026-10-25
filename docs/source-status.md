@@ -32,7 +32,7 @@
 
 三者分别记录版本。正式发行时，更新说明会标注变化、适用系统、已知问题和可获取的文件。
 
-获取时请核对桌面版版本、源码标签和资产兼容说明。[GitHub 发行记录](https://github.com/NongNongYaEr/tree-duck/releases)以其中实际发布的内容为准。
+获取时请核对桌面版版本、源码标签和资产兼容说明。[GitHub 发行记录](https://github.com/NongNongYaEr/ShuYaEr/releases)以其中实际发布的内容为准。
 
 ## 配套资产在哪里
 
@@ -44,4 +44,4 @@
 
 ---
 
-[查看发行记录 ↗](https://github.com/NongNongYaEr/tree-duck/releases)　·　[文档目录](README.md)　·　[项目首页](../README.md)
+[查看发行记录 ↗](https://github.com/NongNongYaEr/ShuYaEr/releases)　·　[文档目录](README.md)　·　[项目首页](../README.md)

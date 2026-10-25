@@ -50,13 +50,13 @@
       <a href="docs/feedback.md"><img src="docs/images/feedback-duck.png" width="72" alt="鸭鸭的反馈与建议入口" /></a>
       <h3><a href="docs/feedback.md">一起改进 ↗</a></h3>
       <p>遇到问题，或有想法？<br />从具体制作任务说起。</p>
-      <p><a href="https://github.com/NongNongYaEr/tree-duck/issues/new/choose">选择反馈类型</a></p>
+      <p><a href="https://github.com/NongNongYaEr/ShuYaEr/issues/new/choose">选择反馈类型</a></p>
     </td>
     <td width="33%" align="center" valign="top">
       <a href="docs/source-status.md"><img src="docs/images/source-duck.png" width="72" alt="鸭鸭拿着工具，表示源码与版本仍在准备" /></a>
       <h3><a href="docs/source-status.md">源码与版本 ↗</a></h3>
       <p>了解公开范围，<br />查看当前准备进度。</p>
-      <p><a href="https://github.com/NongNongYaEr/tree-duck/releases">发行记录</a></p>
+      <p><a href="https://github.com/NongNongYaEr/ShuYaEr/releases">发行记录</a></p>
     </td>
   </tr>
 </table>
@@ -67,7 +67,7 @@
 | :--- | :--- | :--- |
 | 用于直接开始制作。正式下载入口确认后公布；本仓库目前没有提供安装包。 | 用于研究与自行构建。源码、依赖和构建说明仍在整理，当前文档与图片不是完整软件源码。 | 植物样板、枝条与藤蔓素材，在网站资产库单独维护，按内容说明获取。 |
 
-桌面版、源码标签与资产分别标注版本；实际可获取文件以对应项目说明和[发行记录](https://github.com/NongNongYaEr/tree-duck/releases)为准。正式官网地址准备好后会补充到这里。
+桌面版、源码标签与资产分别标注版本；实际可获取文件以对应项目说明和[发行记录](https://github.com/NongNongYaEr/ShuYaEr/releases)为准。正式官网地址准备好后会补充到这里。
 
 <details>
 <summary><strong>参与反馈与授权说明</strong></summary>

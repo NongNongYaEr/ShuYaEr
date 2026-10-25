@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: 使用文档 · 先找答案
-    url: https://github.com/NongNongYaEr/tree-duck/blob/main/docs/README.md
+    url: https://github.com/NongNongYaEr/ShuYaEr/blob/main/docs/README.md
     about: 先查看启动、工程、素材与导出说明，或了解当前源码和版本准备进度。
   - name: 源码与版本 · 查看进度
-    url: https://github.com/NongNongYaEr/tree-duck/blob/main/docs/source-status.md
+    url: https://github.com/NongNongYaEr/ShuYaEr/blob/main/docs/source-status.md
     about: 查看已经开放的内容，以及软件源码、桌面版和授权的准备状态。
