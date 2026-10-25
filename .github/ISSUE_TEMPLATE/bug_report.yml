@@ -5,8 +5,16 @@ body:
   - type: markdown
     attributes:
       value: |
-        感谢你帮助改进树鸭儿。请先查看已有 Issues，有相同问题时可补充到原讨论。
+        <img src="https://raw.githubusercontent.com/NongNongYaEr/tree-duck/main/docs/images/source-duck.png" width="56" alt="鸭鸭帮助定位软件问题" />
+
+        ### 一起把问题说清楚
+        依次填写版本、操作步骤和看到的结果，方便定位问题。
+        [先看常见问题](https://github.com/NongNongYaEr/tree-duck/blob/main/docs/faq.md) · [查看已有讨论](https://github.com/NongNongYaEr/tree-duck/issues)
+
         这里会公开展示。账号、订单和会员问题请通过网站站内反馈处理；日志与截图请先移除个人和项目敏感信息。
+  - type: markdown
+    attributes:
+      value: "### 01 · 版本与环境"
   - type: input
     id: version
     attributes:
@@ -38,6 +46,9 @@ body:
         - 其他
     validations:
       required: true
+  - type: markdown
+    attributes:
+      value: "### 02 · 操作与结果"
   - type: textarea
     id: steps
     attributes:
@@ -62,6 +73,9 @@ body:
       label: 你期望的结果
     validations:
       required: true
+  - type: markdown
+    attributes:
+      value: "### 03 · 补充材料"
   - type: textarea
     id: evidence
     attributes:

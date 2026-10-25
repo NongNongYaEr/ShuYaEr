@@ -5,8 +5,16 @@ body:
   - type: markdown
     attributes:
       value: |
+        <img src="https://raw.githubusercontent.com/NongNongYaEr/tree-duck/main/docs/images/feedback-duck.png" width="56" alt="鸭鸭欢迎你的制作想法" />
+
+        ### 说说你想怎样创作
         先说说你想完成的制作任务，再描述希望怎样改进。一个建议尽量聚焦一个问题。
+        [反馈指南](https://github.com/NongNongYaEr/tree-duck/blob/main/docs/feedback.md) · [查看已有讨论](https://github.com/NongNongYaEr/tree-duck/issues)
+
         这里会公开展示，请不要附上未公开项目或账号、订单资料。
+  - type: markdown
+    attributes:
+      value: "### 01 · 制作任务与想法"
   - type: input
     id: task
     attributes:
@@ -28,6 +36,9 @@ body:
       description: 可以描述操作过程、期望结果或一个具体例子。
     validations:
       required: true
+  - type: markdown
+    attributes:
+      value: "### 02 · 补充说明（可选）"
   - type: textarea
     id: workaround
     attributes:
