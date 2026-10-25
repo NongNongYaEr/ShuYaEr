@@ -3,7 +3,7 @@
 <table width="100%">
   <tr>
     <td width="88" align="center"><img src="images/tree-duck-icon.png" width="64" height="64" alt="树鸭儿植物创作图标" /></td>
-    <td><h1>从一株植物，看见更多可能</h1><p>树形、枝叶与花朵，各有自己的轮廓。</p></td>
+    <td><h1>植物作品</h1><p>从一株植物，看见更多可能。</p></td>
   </tr>
 </table>
 
