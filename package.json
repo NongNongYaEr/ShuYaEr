@@ -1,0 +1,11 @@
+{
+  "name": "shuyaer-source-available",
+  "version": "0.2.51",
+  "private": false,
+  "type": "module",
+  "license": "LicenseRef-ShuYaEr-Free-Use-Source-Available-1.0",
+  "scripts": {
+    "test": "node --experimental-loader ./tests/vendor-loader.mjs --test tests/unit-preparation.test.mjs tests/keyboard-transform.test.mjs tests/plant-unit-grid.test.mjs tests/unit-authoring.test.mjs",
+    "test:all": "node --experimental-loader ./tests/vendor-loader.mjs --test tests/*.test.mjs"
+  }
+}

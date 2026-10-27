@@ -1,0 +1,24 @@
+// Own off-desktop host. Reproduce transient empty helpers without user input.
+const fs=require('node:fs'),path=require('node:path'),Module=require('node:module');
+const base=path.join(__dirname,'native-viewport.browser.cjs'),expectFailure=process.argv.includes('--expect-empty-error');
+let source=fs.readFileSync(base,'utf8');
+const start=source.indexOf("  await page.evaluate(()=>window.chrome.webview.postMessage(JSON.stringify({topic:'branchforge-native',action:'capture'})))"),end=source.indexOf(' }catch(error)');
+if(start<0||end<0)throw Error('Native acceptance harness changed');
+source=source.slice(0,start)+String.raw`
+  const settle=async()=>{const target=await page.evaluate(()=>window.__branchForge.nativeViewport.stats.submittedRevision);await page.waitForFunction(target=>{const f=window.__branchForge,s=f.nativeViewport.stats;return s.lastError||s.active&&!s.pendingResources&&s.native.scene_session===s.sceneSession&&s.native.revision>=target;},target,{timeout:60000,polling:37});assert.equal(await page.evaluate(()=>window.__branchForge.nativeViewport.stats.lastError),'');};
+  await page.evaluate(()=>{const f=window.__branchForge;f.asset.settings.wind_strength=0;f.controls.enableDamping=false;f.controls.update();});await delay(200);await settle();
+  const original=await page.evaluate(()=>JSON.stringify(window.__branchForge.authoring));
+  const before=await page.evaluate(()=>window.__branchForge.nativeViewport.stats.native.geometry_resources);
+  await page.evaluate(async()=>{const T=await import('/vendor/three.module.min.js'),root=new T.Group(),empty=new T.BufferGeometry();empty.setAttribute('position',new T.Float32BufferAttribute([],3));root.name='acceptance-empty-helper';root.add(new T.Mesh(empty,new T.MeshBasicMaterial()));const zero=new T.InstancedMesh(new T.BoxGeometry(),new T.MeshBasicMaterial(),1);zero.count=0;root.add(zero);window.__emptyHelper=root;window.__branchForge.scene.add(root);});
+  if(EXPECT_FAILURE){await page.waitForFunction(()=>Boolean(window.__branchForge.nativeViewport.stats.lastError),null,{timeout:30000,polling:37});assert.match(await page.evaluate(()=>window.__branchForge.nativeViewport.stats.lastError),/Invalid native buffer size/);fs.writeFileSync(path.join(out,'acceptance.json'),JSON.stringify({passed:true,reproduced:true,error:'Invalid native buffer size'}));console.log('REPRODUCED actual empty helper terminates the native viewport');}
+  else {
+   await delay(200);await settle();
+   await page.evaluate(async()=>{const T=await import('/vendor/three.module.min.js'),root=window.__emptyHelper,box=new T.BoxGeometry(),mat=new T.MeshBasicMaterial(),indexed=new T.BufferGeometry();indexed.setAttribute('position',new T.Float32BufferAttribute([0,0,0,1,0,0,0,1,0],3));indexed.setIndex([]);root.add(new T.Mesh(indexed,mat));const lineGeometry=new T.BufferGeometry();lineGeometry.setAttribute('position',new T.Float32BufferAttribute([0,0,0],3));const line=new T.Line(lineGeometry,new T.LineBasicMaterial());root.add(line);const instances=new T.InstancedMesh(box,mat,1);instances.count=0;root.add(instances);const range=new T.Mesh(box.clone(),mat);range.geometry.setDrawRange(0,0);root.add(range);const grouped=new T.Mesh(box.clone(),[mat]);grouped.geometry.clearGroups();grouped.geometry.addGroup(0,0,0);root.add(grouped);window.__emptyCases={T,line,instances};});
+   await delay(200);await settle();assert.equal(await page.evaluate(()=>window.__branchForge.nativeViewport.stats.native.geometry_resources),before);
+   for(let i=0;i<20;i++){await page.evaluate(i=>{const {T,line,instances}=window.__emptyCases,filled=i%2===0;line.geometry.setAttribute('position',new T.Float32BufferAttribute(filled?[1000,0,0,1001,0,0]:[],3));instances.count=filled?1:0;instances.position.x=1000;},i);await delay(40);await settle();}
+   await page.evaluate(()=>{window.__branchForge.scene.remove(window.__emptyHelper);window.__emptyHelper.traverse(o=>{o.geometry?.dispose();for(const m of Array.isArray(o.material)?o.material:[o.material])m?.dispose();});delete window.__emptyHelper;delete window.__emptyCases;});await delay(100);await settle();assert.equal(await page.evaluate(()=>JSON.stringify(window.__branchForge.authoring)),original);assert.equal(await page.evaluate(()=>window.__branchForge.nativeViewport.stats.native.geometry_resources),before);assert.deepEqual(failures,[]);
+   fs.writeFileSync(path.join(out,'acceptance.json'),JSON.stringify({passed:true,reproduced:false,cycles:20,checks:['empty positions','empty indices','single-point strip','zero instances','empty draw range','empty material groups','clear/refill and resource reclamation','authoring unchanged']}));console.log('PASS empty helpers and 20 clear/refill cycles preserve DX12, authored state and resource counts');
+  }
+`+source.slice(end);
+source=source.replace('if(EXPECT_FAILURE)',`if(${expectFailure})`);
+const mod=new Module(base,module);mod.filename=base;mod.paths=module.paths;mod._compile(source,base);

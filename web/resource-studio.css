@@ -1,0 +1,424 @@
+/* Resource workspaces share one visual rhythm; modeling controls stay scoped out. */
+:is(#resourceCenterDialog,#plantUnitInspector,.plant-pack-panel,.resource-form-dialog,#resourcePackConfirm,#plantUnitDialog) {
+  --rs-pane:color-mix(in srgb,var(--surface) 80%,var(--field));
+  --rs-raised:color-mix(in srgb,var(--surface-2) 60%,var(--surface));
+  --rs-line:color-mix(in srgb,var(--line-soft) 80%,transparent);
+  --rs-selected:color-mix(in srgb,var(--brand-soft) 55%,var(--surface));
+  --rs-radius:7px;
+  font-family:'Segoe UI','Microsoft YaHei UI',sans-serif;
+  font-size:13px;
+  line-height:1.6;
+  border-color:var(--rs-line);
+  border-radius:10px;
+  box-shadow:0 20px 70px #0006,0 0 0 1px #ffffff03;
+}
+:is(#resourceCenterDialog,#plantUnitInspector,.plant-pack-panel,.resource-form-dialog,#plantUnitDialog) button {
+  border-radius:6px;
+  font-size:12px;
+  font-weight:500;
+  transition:background-color 120ms,color 120ms,box-shadow 120ms;
+}
+:is(#resourceCenterDialog,#plantUnitInspector,.plant-pack-panel,.resource-form-dialog,#plantUnitDialog) button svg { stroke-width:1.7; }
+:is(#resourceCenterDialog,#plantUnitInspector,.plant-pack-panel,.resource-form-dialog,#plantUnitDialog) :is(button,input,select,textarea,summary):focus-visible { outline:2px solid var(--focus); outline-offset:3px; }
+:is(#resourceCenterDialog,#plantUnitInspector,.plant-pack-panel,.resource-form-dialog,#plantUnitDialog) :is(input:not([type]),input[type=text],input[type=search],input[type=number],select,textarea) {
+  font-size:13px;
+  border-color:var(--rs-line);
+  border-radius:6px;
+  min-height:38px;
+  background:var(--field);
+}
+:is(#resourceCenterDialog,#plantUnitInspector,.plant-pack-panel,.resource-form-dialog,#plantUnitDialog) input::placeholder,
+:is(#resourceCenterDialog,#plantUnitInspector,.plant-pack-panel,.resource-form-dialog,#plantUnitDialog) textarea::placeholder { color:var(--quiet); }
+:is(#resourceCenterDialog,#plantUnitInspector,.plant-pack-panel,.resource-form-dialog,#plantUnitDialog) input[type=checkbox] {
+  appearance:none; width:16px; height:16px; min-height:16px; padding:0; flex-shrink:0;
+  border:1px solid var(--hover-line); border-radius:4px; background:var(--field); display:inline-grid; place-content:center;
+  vertical-align:middle; cursor:pointer;
+}
+:is(#resourceCenterDialog,#plantUnitInspector,.plant-pack-panel,.resource-form-dialog,#plantUnitDialog) input[type=checkbox]:checked { border-color:var(--accent); background:var(--accent); }
+:is(#resourceCenterDialog,#plantUnitInspector,.plant-pack-panel,.resource-form-dialog,#plantUnitDialog) input[type=checkbox]:checked::after {
+  content:''; display:block; width:8px; height:5px; margin-top:-2px; border-left:2px solid var(--brand-ink); border-bottom:2px solid var(--brand-ink); transform:rotate(-45deg);
+}
+:is(#resourceCenterDialog,#plantUnitInspector,.plant-pack-panel,.resource-form-dialog,#plantUnitDialog) :is(.rc-grid,.rc-sidebar,.rc-details,.pui-unit-grid,.pui-material,.pui-layout,[data-body],.plant-pack-source-list,.pu-pack-sidebar,.pu-pack-editor,.pu-inspector) {
+  scrollbar-width:thin; scrollbar-color:var(--scroll-thumb) transparent;
+}
+
+/* Browser: quieter chrome, readable cards and a clear distinction between locations. */
+#resourceCenterDialog .rc-heading { padding:19px 24px; gap:22px; background:var(--surface); border-color:var(--rs-line); }
+#resourceCenterDialog .rc-heading-mark { width:40px; height:40px; border-radius:9px; }
+#resourceCenterDialog .rc-heading h2 { font-size:21px; font-weight:650; letter-spacing:-.3px; }
+#resourceCenterDialog .rc-heading-title small { font-size:11px; letter-spacing:.5px; margin-bottom:3px; }
+#resourceCenterDialog .rc-heading-actions { gap:8px; }
+#resourceCenterDialog .rc-pack-commands { border-color:var(--rs-line); padding-right:14px; margin-right:3px; gap:8px; }
+#resourceCenterDialog #resourceImportPack { min-height:36px; padding-inline:13px; color:var(--brand-ink); background:var(--accent); font-weight:650; }
+#resourceCenterDialog #resourceExportPack { min-height:36px; background:var(--rs-raised); padding-inline:13px; }
+
+#resourceCenterDialog #resourceCenterDismiss { color:var(--muted); }
+#resourceCenterDialog .rc-layout { grid-template-columns:206px minmax(0,1fr) 310px; }
+#resourceCenterDialog.rc-details-closed .rc-layout { grid-template-columns:206px minmax(0,1fr); }
+#resourceCenterDialog .rc-sidebar { padding:24px 13px 20px; background:var(--rs-pane); border-color:var(--rs-line); }
+#resourceCenterDialog .rc-sidebar>strong { font-size:11px; letter-spacing:.2px; margin-bottom:10px; padding-inline:12px; color:var(--quiet); }
+#resourceCenterDialog .rc-sidebar nav { gap:5px; margin-bottom:27px; }
+#resourceCenterDialog .rc-sidebar nav button { min-height:37px; padding:8px 12px; font-size:13px; border-radius:6px; }
+#resourceCenterDialog .rc-sidebar nav button[aria-pressed=true] { color:var(--selected-text); background:var(--rs-selected); }
+#resourceCenterDialog .rc-locations button { min-height:62px; padding:11px 12px; gap:10px; }
+#resourceCenterDialog .rc-locations button[aria-pressed=true] { box-shadow:inset 2px 0 var(--accent-text); }
+#resourceCenterDialog .rc-locations button>span { flex:1; min-width:0; }
+#resourceCenterDialog .rc-locations strong { font-size:13px; font-weight:600; }
+#resourceCenterDialog .rc-locations small { font-size:11px; color:var(--muted); margin-top:2px; }
+.rc-scope-count { align-self:center; font:500 11px/1.8 'Segoe UI',sans-serif; font-variant-numeric:tabular-nums; color:var(--muted); min-width:24px; text-align:center; border-radius:4px; background:color-mix(in srgb,var(--field) 55%,transparent); }
+#resourceCenterDialog .rc-package-entry { font-size:13px; padding:9px 12px; min-height:39px; }
+#resourceCenterDialog .rc-sidebar-note { font-size:11px; color:var(--quiet); line-height:1.9; margin-top:20px; }
+#resourceCenterDialog .rc-browser { padding:23px 26px 0; }
+#resourceCenterDialog .rc-browser-heading { margin-bottom:19px; }
+#resourceCenterDialog .rc-browser-heading h3 { font-size:23px; font-weight:620; letter-spacing:-.25px; margin:5px 0 7px; }
+#resourceCenterDialog .rc-browser-heading p { font-size:12px; line-height:1.8; }
+#resourceCenterDialog .rc-breadcrumb { font-size:12px; color:var(--quiet); }
+#resourceCenterDialog .rc-breadcrumb button { font-size:11px; color:var(--quiet); }
+#resourceCenterDialog #resourceCreate { font-size:12px; min-height:36px; padding-inline:13px; background:var(--rs-raised); }
+#resourceCenterDialog .rc-types { gap:2px 8px; border-color:var(--rs-line); margin-bottom:19px; }
+#resourceCenterDialog .rc-types button { padding:10px 8px 12px; font-size:12px; color:var(--muted); border-radius:0; min-height:43px; gap:7px; }
+#resourceCenterDialog .rc-types button[aria-pressed=true] { color:var(--accent-text); border-bottom-color:var(--accent-text); }
+#resourceCenterDialog .rc-types [data-type-count] { font-size:11px; font-variant-numeric:tabular-nums; opacity:.85; }
+#resourceCenterDialog .rc-searchbar { gap:8px; }
+#resourceCenterDialog .rc-search { border-color:var(--rs-line); padding-inline:12px; border-radius:6px; transition:border-color 120ms; }
+#resourceCenterDialog .rc-search:focus-within { border-color:var(--focus); }
+#resourceCenterDialog .rc-search input { min-height:38px; font-size:13px; }
+#resourceCenterDialog .rc-search input:focus-visible { outline:none; }
+#resourceCenterDialog .rc-searchbar select { min-height:38px; width:120px; padding-inline:10px; }
+#resourceCenterDialog .rc-searchbar>button { font-size:12px; min-height:34px; gap:6px; }
+#resourceCenterDialog .rc-view-size { padding:3px; gap:2px; border-radius:6px; background:var(--field); }
+#resourceCenterDialog .rc-list-heading { min-height:48px; font-size:12px; }
+#resourceCenterDialog .rc-list-heading button { font-size:11px; }
+#resourceCenterDialog .rc-grid { grid-template-columns:repeat(auto-fill,minmax(184px,1fr)); gap:23px 18px; padding:2px 5px 26px 1px; }
+#resourceCenterDialog[data-card-size=large] .rc-grid { grid-template-columns:repeat(auto-fill,minmax(244px,1fr)); }
+#resourceCenterDialog .rc-card { border-radius:6px; }
+#resourceCenterDialog .rc-card-main { border-radius:6px; padding:0 0 5px; transition:background-color 120ms; }
+#resourceCenterDialog .rc-card-main:hover { background:color-mix(in srgb,var(--surface-2) 36%,transparent); }
+#resourceCenterDialog .rc-thumbnail { border-radius:6px; }
+#resourceCenterDialog .rc-card.focused .rc-thumbnail { box-shadow:none; }
+#resourceCenterDialog .rc-card.focused .rc-thumbnail::after { border:0; border-radius:0; inset:auto 0 0; height:2px; background:var(--accent-text); }
+#resourceCenterDialog .rc-card.focused .rc-card-main { background:color-mix(in srgb,var(--brand-soft) 38%,transparent); }
+#resourceCenterDialog .rc-card-main strong { font-size:13px; font-weight:550; line-height:1.6; min-height:41px; margin:10px 8px 4px; }
+#resourceCenterDialog .rc-card-main small { padding:0 8px 4px; font-size:11px; color:var(--muted); line-height:1.6; }
+#resourceCenterDialog .rc-type-badge { font-size:10px; padding:3px 6px; left:10px; bottom:10px; background:#13201bd9; }
+#resourceCenterDialog .rc-card-favorite { width:30px; min-height:30px; padding:7px; border-radius:5px; }
+#resourceCenterDialog .rc-picked:not(.focused) .rc-card-main { background:color-mix(in srgb,var(--brand-soft) 30%,transparent); }
+#resourceCenterDialog .rc-dependency-note { font-size:11px; padding:2px 8px 7px; gap:6px; }
+#resourceCenterDialog .rc-dependency-note svg { width:13px; height:13px; }
+#resourceCenterDialog .rc-details { padding:24px 21px; border-color:var(--rs-line); background:var(--rs-pane); }
+#resourceCenterDialog .rc-detail-heading small { font-size:11px; font-weight:500; }
+#resourceCenterDialog .rc-version { padding:2px 7px; font-size:11px; background:var(--rs-raised); border-radius:4px; }
+#resourceCenterDialog .rc-detail-heading h3 { font-size:19px; font-weight:600; line-height:1.5; margin:11px 0 17px; }
+#resourceCenterDialog .rc-detail-preview { border-radius:6px; }
+#resourceCenterDialog .rc-detail-meta { font-size:12px; margin:12px 0 19px; }
+#resourceCenterDialog .rc-primary-actions { gap:8px; margin-bottom:25px; }
+#resourceCenterDialog .rc-primary-actions>button { min-height:39px; font-size:13px; background:var(--rs-raised); }
+#resourceCenterDialog .rc-primary-actions>button.rc-primary { font-weight:650; }
+#resourceCenterDialog .rc-detail-section { margin-bottom:24px; }
+#resourceCenterDialog .rc-detail-section h4 { font-size:12px; color:var(--label); margin-bottom:13px; }
+#resourceCenterDialog .rc-facts dl { font-size:12px; row-gap:11px; grid-template-columns:76px minmax(0,1fr); }
+#resourceCenterDialog .rc-facts dd { text-align:right; font-variant-numeric:tabular-nums; }
+#resourceCenterDialog .rc-secondary-actions { gap:6px; padding-top:18px; border-color:var(--rs-line); }
+#resourceCenterDialog .rc-secondary-actions button { min-height:33px; font-size:12px; padding:6px 9px; color:var(--label); background:var(--rs-raised); }
+#resourceCenterDialog .rc-secondary-actions button svg { width:14px; height:14px; color:var(--muted); }
+#resourceCenterDialog .rc-secondary-actions button span { min-width:0; overflow-wrap:anywhere; }
+#resourceCenterDialog .rc-tags-section { font-size:12px; }.rc-tags-section summary { padding-block:7px; }
+#resourceCenterDialog .rc-tags span { font-size:11px; padding:4px 8px; background:var(--rs-raised); border-radius:4px; }
+#resourceCenterDialog .rc-description { font-size:12px; line-height:1.9; }
+#resourceCenterDialog .rc-use-note { border-color:var(--rs-line); padding-top:17px; }
+#resourceCenterDialog .rc-selection-bar { padding-block:13px; gap:7px; font-size:12px; border-color:var(--rs-line); }
+#resourceCenterDialog .rc-selection-bar button { font-size:12px; }
+#resourceCenterDialog .rc-footer { font-size:11px; min-height:39px; padding-inline:24px; border-color:var(--rs-line); background:var(--rs-pane); }
+#resourceCenterDialog .rc-empty { padding:64px 24px; }.rc-empty p { font-size:13px; }
+#resourceCenterDialog .rc-empty>span { width:60px; height:60px; background:var(--rs-raised); border-radius:14px; }
+
+/* Export/import: one clear primary action and a deliberate, readable step rhythm. */
+.plant-pack-panel { border-radius:10px; }
+.plant-pack-panel>header { padding:22px 28px; border-color:var(--rs-line); background:var(--surface); }
+.plant-pack-panel>header h2 { font-size:21px; font-weight:650; letter-spacing:-.2px; }
+.plant-pack-panel>header small { font-size:11px; }
+.plant-pack-panel>header p { font-size:12px; }
+.plant-pack-panel .pack-dialog-mark { width:40px; height:40px; border-radius:9px; }
+.plant-pack-panel .pack-steps { padding:19px 29px; gap:22px; background:var(--rs-pane); border-color:var(--rs-line); }
+.plant-pack-panel .pack-step>span { width:29px; height:29px; font-size:11px; background:var(--rs-raised); }
+.plant-pack-panel .pack-step strong { font-size:13px; font-weight:550; }
+.plant-pack-panel .pack-step.is-current>span { background:var(--accent); color:var(--brand-ink); box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 12%,transparent); }
+.plant-pack-panel .pack-step.is-done>span { background:var(--brand-soft); color:var(--accent-text); }
+.plant-pack-panel .pack-step:not(:last-child)::after { background:var(--rs-line); }
+.plant-pack-panel .pack-section-heading h3 { font-size:21px; font-weight:600; margin-bottom:7px; }
+.plant-pack-panel .pack-section-heading p { font-size:13px; line-height:1.8; }
+.plant-pack-panel .pack-search { border-color:var(--rs-line); border-radius:6px; }
+.plant-pack-panel .pack-search:focus-within { border-color:var(--focus); }
+.plant-pack-panel .pack-search input:focus-visible { outline:none; }
+.plant-pack-panel .pack-picked-summary { font-size:12px; margin:19px 0 12px; }
+.plant-pack-panel .pack-picked-summary>span { font-size:11px; }
+.plant-pack-panel .plant-pack-source-list { gap:12px; grid-template-columns:repeat(auto-fill,minmax(310px,1fr)); }
+.plant-pack-panel .plant-pack-choice { padding:14px; gap:13px; min-height:112px; background:var(--rs-pane); border-radius:7px; }
+.plant-pack-panel .plant-pack-choice:hover { background:var(--rs-raised); }
+.plant-pack-panel .plant-pack-choice:has(input:checked) { background:var(--rs-selected); box-shadow:inset 2px 0 var(--accent-text); }
+.plant-pack-panel .plant-pack-choice.dependency-choice { box-shadow:inset 2px 0 var(--quiet); }
+.plant-pack-panel .pack-choice-preview { width:86px; height:70px; border-radius:5px; }
+.plant-pack-panel .plant-pack-choice strong { font-size:13px; line-height:1.6; margin-bottom:5px; }
+.plant-pack-panel .plant-pack-choice small { font-size:11px; line-height:1.7; }
+.plant-pack-panel .plant-pack-choice .dependency-note { font-size:11px; }
+.plant-pack-panel .pack-information { column-gap:30px; }
+.plant-pack-panel .plant-pack-fields { gap:20px 22px; }
+.plant-pack-panel .plant-pack-fields label { font-size:13px; gap:9px; }
+.plant-pack-panel .plant-pack-fields label>small { font-size:10px; color:var(--quiet); }
+.plant-pack-panel .plant-pack-fields textarea { min-height:108px; }
+.plant-pack-panel .pack-cover-editor { padding:21px; background:var(--rs-pane); border-radius:8px; }
+.plant-pack-panel .pack-cover-editor h4 { font-size:13px; margin-bottom:14px; }
+.plant-pack-panel .pack-cover-editor p { font-size:11px; line-height:1.8; }
+.plant-pack-panel .pack-cover-editor [data-cover-preview] { border-radius:6px; }
+.plant-pack-panel .pack-review-stats { padding:20px 23px; border-radius:8px; background:var(--rs-pane); margin-bottom:29px; }
+.plant-pack-panel .pack-review-stats small { font-size:12px; }
+.plant-pack-panel .pack-review-stats strong { font-size:25px; font-weight:600; }
+.plant-pack-panel .pack-review-group h4 { font-size:13px; margin-bottom:12px; }
+.plant-pack-panel .plant-pack-review { gap:10px; }
+.plant-pack-panel .plant-pack-review article { padding:14px; border-radius:6px; background:var(--rs-pane); }
+.plant-pack-panel .plant-pack-review strong { font-size:12px; }.plant-pack-panel .plant-pack-review small { font-size:11px; }
+.plant-pack-panel .pack-import-overview { background:var(--rs-pane); border-radius:8px; padding:22px; }
+.plant-pack-panel .pack-import-overview dl { font-size:12px; row-gap:11px; }
+.plant-pack-panel .pack-import-overview p { font-size:12px; line-height:1.9; }
+.plant-pack-panel .pack-check-result { background:color-mix(in srgb,var(--green-dark) 32%,var(--surface)); padding:17px 18px; border-radius:7px; }
+.plant-pack-panel .pack-check-result strong { font-size:14px; }.plant-pack-panel .pack-check-result small { font-size:12px; }
+.plant-pack-panel .pack-ready-note,.plant-pack-panel .pack-notice { font-size:12px; line-height:1.8; }
+.plant-pack-panel .pack-export-success { border-radius:8px; padding:18px; gap:14px; }
+.plant-pack-panel .pack-export-success strong { font-size:14px; }.plant-pack-panel .pack-export-success small { font-size:12px; }
+.plant-pack-panel>footer { padding:16px 26px; min-height:70px; gap:9px; border-color:var(--rs-line); background:var(--rs-pane); }
+.plant-pack-panel>footer [data-status] { font-size:12px; line-height:1.7; }
+.plant-pack-panel>footer button { min-height:38px; padding-inline:16px; font-size:13px; }
+.plant-pack-panel>footer [data-next] { color:var(--brand-ink); background:var(--accent); font-weight:650; }
+.plant-pack-panel .pack-loading { padding:55px 24px; }.plant-pack-panel .pack-loading h3 { font-size:21px; }.plant-pack-panel .pack-loading p { font-size:13px; }
+
+/* Small forms belong to the same family, with calmer labels and aligned footers. */
+dialog.resource-form-dialog { width:min(490px,calc(100vw - 40px)); border-radius:9px; }
+.resource-form-dialog form { padding:26px; }
+.resource-form-dialog .resource-form-heading { gap:12px; margin-bottom:17px; }
+.resource-form-dialog .resource-form-mark { width:40px; height:40px; border-radius:9px; }
+.resource-form-dialog .resource-form-heading h2 { font-size:20px; font-weight:620; }
+.resource-form-dialog .resource-form-heading small { font-size:11px; }
+.resource-form-dialog .resource-form-description { font-size:13px; line-height:1.9; margin-bottom:23px; }
+:is(#branchPrefabNameDialog,.rc-metadata,.plant-pack-name).resource-form-dialog label { font-size:13px; gap:9px; margin-block:18px; }
+:is(#branchPrefabNameDialog,.rc-metadata,.plant-pack-name).resource-form-dialog footer { padding:16px 26px; margin:25px -26px -26px; background:var(--rs-pane); border-color:var(--rs-line); }
+.resource-form-dialog button { min-height:38px; font-size:13px; }
+.resource-form-dialog [data-form-close] { min-height:34px; }
+#resourcePackConfirm { border-radius:9px; }
+#resourcePackConfirm header { background:var(--surface); padding:23px 26px; border-color:var(--rs-line); }
+#resourcePackConfirm h2 { font-size:21px; font-weight:620; }
+#resourcePackConfirm :is(p,button) { font-size:13px; }
+#resourcePackConfirm footer { background:var(--rs-pane); padding:17px 26px; border-color:var(--rs-line); }
+
+/* Unit inspection and editing: match the browser, with more legible metadata. */
+#plantUnitInspector .pui-heading { padding:20px 23px; gap:13px; background:var(--surface); border-color:var(--rs-line); }
+#plantUnitInspector .pui-heading h2 { font-size:21px; font-weight:620; letter-spacing:-.2px; }
+#plantUnitInspector .pui-heading small,#plantUnitInspector .pui-heading p { font-size:11px; }
+#plantUnitInspector .pui-heading [data-edit] { background:var(--rs-raised); min-height:37px; padding-inline:13px; }
+#plantUnitInspector .pui-units { background:var(--rs-pane); border-color:var(--rs-line); }
+#plantUnitInspector .pui-list-heading { padding:20px 16px 14px; gap:11px; }
+#plantUnitInspector .pui-list-heading h3 { font-size:13px; font-weight:600; }
+#plantUnitInspector .pui-list-heading h3 span { font-size:11px; }
+#plantUnitInspector .pui-unit-grid { padding:1px 12px 18px; gap:10px 7px; }
+#plantUnitInspector .pui-unit-grid button { padding:6px; border-radius:6px; gap:5px; }
+#plantUnitInspector .pui-unit-grid button[aria-pressed=true] { background:var(--rs-selected); color:var(--selected-text); }
+#plantUnitInspector .pui-unit-grid img { border-radius:4px; }
+#plantUnitInspector .pui-unit-grid strong { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; white-space:normal; font-size:12px; line-height:1.55; min-height:36px; }
+#plantUnitInspector .pui-unit-grid small { font-size:11px; }
+#plantUnitInspector .pui-model-tools { min-height:54px; padding:9px 14px; background:var(--rs-pane); border-color:var(--rs-line); }
+#plantUnitInspector .pui-model-tools [role=group] { gap:3px; }
+#plantUnitInspector .pui-model-tools button { min-height:34px; font-size:12px; }
+#plantUnitInspector .pui-unit-info { padding:20px 23px; border-color:var(--rs-line); background:var(--rs-pane); }
+#plantUnitInspector .pui-unit-info h3 { font-size:18px; font-weight:600; margin:5px 0 16px; }
+#plantUnitInspector dl { font-size:12px; row-gap:9px; }
+#plantUnitInspector .pui-unit-info p { font-size:11px; margin-top:14px; }
+#plantUnitInspector .pui-material { padding:23px 19px; background:var(--rs-pane); border-color:var(--rs-line); }
+#plantUnitInspector .pui-material h3 { font-size:14px; font-weight:600; margin-bottom:9px; }
+#plantUnitInspector .pui-material>p { font-size:12px; line-height:1.9; }
+#plantUnitInspector .pui-map { margin-bottom:25px; }
+#plantUnitInspector .pui-map h4 { font-size:12px; margin-bottom:11px; }
+#plantUnitInspector .pui-map-image { height:158px; border-radius:6px; }
+#plantUnitInspector .pui-map p { font-size:12px; margin-top:9px; }
+#plantUnitInspector .pui-map small { font-size:11px; line-height:1.8; }
+#plantUnitInspector .pui-missing-map { height:84px; border-radius:6px; font-size:12px; }
+#plantUnitInspector .pui-texture-tools { padding:10px 12px; gap:6px; }
+#plantUnitInspector .pui-texture-tools strong { font-size:12px; }
+#plantUnitInspector .pui-texture-tools label { font-size:12px; }
+#plantUnitInspector .pui-texture-view>p { font-size:11px; padding:9px 13px; }
+#plantUnitInspector .pui-footer { min-height:39px; padding:10px 22px; background:var(--rs-pane); border-color:var(--rs-line); font-size:11px; }
+#plantUnitDialog .pu-header { padding:21px 24px; border-color:var(--rs-line); }
+#plantUnitDialog .pu-header h2 { font-size:21px; font-weight:620; margin-bottom:5px; }
+#plantUnitDialog .pu-header p { font-size:12px; }
+body #plantUnitDialog>header.panel-guide-destination { min-height:0; padding:18px 24px; background:var(--surface); }
+#plantUnitDialog .panel-guide-destination>div:first-child { padding-right:250px; }
+#plantUnitDialog .panel-guide-destination .panel-guide-art { width:76px; height:62px; right:175px; bottom:15px; }
+#plantUnitDialog .panel-guide-destination .panel-guide-steps { margin-top:8px; font-size:11px; }
+#plantUnitDialog .panel-guide-destination h2 { font-size:20px; line-height:1.3; margin:0 0 5px; }
+#plantUnitDialog .panel-guide-destination p { line-height:1.5; }
+#plantUnitDialog .pu-pack-sidebar,#plantUnitDialog .pu-inspector { background:var(--rs-pane); padding:18px 16px; border-color:var(--rs-line); }
+#plantUnitDialog .pu-pack-editor { padding:21px 23px; }
+#plantUnitDialog .pu-library-toolbar { padding:14px 23px; background:var(--rs-pane); border-color:var(--rs-line); }
+#plantUnitDialog .pu-material { padding:16px; border-color:var(--rs-line); background:var(--rs-pane); border-radius:7px; margin-block:19px; }
+#plantUnitDialog .pu-unit-grid { gap:13px; }
+#plantUnitDialog .pu-unit-card { border:0; background:var(--rs-pane); border-radius:6px; padding:9px; gap:8px; }
+#plantUnitDialog .pu-unit-card.is-current { background:var(--rs-selected); box-shadow:inset 0 -2px var(--accent-text); }
+#plantUnitDialog .pu-unit-card strong { font-size:13px; line-height:1.6; }
+#plantUnitDialog .pu-unit-card small { font-size:11px; }
+#plantUnitDialog .pu-unit-card img { background:#17221e; border-radius:4px; }
+#plantUnitDialog .pu-pack-item { border:0; padding:11px; border-radius:6px; }
+#plantUnitDialog .pu-pack-item.active { background:var(--rs-selected)!important; box-shadow:inset 2px 0 var(--accent-text); }
+#plantUnitDialog #unitPreviewCanvas { border:0; border-radius:6px; }
+#plantUnitDialog .pu-footer { padding:14px 23px; background:var(--rs-pane); border-color:var(--rs-line); }
+
+@media(max-width:1400px) {
+  #resourceCenterDialog .rc-layout { grid-template-columns:184px minmax(0,1fr) 288px; }
+  #resourceCenterDialog.rc-details-closed .rc-layout { grid-template-columns:184px minmax(0,1fr); }
+  #resourceCenterDialog .rc-browser { padding:20px 21px 0; }
+  #resourceCenterDialog .rc-sidebar { padding-inline:10px; }
+  #resourceCenterDialog .rc-details { padding:22px 18px; }
+  #resourceCenterDialog .rc-grid { grid-template-columns:repeat(auto-fill,minmax(174px,1fr)); gap:21px 15px; }
+  #plantUnitInspector .pui-material { padding:20px 16px; }
+}
+@media(max-width:1150px) {
+  #resourceCenterDialog .rc-layout { grid-template-columns:160px minmax(0,1fr) 250px; }
+  #resourceCenterDialog.rc-details-closed .rc-layout { grid-template-columns:160px minmax(0,1fr); }
+  #resourceCenterDialog .rc-browser { padding:17px 16px 0; }
+  #resourceCenterDialog .rc-heading { padding:15px 18px; gap:12px; }
+  #resourceCenterDialog .rc-heading h2 { font-size:20px; }
+  #resourceCenterDialog .rc-locations button { padding:9px 8px; gap:8px; }
+  #resourceCenterDialog .rc-locations small { font-size:10px; }
+  #resourceCenterDialog .rc-grid { grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); }
+  #resourceCenterDialog .rc-types { gap:0 4px; margin-bottom:14px; }
+  #plantUnitInspector .pui-unit-info { padding:17px; }
+}
+@media(max-width:820px) {
+  #resourceCenterDialog { inset:12px; width:auto; height:auto; margin:0; }
+  #resourceCenterDialog .rc-heading { padding:13px 15px; gap:8px; }
+  #resourceCenterDialog .rc-pack-commands { border:0; padding:0; margin:0; }
+  #resourceCenterDialog .rc-heading h2 { font-size:19px; }
+  #resourceCenterDialog .rc-layout,#resourceCenterDialog.rc-details-closed .rc-layout { grid-template-columns:145px minmax(0,1fr); }
+  #resourceCenterDialog .rc-sidebar { padding:18px 8px; }
+  #resourceCenterDialog .rc-locations strong { font-size:12px; }
+  #resourceCenterDialog .rc-scope-count { min-width:20px; font-size:10px; }
+  #resourceCenterDialog .rc-browser { padding:15px 14px 0; }
+  #resourceCenterDialog .rc-browser-heading { margin-bottom:11px; }
+  #resourceCenterDialog .rc-browser-heading h3 { font-size:21px; }
+  #resourceCenterDialog .rc-types button { font-size:11px; padding:8px 5px 10px; min-height:38px; gap:5px; }
+  #resourceCenterDialog .rc-types { margin-bottom:12px; }
+  #resourceCenterDialog .rc-list-heading { min-height:43px; }
+  #resourceCenterDialog .rc-footer { padding-inline:15px; min-height:36px; }
+  #resourceCenterDialog .rc-details { padding:21px; }
+  .plant-pack-panel>header { padding:18px 20px; }
+  .plant-pack-panel .pack-steps { padding:15px 20px; gap:14px; }
+  .plant-pack-panel .pack-step strong { font-size:12px; }
+  .plant-pack-panel>footer { padding:13px 18px; }
+  .plant-pack-panel .plant-pack-source-list { grid-template-columns:minmax(0,1fr); }
+  #plantUnitInspector .pui-heading { padding:15px; gap:10px; }
+  #plantUnitInspector .pui-heading h2 { font-size:18px; }
+  #plantUnitInspector .pui-material { padding:19px 17px; }
+  #plantUnitDialog .pu-pack-editor { padding:18px; }
+  #plantUnitDialog .panel-guide-destination>div:first-child { padding-right:135px; }
+  #plantUnitDialog .panel-guide-destination .panel-guide-art { display:none; }
+}
+@media(max-width:600px) {
+  #resourceCenterDialog .rc-heading-mark { display:none; }
+  #resourceCenterDialog .rc-locations small { display:none; }
+  #resourceCenterDialog .rc-layout,#resourceCenterDialog.rc-details-closed .rc-layout { grid-template-columns:120px minmax(0,1fr); }
+  #resourceCenterDialog .rc-locations button { gap:6px; padding:9px 6px; min-height:44px; }
+  #resourceCenterDialog .rc-locations strong { font-size:11px; }
+  #resourceCenterDialog .rc-scope-count { display:none; }
+  #resourceCenterDialog .rc-sidebar nav button { font-size:12px; padding-inline:7px; }
+  #resourceCenterDialog .rc-sidebar>strong { padding-inline:7px; }
+  #resourceCenterDialog .rc-sidebar-note { padding-inline:7px; }
+  #resourceCenterDialog .rc-grid { grid-template-columns:repeat(auto-fill,minmax(135px,1fr)); gap:18px 11px; }
+  #resourceCenterDialog .rc-card-main strong { font-size:12px; margin-inline:5px; }
+  #resourceCenterDialog .rc-card-main small { padding-inline:5px; }
+  .plant-pack-panel .pack-step>span { width:25px; height:25px; }
+  .plant-pack-panel .pack-step strong { font-size:11px; }
+  .plant-pack-panel .pack-steps { gap:9px; }
+  .plant-pack-panel .pack-review-stats { padding:15px; }.plant-pack-panel .pack-review-stats strong { font-size:21px; }
+  #plantUnitInspector .pui-heading h2 { font-size:16px; }
+  #plantUnitInspector .pui-heading [data-edit] { font-size:11px; padding-inline:7px; }
+}
+@media(prefers-reduced-motion:reduce) {
+  :is(#resourceCenterDialog,#plantUnitInspector,.plant-pack-panel,.resource-form-dialog,#plantUnitDialog) button { transition:none; }
+}
+
+/* Card information sits outside the image; each unit tile owns its full height. */
+#resourceCenterDialog .rc-grid { align-items:start; grid-auto-rows:max-content; }
+#resourceCenterDialog .rc-card-main { height:auto; max-height:none; }
+#resourceCenterDialog .rc-card-main strong { margin:11px 9px 6px; }
+#resourceCenterDialog .rc-card-main .rc-card-meta { display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:25px; padding:0 9px 8px; }
+#resourceCenterDialog .rc-card-summary { display:inline-flex; align-items:center; gap:6px; min-width:0; }
+#resourceCenterDialog .rc-card-summary>span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#resourceCenterDialog .rc-card-summary svg { width:13px; height:13px; color:var(--quiet); flex-shrink:0; }
+#resourceCenterDialog .rc-card-version { flex-shrink:0; max-width:50%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:1px 6px; border-radius:4px; background:var(--rs-raised); color:var(--muted); font-size:11px; line-height:1.7; font-variant-numeric:tabular-nums; }
+#resourceCenterDialog .rc-multi:not(:checked) { opacity:.58; }
+#resourceCenterDialog .rc-card:is(:hover,:focus-within) .rc-multi { opacity:1; }
+#resourceCenterDialog .rc-detail-heading small { display:inline-flex; align-items:center; gap:7px; }
+#resourceCenterDialog .rc-detail-heading small svg { width:14px; height:14px; stroke-width:1.7; }
+#resourceCenterDialog .rc-primary-actions:has(>button) { position:sticky; top:0; z-index:3; background:var(--rs-pane); padding-block:12px; box-shadow:0 1px 0 var(--rs-line); }
+#resourceCenterDialog .rc-secondary-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+#resourceCenterDialog .rc-secondary-actions h4 { grid-column:1/-1; }
+#resourceCenterDialog .rc-secondary-actions button { justify-content:flex-start; text-align:left; min-height:36px; }
+
+#plantUnitInspector .pui-unit-grid { grid-auto-rows:max-content; align-items:start; }
+#plantUnitInspector .pui-unit-grid button { display:grid; grid-template-rows:auto minmax(36px,auto) auto; align-content:start; height:auto; min-height:0; max-height:none; overflow:hidden; }
+#plantUnitInspector .pui-unit-grid img,#plantUnitInspector .pui-unit-loading { height:auto; min-height:0; aspect-ratio:1.5; }
+#plantUnitInspector .pui-unit-grid strong { margin:0; min-height:36px; max-height:38px; }
+#plantUnitInspector .pui-unit-grid small { display:block; min-height:18px; line-height:1.6; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#plantUnitInspector .pui-model-tools [role=group] { flex:0 1 auto; padding:3px; background:var(--field); border-radius:6px; }
+#plantUnitInspector .pui-model-tools [data-reset] { margin-left:auto; }
+#plantUnitInspector .pui-unit-info { padding:18px 21px; }
+#plantUnitInspector .pui-unit-info h3 { margin-bottom:13px; }
+#plantUnitInspector [data-unit-facts] { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px 12px; }
+#plantUnitInspector .pui-fact { display:grid; gap:4px; min-width:0; padding:9px 11px; background:color-mix(in srgb,var(--field) 45%,transparent); border-radius:5px; }
+#plantUnitInspector .pui-fact dt { font-size:11px; line-height:1.6; }
+#plantUnitInspector .pui-fact dd { text-align:left; font-size:12px; line-height:1.7; font-variant-numeric:tabular-nums; }
+#plantUnitInspector [data-unit-source] { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#plantUnitInspector .pui-map h4 { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+#plantUnitInspector .pui-map-state { flex-shrink:0; padding:2px 6px; border-radius:4px; font-size:10px; font-weight:400; color:var(--muted); background:var(--field); }
+#plantUnitInspector .pui-map-state[data-configured=true] { color:var(--green); }
+@media(max-width:1100px) {
+  #plantUnitInspector .pui-unit-grid { gap:9px 5px; padding-inline:8px; }
+  #plantUnitInspector .pui-unit-grid button { padding:5px; }
+}
+@media(max-width:560px) {
+  #plantUnitInspector [data-unit-facts] { grid-template-columns:minmax(0,1fr); }
+  #resourceCenterDialog .rc-secondary-actions { grid-template-columns:minmax(0,1fr); }
+}
+
+
+/* Botanical resource symbols and restrained, transparent Tree Duck guidance. */
+.resource-icon { display:inline-block; flex-shrink:0; vertical-align:middle; }
+#resourceCenterDialog .rc-types .resource-icon { width:19px; height:19px; }
+#resourceCenterDialog .rc-card-summary .resource-icon { width:15px; height:15px; }
+#resourceCenterDialog .rc-detail-heading small .resource-icon { width:16px; height:16px; }
+.resource-global-commands .resource-icon { width:17px; height:17px; }
+.resource-illustration { display:block; width:176px; height:176px; max-width:100%; object-fit:contain; flex-shrink:0; user-select:none; pointer-events:none; }
+#resourceCenterDialog .rc-empty { padding:32px 18px 40px; min-height:320px; gap:0; }
+#resourceCenterDialog .rc-empty>.resource-illustration { margin:0 0 16px; }
+#resourceCenterDialog .rc-empty>strong { font-size:17px; font-weight:600; letter-spacing:.15px; }
+#resourceCenterDialog .rc-empty>p { max-width:370px; margin:9px 0 16px; line-height:1.85; }
+#resourceCenterDialog .rc-empty>div { display:flex; justify-content:center; flex-wrap:wrap; gap:8px; }
+#resourceCenterDialog .rc-empty button { margin:0; min-height:36px; padding:8px 13px; }
+#resourceCenterDialog .rc-empty [data-empty-reset] { color:var(--accent-text); background:var(--brand-soft); }
+#plantUnitInspector .pui-no-results { grid-column:1/-1; display:flex; flex-direction:column; align-items:center; text-align:center; padding:28px 12px; gap:10px; }
+#plantUnitInspector .pui-no-results .resource-illustration { width:120px; height:120px; background:transparent; border-radius:0; }
+#plantUnitInspector .pui-no-results strong { color:var(--label); font-size:13px; font-weight:550; }
+#plantUnitInspector .pui-no-results p { margin:0; font-size:12px; line-height:1.8; color:var(--muted); }
+.plant-pack-panel .pack-loading .resource-illustration { width:152px; height:152px; margin-bottom:3px; }
+.plant-pack-panel .pack-loading:not(.pack-error)>svg { width:18px; height:18px; }
+.plant-pack-panel .plant-pack-empty-art { display:flex; flex-direction:column; align-items:center; text-align:center; gap:10px; padding:32px 18px; }
+.plant-pack-panel .plant-pack-empty-art strong { color:var(--label); font-size:15px; font-weight:550; }
+.plant-pack-panel .plant-pack-empty-art p { margin:0; font-size:12px; line-height:1.8; }
+.plant-pack-panel .plant-pack-empty-art .resource-illustration { width:152px; height:152px; }
+@media (max-width:820px), (max-height:780px) {
+  #resourceCenterDialog .rc-empty { padding:22px 12px; min-height:260px; }
+  #resourceCenterDialog .rc-empty>.resource-illustration { width:136px; height:136px; margin-bottom:12px; }
+  #resourceCenterDialog .rc-empty>strong { font-size:15px; }
+  .plant-pack-panel .pack-loading { padding:24px 16px; }
+  .plant-pack-panel .pack-loading .resource-illustration { width:120px; height:120px; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .plant-pack-panel .pack-loading>svg { animation:none; }
+}

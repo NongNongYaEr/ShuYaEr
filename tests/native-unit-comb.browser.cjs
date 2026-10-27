@@ -1,0 +1,13 @@
+// Run the established complete-unit pointer workflow in a real DX12 child
+// surface with its own server/session, including mixed shared source batches.
+const fs=require('node:fs'),path=require('node:path'),Module=require('node:module'),assert=require('node:assert/strict');
+const base=path.join(__dirname,'unit-comb-workflow.browser.cjs');let source=fs.readFileSync(base,'utf8');
+const out=path.resolve(process.env.BRANCHFORGE_NATIVE_OUTPUT||'.runtime/native-unit-comb');assert(!fs.existsSync(out),'use a fresh owned output');
+const replace=(a,b)=>{assert.equal(source.split(a).length,2,'legacy harness marker: '+a.slice(0,50));source=source.replace(a,b);};
+replace("path.resolve('.runtime/unit-comb-workflow')",JSON.stringify(out));
+replace("const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});let page;","const owner=await require('./owned-native-browser.cjs')({out});const browser={newPage:async()=>owner.page,close:owner.close};let page;");
+replace("page.goto(process.argv[2]||'http://localhost:19837')",'page.goto(owner.url)');
+replace('const stroke=async(cancel=false)=>',String.raw`const auditLive=async()=>{await page.waitForFunction(()=>{const s=window.__branchForge.nativeViewport.stats;return s.lastError||!s.inFlight&&!s.pendingResources;},null,{timeout:120000});const revision=await page.evaluate(()=>{const f=window.__branchForge;f.nativeViewport.render();return f.nativeViewport.stats.submittedRevision;});await page.waitForFunction(revision=>{const f=window.__branchForge,s=f.nativeViewport.stats;return s.lastError||s.active&&s.native.asset_identity===f.asset.group.uuid&&s.native.revision>=revision;},revision,{timeout:120000});const audit=await page.evaluate(()=>window.__branchForge.nativeViewport.auditModel());assert(audit.checked&&!audit.mismatch);(report.strokeAudits??=[]).push(audit);};const stroke=async(cancel=false)=>`);
+replace('await page.waitForTimeout(45);if(cancel)','await page.waitForTimeout(45);await auditLive();if(cancel)');
+replace('report.passed=report.checks.length;',"await page.evaluate(()=>{const f=window.__branchForge;f.asset.settings.wind_strength=0;f.controls.enableDamping=false;});await auditLive();const nativeState=await page.evaluate(()=>window.__branchForge.nativeViewport.stats);assert.equal(nativeState.lastError,'');assert.equal(nativeState.presentation,'dx12');assert(nativeState.native.gpu_validation_enabled);report.native=nativeState;report.passed=report.checks.length;");
+const mod=new Module(base,module);mod.filename=base;mod.paths=module.paths;mod._compile(source,base);

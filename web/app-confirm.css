@@ -1,0 +1,16 @@
+.app-confirm{box-sizing:border-box;width:min(480px,calc(100vw - 32px));max-width:none;max-height:calc(100dvh - 32px);padding:0;overflow:auto;background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:16px;box-shadow:0 24px 80px #0006;font:13px 'Segoe UI','Microsoft YaHei UI',sans-serif}
+.app-confirm::backdrop{background:#11151ab8}
+.app-confirm header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:22px 24px 18px;background:var(--panel-header);border-bottom:1px solid var(--line-soft)}
+.app-confirm header>div{min-width:0}.app-confirm-kicker{color:var(--accent-text);font-size:11px}
+.app-confirm h2{margin:9px 0 0;font-size:22px;line-height:1.4}.app-confirm header img{width:92px;height:78px;object-fit:contain;flex-shrink:0}
+.app-confirm-body{padding:20px 24px}.app-confirm-item{display:flex;align-items:center;gap:12px;padding:14px;background:var(--field);border:1px solid var(--line-soft);border-radius:9px}
+.app-confirm-item>svg{width:23px;height:23px;color:var(--accent-text);flex-shrink:0}.app-confirm-item>div{min-width:0}
+.app-confirm-item strong{display:block;line-height:1.6;overflow-wrap:anywhere}.app-confirm-item small{display:block;margin-top:4px;color:var(--muted);font-size:11px;line-height:1.6}
+.app-confirm p{margin:16px 0 0;color:var(--muted);font-size:13px;line-height:1.8;white-space:pre-line}
+.app-confirm footer{display:flex;justify-content:flex-end;gap:10px;padding:0 24px 22px}
+.app-confirm button{min-height:38px;min-width:106px;padding:8px 18px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);color:var(--text);font:inherit;cursor:pointer}
+.app-confirm button:hover{background:var(--surface-3);border-color:var(--hover-line)}.app-confirm button:focus-visible{outline:2px solid var(--focus);outline-offset:3px}
+.app-confirm [data-confirm-accept]{background:var(--yellow);color:var(--brand-ink);border-color:var(--yellow);font-weight:600}
+.app-confirm [data-confirm-accept]:hover{background:color-mix(in srgb,var(--yellow),white 20%);border-color:var(--yellow)}
+.app-confirm-danger [data-confirm-accept]{background:var(--coral);border-color:var(--coral)}.app-confirm-danger [data-confirm-accept]:hover{background:color-mix(in srgb,var(--coral),white 15%);border-color:var(--coral)}
+@media(max-width:420px){.app-confirm header{padding:18px}.app-confirm header img{width:72px;height:64px}.app-confirm h2{font-size:20px}.app-confirm-body{padding:18px}.app-confirm footer{padding:0 18px 18px}.app-confirm footer button{flex:1;min-width:0}}

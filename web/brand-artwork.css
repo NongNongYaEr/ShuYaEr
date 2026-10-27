@@ -1,0 +1,53 @@
+/* Approved app mark with dedicated landscape launch scenes. */
+.brand .brand-mark { object-fit:contain; border-radius:9px; background:#142b23; }
+.brand-startup-card,.brand-home-hero { background:#142b23; isolation:isolate; overflow:hidden; }
+.brand-startup-card { --scene-art:url('/brand/startup-workshop-v1.png'); border-color:#385c48; }
+.brand-home-hero { --scene-art:url('/brand/welcome-garden-v1.png'); aspect-ratio:16/9; min-height:0; }
+.brand-scene { position:absolute; inset:0; z-index:-1; overflow:hidden; pointer-events:none; }
+.brand-scene::before { content:""; position:absolute; inset:-1%; background:var(--scene-art) center / cover no-repeat; transform-origin:72% 55%; }
+.brand-scene::after { content:""; position:absolute; inset:0; background:radial-gradient(ellipse at 77% 25%,#ffe09c1f,transparent 48%); opacity:.4; }
+.brand-startup-copy { width:33%; }
+.brand-startup-copy img { border-radius:12px; }
+.brand-startup-copy small { line-height:1.8; }
+.brand-startup-status { max-width:33%; }
+.brand-home-copy { width:42%; background:none; padding:38px; }
+.brand-home-hero .brand-home-copy h2 { color:#f3f0e6; }
+.brand-home-hero .brand-home-copy p { color:#c6cfb8; }
+#brandStartupDismiss { right:auto; left:6%; bottom:5%; }
+.brand-signature { bottom:13%; }
+.brand-motion-toggle { position:absolute; right:18px; bottom:16px; z-index:2; min-height:30px; padding:5px 10px; border:1px solid #758b7380; border-radius:6px; background:#142b23df; color:#e6eedf; font-size:11px; }
+.brand-motion-toggle:hover:not(:disabled) { background:#244b3b; }
+.brand-floating-leaf { position:absolute; width:16px; height:9px; border-radius:2px 80% 2px 80%; background:linear-gradient(145deg,#cbe784,#4c8047); box-shadow:inset 0 -1px #244b3b; opacity:0; }
+.brand-floating-leaf:nth-child(1) { left:52%; top:13%; --leaf-turn:25deg; --leaf-delay:-2s; }
+.brand-floating-leaf:nth-child(2) { left:91%; top:60%; --leaf-turn:-35deg; --leaf-delay:-6s; width:12px; height:7px; }
+.brand-floating-leaf:nth-child(3) { left:41%; top:73%; --leaf-turn:65deg; --leaf-delay:-10s; width:10px; height:6px; }
+@keyframes brand-scene-drift { from { transform:translate3d(-.2%,0,0) scale(1); } to { transform:translate3d(.3%,-.3%,0) scale(1.018); } }
+@keyframes brand-scene-light { from { opacity:.15; } to { opacity:.65; } }
+@keyframes brand-leaf-drift {
+  0% { opacity:0; transform:translate3d(0,-8px,0) rotate(var(--leaf-turn)); }
+  20%,75% { opacity:.65; }
+  100% { opacity:0; transform:translate3d(-30px,74px,0) rotate(calc(var(--leaf-turn) + 90deg)); }
+}
+@keyframes brand-ready-pulse { from { opacity:.45; } to { opacity:1; } }
+/* Animate only open launch surfaces, never the working editor or closed dialogs. */
+:root[data-brand-motion=on] :is(#brandStartup,#brandHomeDialog[open]) .brand-scene::before { animation:brand-scene-drift 12s ease-in-out infinite alternate; }
+:root[data-brand-motion=on] :is(#brandStartup,#brandHomeDialog[open]) .brand-scene::after { animation:brand-scene-light 7s ease-in-out infinite alternate; }
+:root[data-brand-motion=on] :is(#brandStartup,#brandHomeDialog[open]) .brand-floating-leaf { animation:brand-leaf-drift 13s linear var(--leaf-delay) infinite; }
+:root[data-brand-motion=on] #brandStartup .brand-loading-dot { animation:brand-ready-pulse 1.3s ease-in-out infinite alternate; }
+:root[data-brand-paused=true] :is(.brand-scene::before,.brand-scene::after,.brand-floating-leaf,.brand-loading-dot) { animation-play-state:paused!important; }
+@media(prefers-reduced-motion:reduce) {
+  .brand-scene::before,.brand-scene::after,.brand-floating-leaf,.brand-loading-dot { animation:none!important; }
+}
+@media(max-width:760px) {
+  .brand-home-hero { aspect-ratio:auto; padding-top:56%; }
+  .brand-home-hero .brand-scene { bottom:auto; height:auto; aspect-ratio:16/9; }
+  .brand-home-copy { width:100%; padding:22px 22px 58px; background:#142b23; }
+  .brand-startup-card { aspect-ratio:auto; min-height:85vh; }
+  .brand-startup-card .brand-scene { bottom:auto; aspect-ratio:16/9; }
+  .brand-startup-copy { top:auto; bottom:24%; left:6%; width:88%; padding:10px; background:#142b23ed; border-radius:8px; }
+  .brand-startup-copy img { display:none; }
+  .brand-startup-copy h1 { margin:0 0 8px; }
+  .brand-startup-copy p { margin:0 0 8px; }
+  .brand-startup-status { max-width:88%; bottom:16%; }
+  .brand-signature { bottom:11%; }
+}

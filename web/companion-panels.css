@@ -1,0 +1,45 @@
+.inspector-panel{grid-template-rows:80px auto minmax(0,1fr)}
+.assembly-growth{border:1px solid var(--selected-line);border-radius:7px;padding:10px;margin-bottom:14px;background:var(--surface)}
+.assembly-growth h3{margin:0 0 9px;color:var(--text);font-size:12px}
+.assembly-growth[hidden]{display:none!important}.assembly-growth>button{width:100%;margin-top:6px;font-size:11px;min-height:30px}
+.assembly-growth #agStatus{color:var(--label)}
+.inspector-header{grid-row:1}.inspector-panel>#shapingContext{grid-row:2}.inspector-scroll{grid-row:3;min-height:0}
+.inspector-panel>#shapingContext{border-bottom:2px solid var(--selected-line);background:var(--surface);padding:12px 13px}
+.inspector-panel #shapingContextBody,.inspector-panel #shapingContext:has(.continuous-tool:not([hidden])) #shapingContextBody{max-height:min(38vh,350px)}
+.inspector-panel #shapingContext label{color:var(--label)}
+.inspector-panel #shapingContext :is(input,select){background:var(--field);border-color:var(--line);color:var(--text)}
+.companion-advanced{margin:12px 0 0;border:1px solid var(--line-soft);border-radius:6px;padding:0 9px;min-width:0}
+.companion-advanced>summary{padding:9px 0;font-size:11px;color:var(--muted);line-height:1.5;cursor:pointer}
+.companion-advanced[open]{padding-bottom:10px}.companion-advanced[open]>summary{color:var(--accent-text);margin-bottom:7px;border-bottom:1px solid var(--line-soft)}
+.companion-note,.companion-shortcuts{font-size:11px;color:var(--muted);line-height:1.65;margin:7px 0 12px}
+.companion-shortcuts{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.companion-shortcuts kbd{font:10px inherit;padding:1px 4px;border:1px solid var(--line);border-radius:4px;color:var(--label);background:var(--field)}
+.selection-companion{margin:0 0 12px}.selection-companion .bundle-tool-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;margin-bottom:6px}
+.selection-companion .bundle-tool-grid button{display:flex;align-items:center;justify-content:center;gap:4px;width:auto;height:29px;font-size:11px;padding:3px}
+.selection-companion .bundle-tool-grid svg{width:13px;height:13px}.selection-companion .wide-button{margin-top:0;font-size:11px;min-height:29px}
+.selection-companion .companion-advanced{margin-top:7px}
+#currentBranchPanel .button-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
+#currentBranchPanel .button-grid button{font-size:11px;min-height:30px;padding:5px;white-space:normal}
+#currentBranchPanel .branch-auto-actions #resetBranchEdit{grid-column:1/-1}
+#currentBranchPanel .subtool-block{margin-top:12px}#currentBranchPanel label{font-size:11px;line-height:1.6}
+#pointCompanion[hidden],#unitEditorPanel[hidden],#bundleTransformOptions[hidden]{display:none!important}
+#pointCompanion>.section-title{margin-bottom:5px}#pointCompanion>.field-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+#pointCompanion .parameter-number{min-width:0}
+#manualToolAlternatives{margin:16px 12px;padding:0 7px}#manualToolAlternatives>.parameter-section{border-bottom:1px solid var(--line-soft)}
+.companion-transform{padding:12px 13px;border-bottom:1px solid var(--line-soft)}.companion-transform h3{margin:0 0 10px;font-size:12px}
+#unitEditorPanel{margin:0;padding:12px 13px;border-bottom:1px solid var(--line-soft);font-size:11px;color:var(--label)}
+#unitEditorPanel>summary{font-size:12px;color:var(--text);font-weight:600;cursor:pointer;margin-bottom:10px}
+#unitEditorPanel label{display:block;line-height:1.6;margin:8px 0;font-size:11px}
+#unitEditorPanel :is(input,select){width:100%;min-width:0;border:1px solid var(--line);background:var(--field);color:var(--text);border-radius:5px;min-height:29px;padding:4px 6px}
+#unitEditorPanel .field-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+#unitEditorPanel .wb-row{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0}#unitEditorPanel .wb-row button{flex:1;font-size:11px;padding:5px;min-width:70px}
+body:not([data-unit-editing=on]) #unitEditorPanel>:not(summary):not(.unit-object-kind):not(.unit-orphans){display:none}
+#unitEditorPanel .unit-orphans[hidden]{display:none!important}
+body[data-unit-editing=on] :is(#currentBranchPanel,#bundleTransformOptions){display:none!important}
+body[data-workbench=BRANCH] #currentBranchPanel>.section-title{margin-top:4px}
+#sculptQuickContext{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+#sculptQuickContext>.wb-note{line-height:1.65;margin:4px 0 6px;grid-column:1/-1}
+#sculptQuickContext>:is(.wb-check,.companion-advanced){grid-column:1/-1}
+#sculptQuickContext>label{min-width:0;margin-bottom:0}#sculptQuickContext select{font-size:11px}
+#sculptQuickContext .wb-check{margin:8px 0}#sculptQuickContext>.companion-advanced{margin-top:9px}
+@media(max-width:760px){.inspector-panel #shapingContextBody{max-height:320px}}

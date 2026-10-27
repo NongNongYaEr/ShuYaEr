@@ -1,0 +1,54 @@
+.local-assembly {margin:12px 0;padding:12px;background:var(--surface);border:1px solid var(--line);border-radius:10px;font-size:12px}
+.local-assembly>summary{color:var(--text);font-weight:700;cursor:pointer;margin-bottom:10px}
+.local-assembly label{display:grid;gap:6px;margin:10px 0;color:var(--muted)}
+.local-assembly input,.local-assembly select{min-width:0;width:100%;box-sizing:border-box}
+.local-assembly button{min-height:32px;white-space:normal}
+.local-assembly .wb-row{display:flex;gap:6px}.local-assembly .wb-row button{flex:1}
+#laSummary,#laImpact{line-height:1.7;color:var(--accent-text)}
+#laProtectedList{white-space:pre-line;line-height:1.8;margin:8px 0}
+#laPreviewActions{margin-top:10px;border-top:1px solid var(--line);padding-top:6px}
+#laPreviewActions[hidden],.assembly-brush-ring[hidden]{display:none!important}
+.assembly-brush-ring{position:absolute;pointer-events:none;border:2px solid var(--accent-text);border-radius:50%;background:rgba(250,212,73,.08);z-index:8;box-sizing:border-box}
+#treeRecipeDialog{width:min(1280px,94vw);height:min(850px,91vh);padding:0;max-height:92vh;overflow:hidden;background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:16px}
+#treeRecipeDialog::backdrop{background:rgba(0,0,0,.65)}
+#treeRecipeDialog[open]{display:flex;flex-direction:column}
+#treeRecipeDialog header,.tr-toolbar,#treeRecipeDialog footer{flex-shrink:0}
+#treeRecipeDialog .tr-guide{width:130px;height:85px;object-fit:contain;margin-left:auto;margin-right:20px;pointer-events:none}
+#treeRecipeDialog input,#treeRecipeDialog select{background:var(--field);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:9px 10px;font:inherit}
+#treeRecipeDialog input:focus,#treeRecipeDialog select:focus{outline:2px solid var(--accent-text);outline-offset:1px}
+#treeRecipeDialog .accent{background:var(--yellow);color:#26230f;border-color:var(--yellow);font-weight:600}
+#treeRecipeDialog header{display:flex;align-items:center;justify-content:space-between;padding:20px 24px;background:linear-gradient(110deg,var(--surface),rgba(83,117,83,.18))}
+#treeRecipeDialog h2{margin:0 0 8px}#treeRecipeDialog header p{margin:0;color:var(--muted)}
+.tr-toolbar{display:flex;gap:8px;padding:14px 20px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.tr-toolbar input{flex:1;min-width:150px}
+.tr-body{display:grid;grid-template-columns:230px minmax(0,1fr);flex:1;min-height:0}
+.tr-body>aside{display:flex;flex-direction:column;gap:8px;padding:14px;border-right:1px solid var(--line);min-height:0}
+.tr-body>section{padding:16px;overflow:auto;min-width:0}
+#trRecipes{overflow:auto;flex:1;min-height:90px}
+.tr-recipe{display:grid;grid-template-columns:70px 1fr;gap:4px 8px;width:100%;text-align:left;padding:8px;margin:6px 0;min-height:72px}
+.tr-recipe img{width:70px;height:54px;object-fit:contain;grid-row:span 2;border-radius:5px;background:#17221e}
+.tr-recipe strong{overflow-wrap:anywhere}.tr-recipe small{color:var(--muted)}
+.tr-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.tr-options label{display:grid;gap:5px;font-size:12px;color:var(--muted)}
+.tr-options input,.tr-options select{width:100%;min-width:0;box-sizing:border-box}
+#trStop{grid-column:span 2}
+#trCandidates{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+.tr-candidate{padding:12px;border:1px solid var(--line);border-radius:10px;background:rgba(0,0,0,.08);min-width:0}
+.tr-candidate label{display:flex;align-items:flex-start;gap:7px;min-height:36px}.tr-candidate label input{width:auto;flex-shrink:0;margin-top:3px}.tr-candidate label strong{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;line-height:18px}
+.tr-candidate img{width:100%;aspect-ratio:4/3;object-fit:contain;background:#17221e;margin-top:10px;border-radius:6px}
+.tr-candidate p,.tr-candidate small{font-size:12px;line-height:1.6;color:var(--muted);overflow-wrap:anywhere}.tr-candidate button{width:100%;margin-top:8px}
+.tr-candidate small{display:block;margin-top:6px}
+#trGenerate{align-self:end;height:38px}
+#treeRecipeDialog footer{display:flex;align-items:center;gap:8px;padding:14px 20px;border-top:1px solid var(--line)}
+#trSelection{margin-right:auto;font-size:12px;color:var(--muted)}
+#trProgress{white-space:pre-line;overflow-wrap:anywhere;line-height:1.6;font-size:12px}
+.blm-toolbar{flex-wrap:wrap}.blm-toolbar input{flex:1 1 250px;min-width:190px}.blm-toolbar select{flex:0 1 140px;max-width:160px}
+.blm-organization{margin:10px 0;padding:10px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.blm-organization label{display:grid;gap:5px;margin-top:8px;font-size:12px;color:var(--muted)}
+.blm-organization input{width:100%;min-width:0;box-sizing:border-box}
+#branchLibraryDialog.blm-picker aside .blm-organization label{display:grid}
+#blmDependencies summary{cursor:pointer;margin:12px 0;font-size:12px}
+#blmDependencyList,#blmDependencyStatus{white-space:pre-line;line-height:1.8;font-size:12px;overflow-wrap:anywhere}
+#blmDependencyStatus{color:var(--muted)}
+@media(max-width:1000px){.tr-body{grid-template-columns:175px minmax(0,1fr)}.tr-options{grid-template-columns:repeat(2,minmax(0,1fr))}.tr-toolbar{flex-wrap:wrap}}
+@media(max-width:700px){#treeRecipeDialog .tr-guide{display:none}#treeRecipeDialog footer{flex-wrap:wrap}.tr-body{grid-template-columns:150px minmax(0,1fr)}}

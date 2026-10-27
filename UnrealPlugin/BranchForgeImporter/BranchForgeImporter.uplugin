@@ -1,0 +1,25 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "4.0.0",
+  "FriendlyName": "BranchForge Importer",
+  "Description": "Editor-only importer for BranchForge FBX, LOD, material and validation sidecars.",
+  "Category": "Importers",
+  "CreatedBy": "BranchForge",
+  "CanContainContent": false,
+  "IsBetaVersion": true,
+  "Installed": false,
+  "Modules": [
+    {
+      "Name": "BranchForgeImporter",
+      "Type": "Editor",
+      "LoadingPhase": "Default"
+    }
+  ],
+  "Plugins": [
+    {
+      "Name": "PythonScriptPlugin",
+      "Enabled": true
+    }
+  ]
+}

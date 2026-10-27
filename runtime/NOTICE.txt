@@ -1,0 +1,1 @@
+本目录内置 Node.js v21.0.0，用于本地目录索引和导出 CLI。Node.js 及其组件的完整许可见同目录 NODE-LICENSE.txt，来源为 https://raw.githubusercontent.com/nodejs/node/v21.0.0/LICENSE 。Three.js、fflate、Lucide、FBX exporter 的许可见 web/vendor；WebView2 的许可与 NOTICE 文件位于软件根目录。

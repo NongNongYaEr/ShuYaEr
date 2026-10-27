@@ -1,0 +1,23 @@
+const fs=require('fs'),path=require('path'),assert=require('node:assert/strict');
+const {chromium}=require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+(async()=>{
+ const out=path.resolve('.runtime/procedural-growth');fs.mkdirSync(out,{recursive:true});const report={checks:[],errors:[]};
+ const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});let page;
+ try{
+  page=await browser.newPage({viewport:{width:1600,height:1050}});page.setDefaultTimeout(60000);page.on('pageerror',e=>report.errors.push(e.stack));
+  const wait=()=>page.waitForFunction(()=>{const f=window.__branchForge;return f?.asset&&!document.getElementById('brandStartup')&&!f.asset.group.userData.pending_rebuild&&f.asset.authoring===f.authoring&&!f.workbench.busy&&document.querySelector('#busyOverlay').hidden;});
+  const state=()=>page.evaluate(()=>{const f=window.__branchForge;return {branches:f.asset.masterBranches.map(b=>({id:b.id,stable:b.stableId,parent:b.parentId,t:b.parentT,points:b.points.map(p=>p.toArray()),radius:b.startRadius,length:b.length})),rules:structuredClone(f.authoring.workbench?.procedural_growth),h:f.historyState};});
+  const select=async id=>page.locator('#branchOutliner button').filter({has:page.locator('span',{hasText:new RegExp('^'+id.replaceAll('.','\\.')+'$')})}).click();
+  await page.goto(process.argv[2]);await wait();await select('R1.3');assert.equal(await page.inputValue('#agSource'),'PROCEDURAL');assert(!(await page.locator('#agStart').isDisabled()));
+  const before=await state();await page.fill('#agStart','63');await page.locator('#agStart').press('Tab');await wait();const after=await state(),parent=after.branches.find(b=>b.stable==='R1.3'),children=after.branches.filter(b=>b.parent===parent.id);assert(children.length>0);assert(children.every(b=>b.t>.63));assert.deepEqual(parent,before.branches.find(b=>b.stable==='R1.3'));assert.equal(after.h.undo,before.h.undo+1);assert.notDeepEqual(after.branches,before.branches);
+  await page.click('#undoBtn');await wait();assert.deepEqual((await state()).branches,before.branches);await page.click('#redoBtn');await wait();assert.deepEqual((await state()).branches,after.branches);
+  await page.selectOption('#agSource','ASSEMBLY');assert(await page.locator('#agStart').isDisabled());assert(await page.locator('[data-parameter="agStart"]').isDisabled());assert.match(await page.textContent('#agStatus'),/没有这类次枝/);await page.selectOption('#agSource','PROCEDURAL');assert.equal(await page.inputValue('#agStart'),'63');
+  await page.fill('#agStart','75');await wait();await page.keyboard.press('Escape');await wait();assert.deepEqual((await state()).branches,after.branches);assert.equal((await state()).h.undo,after.h.undo);
+  await page.locator('#assemblyGrowthPanel').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(out,'程序分枝63起点.png')});
+  report.checks.push('复现无成品装配的默认树：自动选择程序分枝，63%实际移动小枝；主枝不变；撤销重做与Esc恢复；空装配类型禁用滑块并解释');
+  const savedState=await state();await page.evaluate(()=>{const original=window.fetch;window.fetch=async function(url,options){if(url==='/api/save-project'){const prefix=await options.body.slice(0,12).text(),line=prefix.indexOf('\n'),offset=line+1+Number(prefix.slice(0,line));const link=document.createElement('a');link.href=URL.createObjectURL(options.body.slice(offset));link.download='growth.branch.json';link.click();return new Response(JSON.stringify({success:true,path:'独立验收下载'}),{headers:{'Content-Type':'application/json'}});}return original.apply(this,arguments);};});
+  await page.click('#saveProjectBtn');await page.locator('#projectSaveDialog [value="FILE"]').check();const [download]=await Promise.all([page.waitForEvent('download'),page.click('#psSubmit')]);const saved=path.join(out,'程序范围保存.branch.json');await download.saveAs(saved);
+  await page.reload();await wait();await page.locator('#projectInput').setInputFiles(saved);await page.waitForFunction(()=>Boolean(window.__branchForge.authoring.workbench?.procedural_growth));await wait();assert.deepEqual((await state()).branches,savedState.branches);assert.deepEqual((await state()).rules,savedState.rules);
+  report.checks.push('实际保存重载保留程序分枝区间与完整几何');assert.deepEqual(report.errors,[]);report.passed=true;console.log(JSON.stringify(report));
+ }catch(e){if(page)await page.screenshot({path:path.join(out,'失败现场.png')});throw e;}finally{await browser.close();fs.writeFileSync(path.join(out,'验收.json'),JSON.stringify(report,null,2));}
+})().catch(e=>{console.error(e);process.exitCode=1});

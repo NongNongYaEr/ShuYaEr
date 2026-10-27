@@ -1,0 +1,7 @@
+{
+  "mode": "built-in image_gen",
+  "reference": "web/brand/tree-duck-v5.png",
+  "file": "web/brand/resource-center-mark-v1.png",
+  "createdAt": "2026-10-27",
+  "prompt": "Use case: illustration-story. Asset type: a SMALL APP HEADER MASCOT ICON, read at 48 by 48 pixels. Input image: canonical Tree Duck identity reference only. Create one new standalone compact portrait icon of this exact character: golden yellow fluffy duck, cream swept spiky tuft, charcoal work goggles resting on forehead above unobstructed large dark brown friendly eyes, orange broad beak, just a hint of cobalt blue work jacket collar. One simple small green leaf beside the lower cheek/shoulder as a botanical accent. Face occupies most of a square composition, tuft and goggles fully inside the frame, centered and balanced with a thin clear outer margin. Friendly confident small smile. Very clean polished cartoon, smooth thick dark outlines, simplified shading and minimal tiny details, recognizable at 48 pixels. TRANSPARENT background, real clean alpha cutout. No environment, frame, circle, colored square, lettering, glow, floor shadow, watermark, hands, tools, books, extra props, full body, or duplicate character. Preserve the canonical head shape, goggles and color identity."
+}

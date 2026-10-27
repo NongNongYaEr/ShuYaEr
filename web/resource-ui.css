@@ -1,0 +1,31 @@
+/* Shared resource dialog rhythm; does not style modeling workbench controls. */
+.resource-form-dialog::backdrop { background:rgb(9 12 13 / 68%); }
+dialog.resource-form-dialog { width:min(480px,calc(100vw - 40px)); max-height:calc(100dvh - 40px); padding:0; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--text); box-shadow:0 20px 64px #0006; font-family:inherit; font-size:13px; line-height:1.6; overflow:auto; }
+:is(#branchPrefabNameDialog,.rc-metadata,.plant-pack-name).resource-form-dialog { padding:0; width:min(480px,calc(100vw - 40px)); border:1px solid var(--line); border-radius:8px; }
+.resource-form-dialog form { display:block!important; padding:24px; margin:0; }
+.resource-form-heading { display:flex; gap:12px; align-items:center; margin:0 0 18px; }
+.resource-form-mark { display:grid; place-items:center; flex-shrink:0; width:42px; height:42px; background:var(--brand-soft); color:var(--accent-text); border-radius:7px; }
+.resource-form-mark svg { width:22px; height:22px; }
+.resource-form-heading small { display:block; color:var(--muted); font-size:11px; }
+.resource-form-heading h2 { font-size:19px; line-height:1.35; margin:1px 0 0; }
+.resource-form-heading button { margin-left:auto; }
+.resource-form-dialog .resource-form-description { color:var(--muted); font-size:12px; margin:0 0 24px; line-height:1.8; }
+:is(#branchPrefabNameDialog,.rc-metadata,.plant-pack-name).resource-form-dialog label { display:grid; gap:8px; margin:16px 0; font-size:12px; color:var(--label); }
+.resource-form-dialog :is(input,textarea) { width:100%; min-width:0; box-sizing:border-box; background:var(--field); color:var(--text); border:1px solid var(--line); border-radius:5px; padding:10px 12px; font-family:inherit; font-size:13px; line-height:1.5; }
+.resource-form-dialog button { display:inline-flex; align-items:center; justify-content:center; gap:7px; border:0; border-radius:5px; background:var(--surface-3); color:var(--text); min-height:36px; padding:8px 16px; cursor:pointer; font:inherit; }
+.resource-form-dialog button:hover:not(:disabled) { filter:brightness(1.12); }
+.resource-form-dialog button:disabled { opacity:.45; cursor:default; }
+.resource-form-dialog [data-form-close] { width:34px; min-height:34px; padding:7px; background:transparent; }
+.resource-form-dialog [data-form-close] svg { width:19px; height:19px; }
+:is(#branchPrefabNameDialog,.rc-metadata,.plant-pack-name).resource-form-dialog footer { display:flex; justify-content:flex-end; gap:8px; margin:24px -24px -24px; padding:16px 24px; border-top:1px solid var(--line-soft); background:var(--panel-header); }
+.resource-form-dialog :is([type=submit],[value=ok]) { background:var(--accent); color:var(--brand-ink); font-weight:650; }
+.resource-form-dialog [role=status]:empty { display:none; }
+.resource-form-dialog :is(input,button,textarea):focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+.resource-form-dialog #prefabNameTarget { color:var(--muted); font-size:12px; margin:0 0 20px; }
+.resource-form-dialog [hidden] { display:none!important; }
+.resource-form-description:empty { display:none; }
+#resourcePackConfirm { background:var(--surface); color:var(--text); border:1px solid var(--line); border-radius:8px; box-shadow:0 20px 64px #0006; }
+#resourcePackConfirm header { background:var(--header); min-height:0; padding:22px 24px; border-bottom:1px solid var(--line-soft); }
+#resourcePackConfirm header img { display:none; }#resourcePackConfirm h2 { font-size:20px; }
+#resourcePackConfirm footer { background:var(--panel-header); border-top:1px solid var(--line-soft); }
+#resourcePackConfirm .resource-confirm-close { width:34px; height:34px; padding:7px; border:0; background:transparent; color:var(--muted); cursor:pointer; border-radius:5px; }#resourcePackConfirm .resource-confirm-close svg { width:19px; height:19px; }

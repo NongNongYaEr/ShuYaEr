@@ -12,7 +12,7 @@
   <a href="docs/source-status.md">源码与版本</a>
 </p>
 
-> **文档与反馈已开放 · 软件源码与发行包筹备中。** [查看准备进度 →](docs/source-status.md)
+> **V020 / 0.2.51 精简源码已公开。** [构建与运行 →](docs/build-source.md) · [使用许可](LICENSE.txt) · [版本范围](docs/source-status.md)
 
 ## 看见植物，也掌握细节
 
@@ -71,9 +71,9 @@
       <p><a href="https://github.com/NongNongYaEr/ShuYaEr/issues/new/choose">选择反馈类型</a></p>
     </td>
     <td width="33%" align="center" valign="top">
-      <a href="docs/source-status.md"><img src="docs/images/source-duck.png" width="72" alt="鸭鸭拿着工具，表示源码与版本仍在准备" /></a>
+      <a href="docs/source-status.md"><img src="docs/images/source-duck.png" width="72" alt="鸭鸭拿着工具，查看源码与版本" /></a>
       <h3><a href="docs/source-status.md">源码与版本 ↗</a></h3>
-      <p>了解公开范围，<br />查看当前准备进度。</p>
+      <p>了解公开范围，<br />查看当前公开版本。</p>
       <p><a href="https://github.com/NongNongYaEr/ShuYaEr/releases">发行记录</a></p>
     </td>
   </tr>
@@ -85,7 +85,7 @@
 
 | 桌面版 | 软件源码 | 配套资产 |
 | :--- | :--- | :--- |
-| 用于直接开始制作。正式下载入口确认后公布；本仓库目前没有提供安装包。 | 用于研究与自行构建。源码、依赖和构建说明仍在整理，当前文档与图片不是完整软件源码。 | 植物样板、枝条与藤蔓素材，在网站资产库单独维护，按内容说明获取。 |
+| 用于直接开始制作。正式下载入口确认后公布；本仓库目前没有提供安装包。 | V020 精简源码、依赖准备脚本及构建说明已公开；从[构建指南](docs/build-source.md)开始。 | 源码附带八类代表样本和完整依赖，完整素材库单独提供；见[素材许可](ASSETS_LICENSE.md)。 |
 
 桌面版、源码标签与资产分别标注版本；实际可获取文件以对应项目说明和[发行记录](https://github.com/NongNongYaEr/ShuYaEr/releases)为准。正式官网地址准备好后会补充到这里。
 
@@ -94,7 +94,7 @@
 
 欢迎提出制作需求、软件问题和文档建议。[反馈中心](docs/feedback.md)提供故障反馈与功能建议两条路径。账号、订单、付款与会员问题，通过软件所属网站的站内反馈处理；GitHub Issues 会公开展示。
 
-源码开放范围与许可证尚待确认，本仓库暂未附加开源许可证。配套资产的获取范围和授权说明独立维护。
+本项目采用[免费使用与源码公开许可](LICENSE.txt)，属于源码可用项目。允许免费使用、学习、修改和制作商业作品；商业分发软件、源码、修改版或原始素材包需作者单独书面授权。[素材](ASSETS_LICENSE.md)、[品牌 IP](BRAND_NOTICE.md)和[第三方组件](THIRD_PARTY_NOTICES.md)分别说明授权范围。
 
 </details>
 

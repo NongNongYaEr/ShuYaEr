@@ -1,0 +1,12 @@
+import {sendProjectSave} from './project-save-request.js';
+import {libraryPrefabSummary} from './prefab-project-data.js';
+import {isPackageAsset,packAssets,readPackAsset} from './plant-pack-client.js';
+export function createBranchPrefabStore(){
+  let connection,kind='browser';
+  const summary=libraryPrefabSummary;
+  async function request(url,options){const r=await fetch(url,{cache:'no-store',...options});if(r.status===404)return null;const result=await r.json();if(!r.ok||result.success===false)throw Error(result.message||'预制枝干库读写失败');return result;}
+  const backend=request('/api/branch-prefabs').then(data=>{if(data){if(!Array.isArray(data.items))throw Error('预制枝干库响应无效');kind='disk';return true;}return false;});
+  const db=()=>connection||=new Promise((resolve,reject)=>{const r=indexedDB.open('branchforge-branch-prefabs',1);r.onupgradeneeded=()=>r.result.createObjectStore('prefabs',{keyPath:'id'});r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
+  async function local(mode,action){const database=await db();return new Promise((resolve,reject)=>{const tx=database.transaction('prefabs',mode),r=action(tx.objectStore('prefabs'));tx.oncomplete=()=>resolve(r.result);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});}
+  return {get kind(){return kind;},async list(){const own=(await backend?(await request('/api/branch-prefabs')).items:(await local('readonly',s=>s.getAll()))).map(summary);return [...own,...(await packAssets('prefab')).map(p=>({...summary(p),packages:p.packages,packageAsset:true}))];},async get(id){if(isPackageAsset(id))return readPackAsset(id);const result=await backend?await request('/api/branch-prefab?id='+encodeURIComponent(id)):await local('readonly',s=>s.get(id));if(!result)throw Error('预制枝干已不存在，请刷新列表');return result;},async put(p){if(await backend)await sendProjectSave('/api/branch-prefab',summary(p),JSON.stringify(p));else await local('readwrite',s=>s.add(p));},async update(id,patch){if(isPackageAsset(id))throw Error('包内原件使用固定版本；加入项目后可以独立命名，也可在资源包管理中收藏或归档整包');if(await backend)return request('/api/branch-prefab-metadata',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,...patch})});const item=await local('readonly',s=>s.get(id));if(!item)throw Error('预制已不存在');await local('readwrite',s=>s.put({...item,...patch,id}));},async remove(id){if(isPackageAsset(id))throw Error('请在资源包管理中移除包登记');if(await backend)await request('/api/branch-prefab?id='+encodeURIComponent(id),{method:'DELETE'});else await local('readwrite',s=>s.delete(id));}};
+}

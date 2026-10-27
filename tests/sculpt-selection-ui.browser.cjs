@@ -1,0 +1,64 @@
+const fs=require('fs'),path=require('path'),assert=require('node:assert/strict');
+const {chromium}=require(process.env.BRANCHFORGE_PLAYWRIGHT||'C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+(async()=>{
+ const out=path.resolve('.runtime/sculpt-selection-ui');fs.mkdirSync(out,{recursive:true});const report={checks:[],errors:[]};
+ const shape=(id,parent,points)=>({id,parent,points,length:3,start_radius:.06,end_radius:.025});
+ const input=path.join(out,'fixture.branch.json');fs.writeFileSync(input,JSON.stringify({format:'ProceduralBranchProject',version:4,settings:{object_name:'雕刻选区界面验收',seed:42,leaf_density:0,child_count:0,branch_levels:4,wind_strength:0},authoring:{branch_shape:{branches:[
+  shape('ROOT','',[[0,0,0],[0,0,.3],[0,0,.6],[0,0,1]]),shape('A','ROOT',[[0,0,1],[1,0,1.4],[1.7,0,2.2],[3,0,2.4]]),
+  shape('A1','A',[[1,0,1.4],[1.4,0,1.8],[1.8,0,2.2],[2.2,0,2.6]]),shape('B','ROOT',[[0,.04,1],[-.5,.04,1.4],[-1,.04,1.8],[-1.5,.04,2.2]])]}}}));
+ const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});let page;
+ try{
+  page=await browser.newPage({viewport:{width:1600,height:1050}});page.setDefaultTimeout(60000);page.on('pageerror',e=>report.errors.push(e.message));
+  await page.goto(process.argv[2]);await page.waitForFunction(()=>window.__branchForge?.asset);
+  const idle=()=>page.waitForFunction(()=>{const f=window.__branchForge;return f.asset&&!f.asset.group.userData.pending_rebuild&&f.asset.authoring===f.authoring&&!f.workbench.busy&&document.querySelector('#busyOverlay').hidden;});
+  await page.locator('#projectInput').setInputFiles(input);await page.waitForFunction(()=>window.__branchForge.asset?.settings.object_name==='雕刻选区界面验收');await idle();
+  await page.evaluate(()=>{const f=window.__branchForge;f.camera.position.set(1,-9,1.5);f.camera.up.set(0,0,1);f.controls.target.set(1,0,1.5);f.controls.update();});
+  const outline=()=>page.evaluate(()=>{const g=window.__branchForge.scene.getObjectByName('枝束选择轮廓');return {visible:g.visible,ids:g.children.flatMap(l=>l.userData.branch_ranges||[]).map(r=>r.id).sort()};});
+  const state=()=>page.evaluate(()=>({authoring:JSON.stringify(window.__branchForge.authoring),history:window.__branchForge.historyState,camera:window.__branchForge.camera.position.toArray().map(v=>Math.round(v*1e8)/1e8),tool:document.querySelector('#viewport').dataset.viewportTool,selected:window.__branchForge.bundleState.selected.sort()}));
+  const snapshot=()=>page.evaluate(()=>window.__branchForge.asset.masterBranches.map(b=>[b.stableId,b.points.map(p=>p.toArray())]));
+  const point=async id=>page.evaluate(id=>{const f=window.__branchForge,b=f.asset.masterBranches.find(b=>b.stableId===id),r=document.querySelector('#viewport').getBoundingClientRect(),p=b.points[Math.floor(b.points.length*.65)].clone().applyMatrix4(f.asset.group.matrixWorld).project(f.camera);return [r.left+(p.x+1)*r.width/2,r.top+(1-p.y)*r.height/2];},id);
+  const blank=()=>page.evaluate(()=>{const r=document.querySelector('#viewport').getBoundingClientRect();return [r.right-70,r.bottom-170];});
+  const select=async id=>page.locator('#branchOutliner button').filter({has:page.locator('span',{hasText:new RegExp('^'+id+'$')})}).click();
+  const tool=async key=>{const b=page.locator('.viewport-tool-rail [data-viewport-tool="'+key+'"]');await b.evaluate(e=>{for(let p=e.parentElement;p;p=p.parentElement)if(p.matches('details'))p.open=true;});await b.click();};
+  await select('A');await tool('GRAB');await page.mouse.move(80,40);
+  assert.deepEqual(await outline(),{visible:true,ids:['A','A1']});assert.equal(await page.locator('#sculptOverlay').isVisible(),false);
+  await page.locator('#branchEditScope').selectOption('DIRECT');assert.deepEqual(await outline(),{visible:true,ids:['A']});
+  await page.locator('#branchEditScope').selectOption('ALL');assert.deepEqual(await outline(),{visible:true,ids:['A','A1','B','ROOT']});
+  report.checks.push('active branches are visible before brush hover, including exact direct/subtree/whole-tree scopes');
+  const baseline=await state();
+  await page.mouse.click(...await blank(),{button:'right'});assert.equal(await page.locator('#brushSelectionMenu').isVisible(),true);
+  await page.screenshot({path:path.join(out,'雕刻选区右键菜单.png')});
+  await page.keyboard.press('Escape');assert.equal(await page.locator('#brushSelectionMenu').isVisible(),false);assert.deepEqual(await state(),baseline);
+  await page.mouse.click(...await blank(),{button:'right'});await page.locator('[data-brush-selection="NONE"]').click();
+  assert.deepEqual((await state()).selected,[]);assert.deepEqual(await outline(),{visible:false,ids:[]});assert.equal(await page.locator('#branchEditScope').inputValue(),'SELECTED');
+  assert.equal((await state()).authoring,baseline.authoring);assert.deepEqual((await state()).history,baseline.history);assert.equal((await state()).tool,'GRAB');
+  const original=await snapshot(),p=await point('A');await page.mouse.move(...p);await page.mouse.down();await page.mouse.move(p[0]+25,p[1]-20,{steps:6});await page.mouse.up();await idle();assert.deepEqual(await snapshot(),original);
+  report.checks.push('clear exits ALL scope, clears exclusions/selection, retains brush and prevents empty-selection sculpt');
+  await page.mouse.click(...await blank(),{button:'right'});await page.keyboard.press('ArrowDown');await page.keyboard.press('Enter');
+  assert.deepEqual((await state()).selected,['A','A1','B','ROOT']);assert.deepEqual(await outline(),{visible:true,ids:['A','A1','B','ROOT']});assert.equal((await state()).authoring,baseline.authoring);assert.deepEqual((await state()).history,baseline.history);
+  report.checks.push('keyboard-operated select-all selects every editable branch without changing document/history/tool');
+  await page.mouse.click(...await point('A'),{button:'right'});assert.equal(await page.locator('#brushSelectionMenu').isVisible(),false);
+  const q=await blank();await page.mouse.move(...q);await page.mouse.down({button:'right'});await page.mouse.move(q[0]-40,q[1]-25,{steps:5});await page.mouse.up({button:'right'});assert.equal(await page.locator('#brushSelectionMenu').isVisible(),false);
+  await page.mouse.click(...await blank(),{button:'right'});await page.locator('#statusText').click();assert.equal(await page.locator('#brushSelectionMenu').isVisible(),false);
+  report.checks.push('branch right-click and right-drag do not open menu; outside-click dismisses it');
+  await select('A');await page.locator('#branchEditScope').selectOption('DIRECT');const preEdit=await snapshot(),r=await point('A');
+  await page.mouse.move(...r);await page.mouse.down();await page.mouse.move(r[0]+35,r[1]-35,{steps:8});
+  const preview=await page.evaluate(()=>{const f=window.__branchForge,b=[...f.sculptState.updated.values()].find(b=>b.stableId==='A'),line=f.scene.getObjectByName('枝束选择轮廓').children[0],range=line.userData.branch_ranges.find(r=>r.id==='A'),p=line.geometry.getAttribute('position').array,drawn=Array.from(p.slice(range.offset*3,(range.offset+range.count)*3)),curve=[];for(let n=1;n<b.points.length;n++)curve.push(...b.points[n-1].toArray(),...b.points[n].toArray());return {line:drawn,curve};});
+  assert.ok(preview.line.every((v,n)=>Math.abs(v-preview.curve[n])<1e-5),'persistent line follows live brush deformation');
+  await page.keyboard.press('Escape');await page.mouse.up();assert.deepEqual(await snapshot(),preEdit);assert.deepEqual(await outline(),{visible:true,ids:['A']});
+  await page.mouse.move(80,40);assert.deepEqual(await outline(),{visible:true,ids:['A']});
+  report.checks.push('outline follows live deformation, restores on Escape, and stays visible after pointer leaves viewport');
+  await tool('SELECT');assert.equal(await page.locator('#brushSelectionMenu').isVisible(),false);
+  await page.reload();await page.waitForFunction(()=>window.__branchForge?.asset);await page.locator('#projectInput').setInputFiles(input);await page.waitForFunction(()=>window.__branchForge.asset?.settings.object_name==='雕刻选区界面验收');await idle();await select('A');await tool('COMB');assert.deepEqual(await outline(),{visible:true,ids:['A','A1']});
+  report.checks.push('actual page reload and project reimport retain expected sculpt UI behavior');
+  await page.locator('#projectInput').setInputFiles(path.resolve('assets/tree-template-library/template-c75273b48abc49fbbfa602525f57c083.branch.json'));await page.waitForFunction(()=>window.__branchForge.authoring.branch_instances.length===550);await idle();
+  await select('CAMPHOR_PRIMARY_1');await tool('COMB');const used=await outline();assert.ok(used.visible&&used.ids.length>0&&used.ids.every(id=>!id.startsWith('FIN_')));
+  const treeState=await state();await page.mouse.click(...await blank(),{button:'right'});assert.equal(await page.locator('#brushSelectionMenu').isVisible(),true);await page.locator('[data-brush-selection="ALL"]').click();
+  const carriers=await page.evaluate(()=>window.__branchForge.asset.branches.filter(b=>!b.instanceId&&!b.unitOwner&&!b.symmetryGroup).map(b=>b.stableId).sort());assert.deepEqual((await state()).selected,carriers);assert.deepEqual((await outline()).ids,carriers);
+  assert.equal((await state()).authoring,treeState.authoring);assert.deepEqual((await state()).history,treeState.history);assert.equal((await state()).tool,'COMB');
+  await page.screenshot({path:path.join(out,'香樟完整装配雕刻全选.png')});
+  await page.mouse.click(...await blank(),{button:'right'});await page.locator('[data-brush-selection="NONE"]').click();assert.deepEqual(await outline(),{visible:false,ids:[]});assert.equal((await state()).authoring,treeState.authoring);
+  report.checks.push('real 550-unit camphor select-all highlights only editable carriers and preserves every installed sample/document');
+  assert.deepEqual(report.errors,[]);report.passed=true;console.log(JSON.stringify(report));
+ }catch(e){if(page)await page.screenshot({path:path.join(out,'失败现场.png')});throw e;}finally{await browser.close();fs.writeFileSync(path.join(out,'验收.json'),JSON.stringify(report,null,2));}
+})().catch(e=>{console.error(e);process.exitCode=1;});

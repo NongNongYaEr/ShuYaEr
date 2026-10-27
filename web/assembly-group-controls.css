@@ -1,0 +1,32 @@
+.assembly-groups{padding:9px 0;border-bottom:1px solid var(--line);min-width:0}
+.assembly-groups [hidden]{display:none!important}
+.assembly-groups-heading,.assembly-group-card-heading{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.assembly-groups-heading h3{font-size:13px;margin:0}
+.assembly-groups-heading button{font-size:11px;min-height:27px;padding:4px 8px}
+.assembly-group-list{display:grid;gap:6px;margin:8px 0}
+.assembly-group-card{border:1px solid var(--line);border-radius:8px;padding:7px;background:var(--field);cursor:pointer;min-width:0}
+.assembly-group-card.active{border-color:var(--selected-line);background:var(--selected-bg)}
+.assembly-group-title{min-width:0;padding:0;border:0;background:none;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;min-height:22px}
+.assembly-group-count{color:var(--accent-text);font-size:11px;white-space:nowrap}
+.assembly-group-thumbnails{display:flex;gap:5px;margin:5px 0;overflow:hidden}
+.assembly-group-thumbnails img{width:calc(25% - 4px);max-width:80px;min-width:0;height:58px;border-radius:5px;object-fit:contain;background:var(--preview-bg)}
+.assembly-group-stats{font-size:10px;color:var(--muted);line-height:1.6}
+.assembly-group-drop{width:100%;border:1px dashed var(--hover-line);font-size:11px;color:var(--accent-text);padding:6px;min-height:27px}
+.assembly-groups .drag-over{outline:2px solid var(--yellow);outline-offset:1px;background:var(--brand-soft)}
+.assembly-group-editor{border:1px solid var(--line);border-radius:8px;padding:8px;margin-top:8px;background:var(--field)}
+.assembly-group-editor label{display:flex;flex-direction:column;gap:4px;min-width:0;margin:5px 0;font-size:11px}
+.assembly-group-editor input,.assembly-group-editor select{width:100%;min-width:0;box-sizing:border-box;font-size:11px;height:28px}
+.assembly-group-editor input[type=range]{height:16px;padding:0;margin:0}
+.assembly-group-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.assembly-group-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;margin:5px 0}
+.assembly-group-actions button{font-size:10px;min-height:26px;min-width:0;padding:4px}
+.assembly-group-editor details{margin:7px 0;font-size:11px;padding-top:6px;border-top:1px solid var(--line)}
+.assembly-group-editor summary{cursor:pointer;color:var(--muted)}
+.assembly-group-palette{display:grid;gap:4px;margin-top:7px}
+.assembly-group-palette-row{display:grid;grid-template-columns:48px minmax(0,1fr) 38px 22px;align-items:center;gap:5px;min-width:0}
+.assembly-group-palette-row img{width:48px;height:43px;object-fit:contain;border-radius:4px;background:var(--preview-bg)}
+.assembly-group-palette-row span{font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.assembly-group-palette-row input{height:24px;padding:2px 4px}
+.assembly-group-palette-row button{height:22px;min-height:22px;padding:0;font-size:11px}
+.assembly-group-editor #sgRestoreAuto,.assembly-group-editor #sgDeleteGroup{width:100%;font-size:10px;min-height:26px;margin-top:5px}
+.assembly-group-editor #sgDeleteGroup{color:var(--danger,#dfa89b)}

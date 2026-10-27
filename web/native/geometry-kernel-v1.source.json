@@ -1,0 +1,10 @@
+{
+  "abi": 1,
+  "compiler": "Zig 0.14.1",
+  "target": "wasm32-freestanding",
+  "floating_point": "strict IEEE operations; contraction disabled",
+  "source": "native/geometry/BfGeometry.cpp",
+  "source_sha256": "c0eacc8c951b69032a90d457fd815c3134c338df26c7fae0cae8c63fe25bfeed",
+  "wasm_sha256": "005d9b4b3ce9fc4a1916d571a6b0ea5a7ccb4c51f15c1024fc6ac5e4362ac2d3",
+  "bytes": 22762
+}

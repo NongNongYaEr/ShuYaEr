@@ -1,0 +1,46 @@
+#plantUnitDialog { width: min(1420px,96vw); max-width: 96vw; height: min(920px,94vh); max-height: 94vh; padding: 0; border: 1px solid #526456; border-radius: 10px; color: var(--text,#d3ded8); background: #111a16; }
+#plantUnitDialog[open] { display: flex; flex-direction: column; }
+#plantUnitDialog::backdrop { background: #000a; }
+#plantUnitDialog [hidden] { display: none !important; }
+#plantUnitDialog { font-family: inherit; font-size: 12px; }
+#plantUnitDialog button { font: inherit; color: #d3ded8; border: 1px solid #3e5546; background: #202e25; padding: 6px 10px; border-radius: 5px; cursor: pointer; min-height: 30px; }
+#plantUnitDialog button:hover { background: #304638; border-color: #68806e; }
+#plantUnitDialog button:disabled { opacity: .45; cursor: default; }
+#plantUnitDialog button.accent { color: #eed58b; border-color: #8b7840; background: #3b3625; }
+#plantUnitDialog input,#plantUnitDialog select { font: inherit; background: #0c1710; color: #d3ded8; border: 1px solid #3b5142; border-radius: 5px; padding: 7px 8px; }
+#plantUnitDialog input:focus,#plantUnitDialog select:focus,#plantUnitDialog button:focus-visible { outline: 2px solid #99bca4; outline-offset: 1px; }
+#plantUnitDialog .wb-row { display: flex; gap: 6px; flex-wrap: wrap; }#plantUnitDialog .wb-row > button { flex: 1; }
+#plantUnitDialog .field-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+.pu-header,.pu-footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 18px; background: #1b2820; flex: 0 0 auto; }
+.pu-header h2 { margin: 0 0 6px; font-size: 18px; }.pu-header p { margin: 0; color: #a5b6aa; font-size: 12px; }
+.pu-footer { border-top: 1px solid #34483b; min-height: 50px; font-size: 12px; }
+.pu-workspace { display: grid; grid-template-columns: 190px minmax(320px,1fr) 310px; min-height: 0; flex: 1; }
+.pu-pack-sidebar,.pu-pack-editor,.pu-inspector { overflow: auto; padding: 14px; min-width: 0; }
+.pu-pack-sidebar { border-right: 1px solid #34483b; }.pu-inspector { border-left: 1px solid #34483b; background: #142019; }
+.pu-pack-item { width: 100%; text-align: left; display: grid; gap: 5px; margin-top: 7px; padding: 10px; }
+.pu-pack-item.active { border-color: #d0b666; background: #303727; }.pu-pack-item small { color: #9cac9e; font-size: 11px; }
+.pu-pack-fields { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }.pu-pack-fields label { flex: 1; min-width: 130px; }
+#plantUnitDialog label { display: grid; gap: 5px; font-size: 12px; color: #bfcec3; margin-bottom: 8px; }
+#plantUnitDialog input,#plantUnitDialog select { width: 100%; min-width: 0; }
+#plantUnitDialog .pu-checkbox { display: flex; align-items: center; gap: 8px; line-height: 1.5; }
+#plantUnitDialog .pu-checkbox input { width: auto; }
+.pu-material { display: flex; align-items: start; gap: 12px; padding: 12px; border: 1px solid #354b3d; border-radius: 6px; margin: 12px 0; }
+.pu-material > div { min-width: 0; flex: 1; }.pu-material img { width: 94px; height: 94px; object-fit: contain; background: #27382d; }
+.pu-import-controls { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; }.pu-import-controls label { flex: 1; }
+.pu-unit-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(125px,1fr)); gap: 8px; }
+.pu-unit-card { min-width: 0; overflow: hidden; border: 1px solid #385240; border-radius: 6px; padding: 7px; background: #17251c; display: flex; flex-direction: column; gap: 6px; cursor: grab; }
+.pu-unit-card img { width: 100%; aspect-ratio: 1.5; object-fit: contain; background: #19231e; border-radius: 3px; }
+.pu-unit-card strong { font-size: 12px; overflow-wrap: anywhere; }.pu-unit-card small { color: #a6b9ad; font-size: 11px; }.pu-unit-card button { font-size: 11px; margin-top: auto; }
+#unitPreviewCanvas { height: 260px; width: 100%; border: 1px solid #354b3d; border-radius: 6px; overflow: hidden; }#unitPreviewCanvas canvas { display: block; width: 100%; height: 100%; }
+.pu-assembly h3 { font-size: 13px; }.pu-assembly .pu-unit-grid { max-height: 325px; overflow: auto; grid-template-columns: repeat(2,minmax(0,1fr)); }
+.pu-slot { border: 1px solid #3b5b46; background: #18271e; border-radius: 6px; margin: 12px 0; padding: 8px; }.pu-slot h4 { font-size: 12px; margin: 0 0 8px; }
+.pu-slot.drag-over { outline: 2px solid #b9c970; }.pu-drop { border: 1px dashed #5d8066; padding: 10px 3px; text-align: center; font-size: 11px; color: #bed7c7; margin-top: 7px; }
+.pu-assigned { display: grid; grid-template-columns: 52px minmax(0,1fr) 22px; align-items: center; gap: 6px; background: #293e30; margin-bottom: 6px; padding: 5px; border-radius: 4px; }.pu-assigned img { width: 52px; height: 45px; object-fit: contain; }.pu-assigned strong { font-size: 11px; overflow-wrap: anywhere; }.pu-assigned > button { padding: 3px; min-width: 20px; }
+.pu-row-fields { display: flex; gap: 5px; margin-top: 5px; }.pu-row-fields label { font-size: 10px; flex: 1; min-width: 0; }.pu-row-fields input { width: 100%; padding: 3px; min-width: 0; font-size: 11px; }
+.pu-error { color: #ffb8a4; }#plantUnitDialog[aria-busy="true"] .pu-workspace { pointer-events: none; opacity: .72; }
+.pu-assembly > button { width: 100%; margin-top: 6px; }
+@media(max-width:1050px) { .pu-workspace { grid-template-columns: 145px minmax(260px,1fr) 240px; }.pu-pack-sidebar,.pu-pack-editor,.pu-inspector { padding: 9px; }.pu-material { flex-wrap: wrap; } }
+@media(max-width:760px) { #plantUnitDialog { height: 96vh; }.pu-workspace { display: flex; flex-direction: column; overflow: auto; }.pu-pack-sidebar,.pu-pack-editor,.pu-inspector { overflow: visible; }.pu-pack-sidebar { max-height: 200px; overflow: auto; flex: 0 0 auto; }.pu-header { align-items: start; }.pu-header p { max-width: 230px; }.pu-inspector { border-left: 0; }.pu-footer { flex-wrap: wrap; } }
+.pu-pack-item:has(img) { display:grid; grid-template-columns:62px minmax(0,1fr); column-gap:10px; align-items:center; }
+.pu-pack-item>img { width:62px; height:47px; object-fit:contain; background:#17221e; grid-row:1/3; border-radius:3px; }
+.pu-pack-item:has(img)>strong,.pu-pack-item:has(img)>small { grid-column:2; }

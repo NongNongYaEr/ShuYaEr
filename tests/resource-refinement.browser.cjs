@@ -1,0 +1,21 @@
+const assert=require('node:assert/strict'),path=require('node:path');
+module.exports=async function verifyResourceRefinement(page,out){
+ const checks=[],check=message=>{checks.push(message);console.log('PASS',message)},center=page.locator('#resourceCenterDialog');
+ const stamp=()=>page.evaluate(()=>{const a=window.__branchForge;return JSON.stringify({authoring:a.authoring,history:a.historyState,selection:a.selectedCurvePoint,camera:a.camera.position.toArray(),target:a.controls.target.toArray()});});
+ const before=await stamp();await page.evaluate(()=>window.__branchForge.resourceCenter.open({scope:'library',type:'',clear:true}));await page.waitForFunction(()=>!document.getElementById('resourceCenterDialog').hasAttribute('aria-busy'));
+ assert.equal(await center.locator('.rc-scope-count').count(),2);const counts=await center.locator('.rc-scope-count').allTextContents();assert(Number(counts[0])>=6&&Number(counts[1])>=200);assert.equal(Number(counts[1]),await page.locator('#resourceGrid .rc-card').count());check('project and library locations display distinct real resource totals');
+ for(const type of ['plant','prefab','branch','units','material']){
+  await center.locator('[data-type="'+type+'"]').click();await page.waitForTimeout(120);
+  const first=page.locator('#resourceGrid .rc-card-main').first();if(await first.count()){await first.click();const font=await first.locator('strong').evaluate(n=>parseFloat(getComputedStyle(n).fontSize));assert(font>=12);assert(await page.locator('#resourceDetails .rc-primary-actions button svg').count()>0);const image=page.locator('#resourceGrid .rc-thumbnail img').first();if(await image.count())assert.equal(await image.evaluate(n=>getComputedStyle(n).objectFit),'contain');}
+  else assert(await center.locator('.rc-empty').isVisible());
+  assert(await center.evaluate(n=>n.scrollWidth<=n.clientWidth+1));await page.screenshot({path:path.join(out,'资源板块-'+type+'.png'),animations:'disabled'});
+ }
+ check('every asset section shares readable card typography, action icons and intact previews or a complete empty state');
+ await center.locator('[data-type=units]').click();await page.locator('#resourceGrid .rc-card-main').first().click();
+ const contrast=await page.evaluate(()=>{const color=value=>value.match(/[\d.]+/g).slice(0,3).map(Number),luminance=v=>v.map(x=>{x/=255;return x<=.04045?x/12.92:((x+.055)/1.055)**2.4;}).reduce((sum,x,i)=>sum+x*[.2126,.7152,.0722][i],0),button=document.getElementById('resourceImportPack'),s=getComputedStyle(button),a=luminance(color(s.color)),b=luminance(color(s.backgroundColor));return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);});assert(contrast>=4.5);
+ for(const palette of ['forest','cream','graphite']){await page.evaluate(value=>document.documentElement.dataset.palette=value,palette);await page.screenshot({path:path.join(out,'资源细化主题-'+palette+'.png'),animations:'disabled'});}check('shared surface styling respects existing palettes and the primary action retains readable contrast');
+ await page.locator('#resourceDetails').getByRole('button',{name:'到叶花果工作台',exact:true}).click();await page.waitForSelector('#plantUnitDialog[open] #unitPackGrid .pu-unit-card');const editor=page.locator('#plantUnitDialog');await page.waitForFunction(()=>!document.getElementById('plantUnitDialog').hasAttribute('aria-busy'));
+ assert.equal(await editor.locator('#unitPackGrid .pu-unit-card.is-current').count(),1);const second=editor.locator('#unitPackGrid .pu-unit-card').nth(1);await second.getByRole('button',{name:'预览 / 编辑',exact:true}).click();assert.equal(await second.getAttribute('aria-current'),'true');assert.equal(await editor.locator('#unitPackGrid .pu-unit-card.is-current').count(),1);await page.screenshot({path:path.join(out,'叶花果工作台细化.png'),animations:'disabled'});
+ await page.setViewportSize({width:640,height:900});assert(await editor.evaluate(n=>n.scrollWidth<=n.clientWidth+1));await page.screenshot({path:path.join(out,'叶花果工作台-640.png'),animations:'disabled'});await editor.locator('#unitWorkbenchClose').click();await page.setViewportSize({width:1700,height:1050});check('leaf asset workbench shares the surface system and clearly identifies the unit being inspected');
+ assert.equal(await stamp(),before);return checks;
+};

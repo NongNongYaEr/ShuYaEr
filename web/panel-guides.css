@@ -1,0 +1,98 @@
+/* Small static IP scenes, separated from real asset previews and click targets. */
+.panel-guide-hero {
+  position:relative; isolation:isolate; overflow:hidden; min-height:160px;
+  background:radial-gradient(ellipse at 88% 90%,color-mix(in srgb,var(--green) 15%,transparent),transparent 60%),var(--surface);
+  border:1px solid var(--line-soft); border-radius:12px;
+}
+.panel-guide-hero>div:first-child { position:relative; z-index:1; padding-right:270px; }
+.panel-guide-art { position:absolute; right:30px; bottom:-8px; width:240px; height:160px; object-fit:contain; pointer-events:none; user-select:none; z-index:0; }
+.panel-guide-hero>button { position:absolute; right:12px; top:12px; z-index:2; }
+.panel-guide-steps { display:flex; flex-wrap:wrap; gap:8px 16px; margin:16px 0 0; padding:0; list-style:none; }
+.panel-guide-steps li { display:flex; align-items:center; gap:7px; color:var(--label); font-size:11px; line-height:1.6; }
+.panel-guide-step-number { display:inline-grid; place-items:center; flex-shrink:0; width:20px; height:20px; border-radius:50%; background:var(--brand-soft); color:var(--accent-text); font-size:10px; font-weight:600; }
+#resourceCenterDialog { width:min(960px,94vw); padding:20px; }
+#resourceCenterDialog .resource-center-heading { display:block; padding:20px 22px; }
+#resourceCenterDialog .resource-center-heading h2 { margin:6px 0; }
+#resourceCenterDialog .resource-center-heading p { max-width:500px; }
+#resourceCenterDialog .resource-center-grid { margin:16px 0; gap:12px; }
+#resourceCenterDialog .resource-center-card { padding:16px 20px; }
+#resourceCenterDialog .resource-center-label svg { width:24px; height:24px; }
+#resourceCenterDialog .resource-center-card h3 { margin:12px 0 6px; }
+#resourceCenterDialog .resource-center-tags { padding-bottom:12px; }
+#resourceCenterDialog .resource-center-footer { padding-top:12px; font-size:11px; }
+#resourceCenterDialog .resource-center-card { position:relative; isolation:isolate; overflow:hidden; }
+.resource-card-copy { position:relative; padding-right:148px; min-height:122px; }
+.resource-card-art { position:absolute; right:12px; top:24px; width:148px; height:99px; object-fit:contain; pointer-events:none; user-select:none; }
+#resourceCenterDialog .resource-center-card>p { margin:0; }
+#resourceCenterDialog .resource-center-card .resource-center-label svg { width:20px; height:20px; }
+#brandExportDialog { width:min(1020px,94vw); padding:20px; }
+#brandExportDialog .brand-dialog-heading { display:block; padding:20px 22px; }
+#brandExportDialog .brand-dialog-heading h2 { margin:6px 0; font-size:24px; }
+#brandExportDialog .brand-dialog-heading .brand-caption { margin:8px 0 0; }
+#brandExportDialog .brand-export-grid { margin:16px 0; gap:12px; }
+#brandExportDialog .brand-export-card { display:flex; flex-direction:column; padding:18px; }
+#brandExportDialog .brand-export-card h3 { margin:10px 0; }
+#brandExportDialog .brand-export-card p { min-height:0; margin:0 0 10px; }
+.panel-guide-purpose { display:block; align-self:flex-start; color:var(--accent-text); background:var(--brand-soft); border-radius:5px; padding:4px 7px; font-size:10px; line-height:1.5; }
+#brandExportDialog .brand-export-card .panel-guide-choice { color:var(--label); padding:10px 0 14px; border-top:1px solid var(--line-soft); margin-top:auto; }
+#brandExportDialog .panel-guide-export-actions { display:flex; flex-direction:column; justify-content:flex-end; gap:9px; min-height:81px; }
+#brandExportDialog .panel-guide-export-actions :is(button,select) { margin:0; min-height:36px; }
+#brandExportDialog>.brand-caption { margin:8px 2px 0; }
+body #branchLibraryDialog>header.panel-guide-library {
+  display:block; flex-shrink:0; min-height:132px; padding:18px 24px;
+  border:0; border-bottom:1px solid var(--line); border-radius:0;
+  background:radial-gradient(ellipse at 88% 90%,color-mix(in srgb,var(--green) 15%,transparent),transparent 55%),var(--surface);
+}
+#branchLibraryDialog .panel-guide-library>div:first-child { padding-right:300px; }
+#branchLibraryDialog .panel-guide-library .panel-guide-art { right:100px; width:198px; height:132px; bottom:-5px; }
+#branchLibraryDialog .panel-guide-library>button { right:22px; top:18px; }
+#branchLibraryDialog .panel-guide-library .panel-guide-steps { margin-top:12px; }
+#branchLibraryDialog .panel-guide-library-note { border:1px solid var(--line-soft); border-radius:8px; padding:12px; background:var(--field); line-height:1.8; font-size:11px; margin:4px 0 0; }
+.panel-guide-library-note strong,.panel-guide-library-note span { display:block; }
+.panel-guide-library-note strong { color:var(--accent-text); margin-bottom:5px; }
+.panel-guide-library-note span { color:var(--muted); }
+body :is(#projectLibraryDialog,#plantUnitDialog)>header.panel-guide-destination {
+  display:block; flex-shrink:0; min-height:132px; padding:18px 24px;
+  border:0; border-bottom:1px solid var(--line); border-radius:0;
+  background:radial-gradient(ellipse at 82% 90%,color-mix(in srgb,var(--green) 15%,transparent),transparent 55%),var(--surface);
+}
+:is(#projectLibraryDialog,#plantUnitDialog) .panel-guide-destination>div:first-child { padding-right:330px; }
+:is(#projectLibraryDialog,#plantUnitDialog) .panel-guide-destination .panel-guide-art { right:150px; width:192px; height:128px; bottom:0; }
+:is(#projectLibraryDialog,#plantUnitDialog) .panel-guide-destination>button { right:22px; top:18px; }
+:is(#projectLibraryDialog,#plantUnitDialog) .panel-guide-destination .panel-guide-steps { margin-top:12px; }
+#projectLibraryDialog .panel-guide-destination p { margin:6px 0 0; }
+.panel-guide-inline { display:grid; grid-template-columns:minmax(0,1fr) 100px; column-gap:6px; padding:12px; margin:0 0 16px; border:1px solid var(--line-soft); border-radius:10px; background:linear-gradient(130deg,var(--surface-2),var(--field)); }
+.panel-guide-inline>div { align-self:center; min-width:0; }
+.panel-guide-inline strong { display:block; color:var(--accent-text); font-size:12px; line-height:1.6; }
+.panel-guide-inline p { color:var(--muted); font-size:11px; line-height:1.7; margin:5px 0 0; }
+.panel-guide-inline-art { align-self:center; width:100px; height:76px; object-fit:contain; pointer-events:none; user-select:none; }
+.panel-guide-inline .panel-guide-inline-note { grid-column:1 / -1; border-top:1px solid var(--line-soft); padding-top:8px; margin-top:8px; }
+@media(max-height:800px) and (min-width:761px) {
+  #resourceCenterDialog,#brandExportDialog { padding:16px; }
+  .panel-guide-hero { min-height:136px; }
+  #resourceCenterDialog .resource-center-heading,#brandExportDialog .brand-dialog-heading { padding:16px 20px; }
+  .panel-guide-art { width:210px; height:140px; }
+  .panel-guide-steps { margin-top:10px; }
+  #resourceCenterDialog .resource-center-card { padding:12px 16px; }
+  #resourceCenterDialog .resource-center-label svg { width:20px; height:20px; padding:4px; }
+  #resourceCenterDialog .resource-center-card h3 { margin:8px 0 6px; }
+  .resource-card-copy { min-height:112px; padding-right:138px; }
+  .resource-card-art { width:138px; height:92px; top:18px; right:10px; }
+}
+@media(max-width:760px) {
+  .panel-guide-hero>div:first-child,#branchLibraryDialog .panel-guide-library>div:first-child { padding-right:26px; }
+  .panel-guide-art { display:none; }
+  .panel-guide-hero { min-height:0; }
+  #resourceCenterDialog,#brandExportDialog { padding:14px; }
+  #resourceCenterDialog .resource-center-heading,#brandExportDialog .brand-dialog-heading { padding:16px; }
+  #branchLibraryDialog>header.panel-guide-library { min-height:0; padding:16px; }
+  #branchLibraryDialog .panel-guide-library>div:first-child { padding-right:50px; }
+  .panel-guide-steps { gap:8px 12px; }
+  #resourceCenterDialog .resource-center-grid { grid-template-columns:1fr; }
+  body :is(#projectLibraryDialog,#plantUnitDialog)>header.panel-guide-destination { min-height:0; padding:16px; }
+  :is(#projectLibraryDialog,#plantUnitDialog) .panel-guide-destination>div:first-child { padding-right:135px; }
+}
+@media(max-width:420px) {
+  .resource-card-copy { padding-right:105px; }
+  .resource-card-art { width:100px; height:76px; right:8px; }
+}

@@ -1,0 +1,64 @@
+const fs=require('fs'),path=require('path'),assert=require('node:assert/strict');
+const {chromium}=require(process.env.BRANCHFORGE_PLAYWRIGHT||'C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+(async()=>{
+ const out=path.resolve('.runtime/branch-root-rotation');fs.mkdirSync(out,{recursive:true});const result={checks:[],errors:[]};
+ const shape=(id,parent,points)=>({id,parent,points,attach:parent==='ROOT'?1:.33,length:3,start_radius:.035,end_radius:.015});
+ const doc={format:'ProceduralBranchProject',version:4,settings:{object_name:'枝束挂接验收',seed:42,leaf_density:0,child_count:0,branch_levels:4,wind_strength:0},authoring:{branch_shape:{branches:[shape('ROOT','',[[0,0,0],[0,0,.3],[0,0,.6],[0,0,1]]),shape('A','ROOT',[[0,0,1],[1,0,1.4],[1.7,0,2.2],[3,0,2.2]]),shape('A1','A',[[1,0,1.4],[1.4,0,1.8],[1.8,0,2.2],[2.2,0,2.6]]),shape('B','ROOT',[[0,.04,1],[1,.04,1.4],[2,.04,1.8],[3,.04,2.2]])]}}};
+ const input=path.join(out,'fixture.branch.json');fs.writeFileSync(input,JSON.stringify(doc));
+ const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
+ try{
+ const page=await browser.newPage({viewport:{width:1600,height:1050}});page.setDefaultTimeout(60000);page.on('pageerror',e=>result.errors.push(e.message));await page.goto(process.argv[2]);console.log('PAGE');await page.waitForFunction(()=>window.__branchForge?.asset);
+ const wait=()=>page.waitForFunction(()=>{const f=window.__branchForge;return f.asset&&!f.asset.group.userData.pending_rebuild&&f.asset.authoring===f.authoring&&!f.workbench.busy&&document.querySelector('#busyOverlay').hidden;});
+ const load=async()=>{await page.locator('#projectInput').setInputFiles(input);await page.waitForFunction(()=>window.__branchForge.asset?.settings.object_name==='枝束挂接验收');await wait();await page.evaluate(()=>{const f=window.__branchForge;f.camera.position.set(1.5,-9,1.5);f.camera.up.set(0,0,1);f.controls.target.set(1.5,0,1.5);f.controls.update();});};
+ const snap=()=>page.evaluate(()=>Object.fromEntries(window.__branchForge.asset.masterBranches.map(b=>[b.stableId,b.points.map(p=>p.toArray())])));
+ const select=async id=>{await page.locator('#branchOutliner button').filter({has:page.locator('span',{hasText:new RegExp('^'+id+'$')})}).click();};
+ const tool=key=>page.locator('.viewport-tool-rail [data-viewport-tool="'+key+'"]').click();
+ const point=async(id,t=.65)=>page.evaluate(({id,t})=>{const f=window.__branchForge,b=f.asset.masterBranches.find(b=>b.stableId===id),n=Math.min(b.points.length-2,Math.floor(t*(b.points.length-1))),p=b.points[n].clone().lerp(b.points[n+1],t*(b.points.length-1)-n),r=document.querySelector('#viewport').getBoundingClientRect();f.asset.group.updateWorldMatrix(true,true);const v=f.asset.group.localToWorld(p).project(f.camera);return [r.left+(v.x+1)*r.width/2,r.top+(1-v.y)*r.height/2];},{id,t});
+ const drag=async(a,b)=>{await page.mouse.move(...a);await page.mouse.down();await page.mouse.move(...b,{steps:12});await page.mouse.up();await wait();};
+
+
+
+
+ const ring=axis=>page.evaluate(async axis=>{
+ const THREE=await import('/vendor/three.module.min.js');const f=window.__branchForge,g=f.bundleState.gizmo,r=document.querySelector('#viewport').getBoundingClientRect();g.getHelper().updateMatrixWorld(true);
+ const center=g.object.getWorldPosition(new THREE.Vector3()).project(f.camera),cx=r.left+(center.x+1)*r.width/2,cy=r.top+(1-center.y)*r.height/2;
+ const ray=new THREE.Raycaster();
+ for(const o of g._gizmo.gizmo.rotate.children){if(o.name!==axis||!o.visible||!o.geometry)continue;const pos=o.geometry.getAttribute('position');for(let i=0;i<pos.count;i+=2){const p=new THREE.Vector3().fromBufferAttribute(pos,i).applyMatrix4(o.matrixWorld).project(f.camera),x=r.left+(p.x+1)*r.width/2,y=r.top+(1-p.y)*r.height/2;const d=Math.hypot(x-cx,y-cy);if(d<18||x<r.left+10||x>r.right-10||y<r.top+10||y>r.bottom-10)continue;ray.setFromCamera(new THREE.Vector2(p.x,p.y),f.camera);const hit=ray.intersectObjects(g._gizmo.picker.rotate.children,true).find(h=>h.object.visible);if(hit?.object.name===axis)return {start:[x,y],end:[x-(y-cy)/d*40,y+(x-cx)/d*40],center:[cx,cy]};}}
+ throw Error('No visible ring '+axis);
+ },axis);
+ const gesture=async(axis,cancel=false)=>{const p=await ring(axis);await page.mouse.move(...p.start);await page.mouse.down();await page.mouse.move(...p.end,{steps:12});if(cancel)await page.keyboard.press('Escape');await page.mouse.up();await wait();};
+ await load();await page.evaluate(()=>{const f=window.__branchForge;f.camera.position.set(5,-7,5);f.controls.target.set(1,0,1.4);f.controls.update();});await select('A');await tool('SELECT');
+ const before=await snap(),hist=await page.evaluate(()=>window.__branchForge.historyState.undo);const dist=(a,b)=>Math.hypot(...a.map((v,k)=>v-b[k]));let previous=before;
+ for(const axis of ['X','Y','Z']){await gesture(axis);const now=await snap();assert.notDeepEqual(now.A,previous.A,axis);assert.ok(dist(now.A[0],before.A[0])<1e-7);assert.deepEqual(now.ROOT,before.ROOT);assert.deepEqual(now.B,before.B);for(const id of ['A','A1'])for(let i=1;i<now[id].length;i++)assert.ok(Math.abs(dist(now[id][0],now[id][i])-dist(before[id][0],before[id][i]))<1e-7);previous=now;}
+ const after=await snap();assert.equal(await page.evaluate(()=>window.__branchForge.historyState.undo),hist+3);assert.equal(await page.evaluate(()=>window.__branchForge.authoring.sculpt_layers.filter(l=>l.operation?.root_rotation).length),1);
+ await page.screenshot({path:path.join(out,'枝根三轴旋转环.png')});await page.locator('#undoBtn').click();await wait();assert.notDeepEqual(await snap(),after);await page.locator('#redoBtn').click();await wait();assert.deepEqual(await snap(),after);
+ await gesture('X',true);assert.deepEqual(await snap(),after);const p=await ring('Y');await page.mouse.click(...p.start);await wait();assert.deepEqual(await snap(),after);assert.equal(await page.evaluate(()=>window.__branchForge.historyState.undo),hist+3);
+ result.checks.push('real mouse drags all X/Y/Z rings; actual root fixed; subtree rigid; unrelated bones unchanged; merged layer; undo/redo, Escape, no-op');
+ await page.evaluate(()=>{const original=window.fetch;window.fetch=async function(url,options){if(url==='/api/save-project'){const prefix=await options.body.slice(0,12).text(),line=prefix.indexOf('\n'),offset=line+1+Number(prefix.slice(0,line));const link=document.createElement('a');link.href=URL.createObjectURL(options.body.slice(offset));link.download='retract.branch.json';link.click();return new Response(JSON.stringify({success:true,path:'独立验收下载'}),{headers:{'Content-Type':'application/json'}});}return original.apply(this,arguments);};});
+ await page.locator('#saveProjectBtn').click();await page.locator('#projectSaveDialog [value="FILE"]').check();const [download]=await Promise.all([page.waitForEvent('download'),page.locator('#psSubmit').click()]);const saved=path.join(out,'挂接保存.branch.json');await download.saveAs(saved);await page.reload();await page.waitForFunction(()=>window.__branchForge?.asset);await page.locator('#projectInput').setInputFiles(saved);await page.waitForFunction(()=>window.__branchForge.asset?.settings.object_name==='枝束挂接验收');await wait();assert.deepEqual(await snap(),after);result.checks.push('actual save and reload preserves mount parameters and geometry');
+
+
+
+ await select('A');await tool('SELECT');assert.equal(await page.evaluate(()=>window.__branchForge.authoring.sculpt_layers.at(-1).operation.root_rotation),true);
+ const beforeMove=await snap(),root=await point('A',0);await drag(root,[root[0],root[1]+30]);const moved=await snap();assert.notDeepEqual(moved.A,beforeMove.A);for(let i=1;i<moved.A.length;i++)assert.ok(Math.abs(dist(moved.A[0],moved.A[i])-dist(beforeMove.A[0],beforeMove.A[i]))<1e-7);
+ await page.locator('#undoBtn').click();await wait();assert.deepEqual(await snap(),after);result.checks.push('saved file reload retains full rotation; center point remains draggable after rotation');
+ const camellia=path.resolve('assets/tree-template-library/template-ea396bae43d74f7fa42ed703724d053b.branch.json');await page.locator('#projectInput').setInputFiles(camellia);await page.waitForFunction(()=>window.__branchForge.authoring.branch_instances.length===577);await wait();
+ const units=await page.evaluate(()=>JSON.stringify([window.__branchForge.authoring.branch_instances,window.__branchForge.authoring.branch_library]));
+ const foliage=()=>page.evaluate(()=>{const a=window.__branchForge.asset;return Object.fromEntries(['placements','treeOrgans'].map(key=>[key,a[key].map(p=>({id:p.stableId,branch:p.branchStableId,position:p.position.toArray(),direction:p.direction.toArray(),scale:p.scale}))]));});const foliageBefore=await foliage();
+ const fullBefore=await snap();const records=await page.evaluate(()=>window.__branchForge.asset.masterBranches.map(b=>({id:b.stableId,parent:window.__branchForge.asset.masterBranches.find(p=>p.id===b.parentId)?.stableId,r:[b.startRadius,b.endRadius]})));
+ const affected=new Set(['P1']);let more=true;while(more){more=false;for(const r of records)if(affected.has(r.parent)&&!affected.has(r.id)){affected.add(r.id);more=true;}}
+ await page.locator('#skeletonEditModeBtn').click();await wait();await select('P1');await tool('SELECT');
+ await page.evaluate(()=>{const f=window.__branchForge,d=f.camera.position.distanceTo(f.controls.target),direction=f.camera.position.clone().set(1,-1,.65).normalize();f.camera.position.copy(f.controls.target).addScaledVector(direction,d);f.controls.update();});await gesture('Y');await gesture('Z');
+ const matrix=await page.evaluate(()=>window.__branchForge.asset.masterBranches.find(b=>b.stableId==='P1').mountMatrix.toArray());
+ await page.locator('#skeletonEditModeBtn').click();await wait();const fullAfter=await snap();
+ assert.equal(await page.evaluate(()=>JSON.stringify([window.__branchForge.authoring.branch_instances,window.__branchForge.authoring.branch_library])),units);
+ const transform=p=>[0,1,2].map(k=>matrix[k]*p[0]+matrix[4+k]*p[1]+matrix[8+k]*p[2]+matrix[12+k]);
+ for(const r of records){assert.ok(fullAfter[r.id],r.id);for(let i=0;i<fullBefore[r.id].length;i++){const want=affected.has(r.id)?transform(fullBefore[r.id][i]):fullBefore[r.id][i];assert.ok(dist(want,fullAfter[r.id][i])<2e-5,r.id+' point '+i+' rigid transform mismatch '+dist(want,fullAfter[r.id][i]));}}
+ const radii=await page.evaluate(()=>window.__branchForge.asset.masterBranches.map(b=>[b.stableId,b.startRadius,b.endRadius]));for(let i=0;i<radii.length;i++){assert.equal(radii[i][0],records[i].id);for(let k=0;k<2;k++)assert.ok(Math.abs(radii[i][k+1]-records[i].r[k])<1e-10);}
+ const foliageAfter=await foliage();for(const key of ['placements','treeOrgans']){assert.equal(foliageBefore[key].length,foliageAfter[key].length);for(let i=0;i<foliageBefore[key].length;i++){const old=foliageBefore[key][i],current=foliageAfter[key][i];assert.equal(current.id,old.id);assert.ok(Math.abs(current.scale-old.scale)<1e-9);const moved=affected.has(old.branch),position=moved?transform(old.position):old.position,direction=moved?[0,1,2].map(k=>matrix[k]*old.direction[0]+matrix[4+k]*old.direction[1]+matrix[8+k]*old.direction[2]):old.direction;assert.ok(dist(current.position,position)<2e-5);assert.ok(dist(current.direction,direction)<2e-5);}}
+ result.foliage={leaves:foliageAfter.placements.length,organs:foliageAfter.treeOrgans.length};
+ result.checks.push('real camellia: skeleton mode mount then full preview, every affected point follows the same rigid matrix, all 577 units/library and radii unchanged');
+ await page.screenshot({path:path.join(out,'山茶三轴旋转预览.png')});
+ assert.deepEqual(result.errors,[]);result.passed=true;console.log(JSON.stringify(result));
+ }finally{await browser.close();fs.writeFileSync(path.join(out,'验收.json'),JSON.stringify(result,null,2));}
+})().catch(e=>{console.error(e);process.exitCode=1;});

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>树鸭儿 · 主干形体试验</title>
+  <script type="importmap">{"imports":{"three":"/vendor/three.module.min.js","fflate":"/vendor/fflate-browser.js"}}</script>
+  <style>
+    :root{color-scheme:dark;font-family:"Microsoft YaHei",sans-serif;background:#202326;color:#eee9db;--yellow:#ffda55;--muted:#adafa8;--line:#424643}
+    *{box-sizing:border-box}body{margin:0}button,input{font:inherit}button{cursor:pointer;color:inherit;background:#303432;border:1px solid var(--line);border-radius:8px;padding:9px 12px}button:hover{border-color:var(--yellow)}button.active{background:#49422b;color:var(--yellow);border-color:#b5a450}button:disabled{opacity:.4;cursor:default}
+    header{height:84px;padding:16px 25px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);gap:20px}h1{font-size:22px;margin:2px 0}header small{color:var(--yellow)}header p{font-size:12px;color:var(--muted);margin:5px 0}.badge{font-size:12px;border:1px solid #6c6138;padding:7px 10px;border-radius:20px;color:var(--yellow);white-space:nowrap}
+    main{height:calc(100vh - 84px);display:grid;grid-template-columns:minmax(500px,1fr) 310px}.viewport{position:relative;overflow:hidden;background:#555a50}canvas{display:block;width:100%;height:100%}.tabs{position:absolute;left:20px;top:18px;display:flex;gap:7px;flex-wrap:wrap;max-width:calc(100% - 40px)}.tabs button{background:#252b25e8}.tabs button.active{background:#514a2ee8}.overlay{position:absolute;bottom:22px;left:22px;padding:13px 17px;background:#17221de8;border:1px solid #52624f;border-radius:10px;max-width:470px;font-size:12px;line-height:1.8;pointer-events:none}.overlay strong{display:block;color:var(--yellow);font-size:14px}.toolbar{position:absolute;right:18px;bottom:22px;display:flex;gap:7px}
+    aside{padding:21px;overflow:auto;border-left:1px solid var(--line);background:#25282a}h2{font-size:17px;margin:0 0 9px}aside p{font-size:12px;line-height:1.8;color:var(--muted);margin:0 0 18px}.field{margin:18px 0}.field label{display:flex;justify-content:space-between;font-size:12px;margin-bottom:10px}.field output{color:var(--yellow);font-variant-numeric:tabular-nums}.field input{width:100%;accent-color:var(--yellow)}.checks{border-top:1px solid var(--line);padding-top:16px;margin-top:20px}.checks label{display:block;font-size:13px;margin:12px 0}.checks input{accent-color:var(--yellow)}.status{font-size:12px;line-height:1.8;padding:12px;background:#1b211e;border:1px solid #3e4b3f;border-radius:8px;margin-top:20px}.status a{color:var(--yellow)}.status strong{color:#a5cca7}.note{font-size:11px;line-height:1.8;color:var(--muted);margin-top:15px}.wide{width:100%}.error{color:#ffaaa0}
+    @media(max-width:850px){main{grid-template-columns:minmax(320px,1fr) 265px}aside{padding:15px}header{padding:12px 18px}.badge{display:none}.tabs{left:12px;top:12px}.tabs button{font-size:12px;padding:8px}.overlay{left:12px;bottom:70px;max-width:calc(100% - 24px)}.toolbar{right:12px;bottom:18px}}
+  </style>
+</head>
+<body>
+  <header><div><small>树鸭儿 · 形体研究</small><h1>让树干长出自己的性格</h1><p>旋转观察纵沟与板根，比较主干轮廓和完整单元枝装配。</p></div><span class="badge">独立试验 · 参数不会写入现有工程</span></header>
+  <main>
+    <div class="viewport" id="viewport">
+      <canvas id="canvas"></canvas>
+      <nav class="tabs" aria-label="试验样本">
+        <button data-sample="Baseline">原有主干</button><button data-sample="Grooved" class="active">① 深纵沟</button><button data-sample="Buttress">② 板根</button><button data-sample="Refined">③ 固定网格基座</button>
+      </nav>
+      <div class="overlay"><strong id="caption">正在载入试验样本…</strong><div id="summary">左键旋转 · 右键平移 · 滚轮缩放</div><div id="detail"></div></div>
+      <div class="toolbar"><button id="focusRoot">看根部</button><button id="fit">看整树</button></div>
+    </div>
+    <aside>
+      <h2 id="panelTitle">深纵沟主干</h2><p id="description">沟槽直接改变网格，可以从轮廓与阴影观察深度。</p>
+      <div id="fields">
+        <div class="field"><label for="grooveDepth">纵沟深度 <output id="grooveDepthValue"></output></label><input id="grooveDepth" type="range" min="0" max="0.7" step="0.01"></div>
+        <div class="field"><label for="ridgeCount">纵脊数量 <output id="ridgeCountValue"></output></label><input id="ridgeCount" type="range" min="3" max="12" step="1"></div>
+        <div class="field"><label for="rootFlare">根部外扩 <output id="rootFlareValue"></output></label><input id="rootFlare" type="range" min="0" max="2" step="0.02"></div>
+        <div class="field"><label for="buttressStrength">板根展开 <output id="buttressStrengthValue"></output></label><input id="buttressStrength" type="range" min="0" max="2" step="0.02"></div>
+        <div class="field"><label for="bulgeStrength">局部隆起 <output id="bulgeStrengthValue"></output></label><input id="bulgeStrength" type="range" min="0" max="0.6" step="0.01"></div>
+      </div>
+      <button class="wide" id="reset">恢复样本参数</button>
+      <div class="checks"><label><input type="checkbox" id="onlyTrunk" checked> 只看主干与根部</label><label><input type="checkbox" id="wireframe"> 查看网格结构</label></div>
+      <div class="status" id="validation">正在读取验证结果…</div>
+      <div class="note">本页是功能验证样本。固定网格基座由本轮原型烘焙后重新读取，模拟精制主干接入；尚未接入任意外部模型编辑。界面调节只影响本页，导出包对应预先生成的样本参数。</div>
+    </aside>
+  </main>
+  <script type="module" src="/trunk-feasibility.js"></script>
+</body>
+</html>

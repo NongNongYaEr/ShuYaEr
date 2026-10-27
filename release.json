@@ -1,0 +1,67 @@
+{
+  "product": "树鸭儿",
+  "version": "0.2.51",
+  "channel": "professional-rc",
+  "edition": "professional",
+  "entry": "树鸭儿.exe",
+  "viewport": "DX12",
+  "viewport_abi": 1,
+  "projectFormatVersion": 4,
+  "delivery": "V020",
+  "variant": "02_精简公开源码",
+  "sampleClasses": [
+    {
+      "category": "TREE",
+      "species": "CAMPHOR",
+      "name": "香樟",
+      "file": "tree-camphor-v1.json"
+    },
+    {
+      "category": "SHRUB",
+      "species": "AZALEA",
+      "name": "杜鹃",
+      "file": "tree-azalea-v1.json"
+    },
+    {
+      "category": "POTTED",
+      "species": "FIDDLE_FIG",
+      "name": "琴叶榕",
+      "file": "tree-fiddle_fig-v1.json"
+    },
+    {
+      "category": "VINE",
+      "species": "IVY",
+      "name": "常春藤",
+      "file": "ivy-v1.json"
+    },
+    {
+      "category": "FLOWERING_VINE",
+      "species": "BOUGAINVILLEA",
+      "name": "三角梅",
+      "file": "bougainvillea-v1.json"
+    },
+    {
+      "category": "GRASS",
+      "species": "SCENE_GRASS",
+      "name": "草叶",
+      "file": "scene-grass-v1.json"
+    },
+    {
+      "category": "HERB",
+      "species": "SCENE_BROADLEAF",
+      "name": "大叶草本",
+      "file": "scene-broadleaf-v1.json"
+    },
+    {
+      "category": "FLOWER",
+      "species": "SCENE_FLOWER",
+      "name": "黄色小花",
+      "file": "scene-flower-v1.json"
+    }
+  ],
+  "sourceAvailable": true,
+  "publicSource": true,
+  "license": "LicenseRef-ShuYaEr-Free-Use-Source-Available-1.0",
+  "commercialCreativeOutput": true,
+  "commercialRedistributionRequiresWrittenPermission": true
+}

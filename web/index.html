@@ -1,0 +1,764 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>树鸭儿 · 植物创作工坊</title>
+  <link rel="icon" href="/brand/tree-duck-v5.ico" sizes="any">
+  <link rel="stylesheet" href="/app.css">
+  <link rel="stylesheet" href="/prefab-assets.css">
+  <link rel="stylesheet" href="/plant-pack.css">
+  <link rel="stylesheet" href="/size-reference.css">
+  <link rel="stylesheet" href="/parameter-workspace.css">
+  <link rel="stylesheet" href="/generator-workspace.css">
+  <link rel="stylesheet" href="/branch-workbench.css">
+  <link rel="stylesheet" href="/trunk-form-controls.css">
+  <link rel="stylesheet" href="/trunk-detail-controls.css">
+  <link rel="stylesheet" href="/bark-material-controls.css">
+  <link rel="stylesheet" href="/branch-library-manager.css">
+  <link rel="stylesheet" href="/project-library-manager.css">
+  <link rel="stylesheet" href="/project-save.css">
+  <link rel="stylesheet" href="/branch-workflow-ui.css">
+  <link rel="stylesheet" href="/branch-variant-workspace.css">
+  <link rel="stylesheet" href="/plant-unit-workspace.css">
+  <script src="/vendor/lucide.min.js"></script>
+  <script type="importmap">
+    {"imports":{"three":"/vendor/three.module.min.js","fflate":"/vendor/fflate-browser.js","@comfyorg/fbx-exporter-three":"/vendor/fbx-exporter/index.js"}}
+  </script>
+    <link rel="stylesheet" href="/vine-workspace.css">
+  <link rel="stylesheet" href="/brand-theme.css">
+  <link rel="stylesheet" href="/brand-palettes.css">
+  <link rel="stylesheet" href="/workspace-navigation.css">
+  <link rel="stylesheet" href="/companion-panels.css">
+  <link rel="stylesheet" href="/ui-layout.css">
+  <link rel="stylesheet" href="/brand-artwork.css">
+  <link rel="stylesheet" href="/panel-guides.css">
+  <link rel="stylesheet" href="/tree-assembly-layout.css">
+  <link rel="stylesheet" href="/app-confirm.css">
+  <script src="/brand-appearance.js"></script>
+  <script defer src="/brand-shell.js"></script>
+<link rel="stylesheet" href="/workflow-polish.css">
+<link rel="stylesheet" href="/creative-workflow.css">
+<link rel="stylesheet" href="/trunk-workspace-theme.css">
+<link rel="stylesheet" href="/resource-center.css">
+<link rel="stylesheet" href="/resource-ui.css">
+<link rel="stylesheet" href="/plant-unit-inspector.css">
+<link rel="stylesheet" href="/resource-studio.css">
+<link rel="stylesheet" href="/resource-browser.css">
+<link rel="stylesheet" href="/plant-unit-workbench.css">
+<link rel="stylesheet" href="/branch-asset-inspector.css">
+<link rel="stylesheet" href="/unit-preparation.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <button class="brand" id="brandHome" title="打开树鸭儿欢迎页" aria-label="树鸭儿 · 欢迎页">
+        <img class="brand-mark" src="/brand/tree-duck-v5-256.png" alt="">
+        <span class="brand-copy"><strong>树鸭儿</strong><small>鸭儿 · 植物创作工坊</small></span>
+      </button>
+      <div class="top-actions project-actions">
+        <button id="newBtn" class="icon-text"><i data-lucide="file-plus-2"></i><span>新建</span></button>
+        <label class="icon-text file-button" for="projectInput" tabindex="0" role="button" title="打开工程文件"><i data-lucide="folder-open"></i><span>打开</span></label>
+        <input id="projectInput" type="file" accept=".branch.json,.json" hidden>
+        <div class="project-save-group" role="group" aria-label="工程保存">
+          <button id="saveProjectBtn" class="icon-text"><i data-lucide="save"></i><span>保存工程</span></button>
+        </div>
+        <button id="openProjectLibrary" class="icon-text" title="整树样板与已保存工程"><i data-lucide="trees"></i><span>工程库</span></button>
+        <div class="project-history-group" role="group" aria-label="撤销与重做">
+          <button id="undoBtn" title="撤销 (Ctrl+Z)" aria-label="撤销 (Ctrl+Z)" disabled><i data-lucide="undo-2"></i></button>
+          <button id="redoBtn" title="重做 (Ctrl+Y)" aria-label="重做 (Ctrl+Y)" disabled><i data-lucide="redo-2"></i></button>
+        </div>
+      </div>
+      <div class="top-actions build-actions">
+        <button id="randomSeedBtn" class="icon-text"><i data-lucide="dices"></i><span>新变体</span></button>
+        <button id="buildBtn" class="icon-text primary"><i data-lucide="refresh-cw"></i><span>生成</span></button>
+        <button id="brandExportOpen" class="icon-text accent" aria-haspopup="dialog"><i data-lucide="download"></i><span>导出模型</span></button>
+      </div>
+    </header>
+    <dialog id="brandExportDialog" class="brand-dialog" aria-labelledby="brandExportTitle">
+      <div class="brand-dialog-heading"><div><span class="brand-kicker">交付你的创作</span><h2 id="brandExportTitle">把植物带到你的场景</h2></div><button data-brand-close aria-label="关闭导出面板">×</button></div>
+      <p class="brand-caption">保存工程用于继续编辑。导出用于 UE 或其他创作软件。</p>
+      <div class="brand-export-grid">
+        <section class="brand-export-card"><h3>通用网格</h3><p>独立网格与贴图，选择适合目标软件的格式。</p>
+        <select id="exportFormat" aria-label="导出格式" title="导出格式"><option value="GLB">高模 GLB · PVE</option><option value="FBX">FBX · 传统导出</option></select>
+        <button id="exportBtn" class="icon-text accent"><i data-lucide="download"></i><span>导出高模 GLB</span></button>
+        </section><section class="brand-export-card"><h3>UE · 骨架与装配</h3><p>首选完整单元枝包，交付可复用模型与实际装配。旧版骨架数据不含完整单元枝模型，仅用于兼容旧流程。</p>
+        <button id="exportPveSkeletonBtn" class="icon-text" title="旧版骨架数据，不含完整单元枝模型；完整装配请选择 UE/PVE 完整单元枝包"><i data-lucide="network"></i><span>旧版骨架数据</span></button>
+        <button id="exportPveCompleteBtn" class="icon-text" title="保存当前整树或藤蔓工程，导出骨架、素材网格、图集、实际装配及验证报告；藤蔓不包含承载模型"><i data-lucide="package"></i><span>UE/PVE 完整单元枝包</span></button>
+        </section><section class="brand-export-card"><h3>UE · 静态植被</h3><p>藤蔓静态装配，共享叶片与材质，不包含承载模型。</p>
+        <button id="exportStaticVegetationBtn" class="icon-text" title="藤蔓：导出 UE 5.8 官方 USD 静态装配，共享叶片，保留实际形状；不包含承载模型"><i data-lucide="boxes"></i><span>导出 UE 静态植被</span></button>
+        </section>
+        <button id="exportLod0GlbBtn" class="icon-text" hidden title="导出完整精度 GLB，内嵌贴图，不输出其他文件" aria-label="导出高模 GLB"><i data-lucide="file-down"></i><span>导出高模 GLB</span></button>
+      </div>
+      <p class="brand-caption">更多批量、层级与输出路径设置，仍在左侧「输出 / 导出」中。</p>
+    </dialog>
+
+    <main class="workspace">
+      <aside class="parameter-panel">
+        <nav class="parameter-tabs" aria-label="参数分类">
+          <button class="tab-button active" data-tab="structure"><i data-lucide="network"></i><span>枝条</span></button>
+          <button class="tab-button" data-tab="assembly"><i data-lucide="git-branch"></i><span>单元枝</span></button>
+          <button class="tab-button" data-tab="foliage"><i data-lucide="leaf"></i><span>叶片</span></button>
+          <button class="tab-button" data-tab="edit"><i data-lucide="mouse-pointer-2"></i><span>编辑</span></button>
+          <button class="tab-button" data-tab="state"><i data-lucide="sun-medium"></i><span>状态</span></button>
+          <button class="tab-button" data-tab="output"><i data-lucide="package-check"></i><span>输出</span></button>
+        </nav>
+
+        <div class="parameter-scroll">
+          <div class="tab-page active" data-page="structure">
+            <section class="parameter-section">
+              <div class="section-title"><h2>枝条配置</h2><span id="branchCountMini">0 枝段</span></div>
+              <label>模型名称<input id="objectName" type="text" value="程序化树枝单元"></label>
+              <label>树种配置<select id="speciesProfile">
+                <option value="BROADLEAF">阔叶树通用枝</option><option value="WILLOW">垂柳长枝</option>
+                <option value="CONIFER">针叶层状枝</option><option value="SHRUB">灌木密集枝</option><option value="FRUIT">果树短枝</option>
+              </select></label>
+              <label>结构形态<select id="architecture">
+                <option value="SPREADING">自然展开</option><option value="UPRIGHT">向上生长</option>
+                <option value="HORIZONTAL">水平侧枝</option><option value="DROOPING">下垂枝</option>
+                <option value="LAYERED">层状枝</option><option value="FORKED">主叉枝</option>
+              </select></label>
+              <div class="field-grid">
+                <label>随机种子<input id="seed" type="number" value="12037" min="1" max="2147483646" step="1"></label>
+                <label>分叉层级<select id="branchLevels"><option>1</option><option>2</option><option selected>3</option><option>4</option></select></label>
+              </div>
+            </section>
+
+            <section class="parameter-section">
+              <h2>主枝尺寸</h2>
+              <div class="field-grid">
+                <label>长度（m）<input id="length" type="number" value="2.4" min="0.2" max="12" step="0.05"></label>
+                <label>基部直径（cm）<input id="baseDiameter" type="number" value="14" min="0.8" max="120" step="0.2"></label>
+                <label>末端直径（cm）<input id="tipDiameter" type="number" value="1.2" min="0.1" max="30" step="0.1"></label>
+                <label>长度分段<input id="mainSegments" type="number" value="20" min="6" max="80" step="1"></label>
+                <label>截面边数<input id="radialSegments" type="number" value="9" min="4" max="20" step="1"></label>
+                <label>表面起伏<input id="surfaceRoughness" type="number" value="0.06" min="0" max="0.35" step="0.01"></label>
+                <label>枝杈膨大<input id="junctionFlare" type="number" value="0.18" min="0" max="1" step="0.05"></label>
+                <label>截面类型<select id="crossSection"><option value="CIRCLE">圆形</option><option value="OVAL">椭圆</option><option value="LOBED">棱脊</option></select></label>
+                <label>截面宽高比<input id="ovalRatio" type="number" value="1" min="0.25" max="2.5" step="0.05"></label>
+                <label>棱脊数量<input id="lobeCount" type="number" value="5" min="2" max="12" step="1"></label>
+                <label>棱脊强度<input id="lobeStrength" type="number" value="0.08" min="0" max="0.45" step="0.01"></label>
+                <label>树皮 U 接缝（°）<input id="barkSeam" type="number" value="0" min="-180" max="180" step="1"></label>
+                <label>树皮平铺密度<input id="barkTiling" type="number" value="1" min="0.1" max="10" step="0.1"></label>
+                <label>曲率细分<input id="curvatureDetail" type="number" value="0.6" min="0" max="2" step="0.05"></label>
+                <label>半径偏置<input id="radiusBias" type="number" value="0" min="-0.8" max="0.8" step="0.05"></label>
+                <label>截面滚转（°）<input id="sectionRoll" type="number" value="0" min="-180" max="180" step="1"></label>
+                <label>纵向沟槽数<input id="grooveCount" type="number" value="7" min="2" max="20" step="1"></label>
+                <label>沟槽深度<input id="grooveDepth" type="number" value="0" min="0" max="0.35" step="0.01"></label>
+                <label>树瘤强度<input id="knotStrength" type="number" value="0" min="0" max="0.5" step="0.01"></label>
+              </div>
+              <div class="switch-list">
+                <label><span>自适应曲率细分</span><input id="adaptiveTessellation" type="checkbox" checked></label>
+                <label><span>生成枝杈封闭套环</span><input id="junctionCollar" type="checkbox" checked></label>
+              </div>
+            </section>
+
+            <section class="parameter-section">
+              <h2>生长姿态</h2>
+              <div class="range-field"><div><label for="bend">弯曲</label><output id="bendValue">0.20</output></div><input id="bend" type="range" value="0.2" min="0" max="1" step="0.01"></div>
+              <div class="range-field"><div><label for="gravity">重力下垂</label><output id="gravityValue">0.16</output></div><input id="gravity" type="range" value="0.16" min="0" max="1.5" step="0.01"></div>
+              <div class="range-field"><div><label for="phototropism">向光性</label><output id="phototropismValue">0.14</output></div><input id="phototropism" type="range" value="0.14" min="-1" max="1" step="0.01"></div>
+              <div class="field-grid">
+                <label>主枝仰角（°）<input id="rootElevation" type="number" value="90" min="0" max="90" step="1"></label>
+                <label>水平朝向（°）<input id="rootAzimuth" type="number" value="0" min="-180" max="180" step="1"></label>
+                <label>弯曲频率<input id="bendFrequency" type="number" value="1.35" min="0.2" max="5" step="0.05"></label>
+                <label>截面扭转（°）<input id="twist" type="number" value="22" min="-180" max="180" step="1"></label>
+              </div>
+            </section>
+
+            <section class="parameter-section">
+              <h2>分叉规则</h2>
+              <div class="field-grid">
+                <label>首级侧枝数<input id="childCount" type="number" value="6" min="0" max="14" step="1"></label>
+                <label>数量递减<input id="childDecay" type="number" value="0.58" min="0.15" max="0.95" step="0.01"></label>
+                <label>长度继承<input id="childLengthRatio" type="number" value="0.48" min="0.12" max="0.85" step="0.01"></label>
+                <label>粗度继承<input id="childRadiusRatio" type="number" value="0.56" min="0.15" max="0.85" step="0.01"></label>
+                <label>分叉角度（°）<input id="branchAngle" type="number" value="42" min="5" max="88" step="1"></label>
+                <label>角度变化（°）<input id="angleVariation" type="number" value="13" min="0" max="45" step="1"></label>
+                <label>叶序角（°）<input id="phyllotaxisAngle" type="number" value="137.5" min="1" max="359" step="0.5"></label>
+                <label>不对称度<input id="asymmetry" type="number" value="0.18" min="0" max="1" step="0.01"></label>
+              </div>
+            </section>
+
+            <section class="parameter-section">
+              <h2>独立随机流</h2>
+              <div class="field-grid">
+                <label>拓扑<input id="topologySeed" type="number" value="12037" min="1" max="2147483646"></label>
+                <label>枝形<input id="shapeSeed" type="number" value="22040" min="1" max="2147483646"></label>
+                <label>叶片<input id="foliageSeed" type="number" value="32044" min="1" max="2147483646"></label>
+                <label>损伤<input id="damageSeed" type="number" value="42046" min="1" max="2147483646"></label>
+              </div>
+              <button id="syncSeedsBtn" class="wide-button"><i data-lucide="shuffle"></i><span>由主种子重置四组随机流</span></button>
+            </section>
+
+            <section class="parameter-section">
+              <h2>多主枝与空间约束</h2>
+              <div class="field-grid">
+                <label>主枝数量<input id="rootCount" type="number" value="1" min="1" max="8" step="1"></label>
+                <label>主枝展开（°）<input id="rootSpread" type="number" value="10" min="0" max="80" step="1"></label>
+                <label>根部散布（m）<input id="rootOffset" type="number" value="0" min="0" max="2" step="0.02"></label>
+                <label>轮廓包络<select id="envelopeType"><option value="NONE">关闭</option><option value="SPHERE">椭球冠</option><option value="CONE">锥形冠</option><option value="FAN">扇形</option><option value="FLAT">平面化</option></select></label>
+                <label>包络半径（m）<input id="envelopeRadius" type="number" value="2.4" min="0.1" max="20" step="0.1"></label>
+                <label>包络高度（m）<input id="envelopeHeight" type="number" value="3.2" min="0.1" max="20" step="0.1"></label>
+                <label>约束强度<input id="envelopeStrength" type="number" value="0.65" min="0" max="1" step="0.05"></label>
+                <label>平面厚度<input id="envelopeFlatness" type="number" value="1" min="0.02" max="1" step="0.02"></label>
+              </div>
+              <div class="switch-list">
+                <label><span>启用吸引点</span><input id="attractorEnabled" type="checkbox"></label>
+                <label><span>启用排斥体</span><input id="repellerEnabled" type="checkbox"></label>
+              </div>
+              <div class="field-grid">
+                <label>吸引 X<input id="attractorX" type="number" value="0" step="0.1"></label><label>吸引 Y<input id="attractorY" type="number" value="0" step="0.1"></label>
+                <label>吸引 Z<input id="attractorZ" type="number" value="3" step="0.1"></label><label>吸引强度<input id="attractorStrength" type="number" value="0.35" min="0" max="2" step="0.05"></label>
+                <label>排斥 X<input id="repellerX" type="number" value="0" step="0.1"></label><label>排斥 Y<input id="repellerY" type="number" value="0" step="0.1"></label>
+                <label>排斥 Z<input id="repellerZ" type="number" value="1.5" step="0.1"></label><label>排斥半径<input id="repellerRadius" type="number" value="1" min="0.05" max="20" step="0.1"></label>
+                <label>排斥强度<input id="repellerStrength" type="number" value="0.5" min="0" max="2" step="0.05"></label>
+              </div>
+            </section>
+          </div>
+
+          <div class="tab-page" data-page="assembly"></div>
+          <div class="tab-page" data-page="foliage">
+            <section class="parameter-section import-section">
+              <div class="section-title"><h2>叶片网格</h2><span id="leafSourceBadge">内置阔叶</span></div>
+              <label class="drop-zone" id="leafDropZone" for="leafInput">
+                <i data-lucide="upload-cloud"></i><strong>添加 OBJ 叶片网格</strong><span>可多选，叶柄朝向所选生长轴</span>
+              </label>
+              <input id="leafInput" type="file" accept=".obj,text/plain" multiple hidden>
+              <div id="leafSourceList" class="resource-list"></div>
+              <div class="field-grid">
+                <label>原网格生长轴<select id="sourceAxis"><option value="Y">Y 轴</option><option value="Z">Z 轴</option><option value="X">X 轴</option></select></label>
+                <label>叶片类型<select id="leafType"><option value="MESH">实体叶片</option><option value="CARD">透明卡片</option></select></label>
+                <label>叶簇模式<select id="foliageMode"><option value="SINGLE">单叶</option><option value="COMPOUND">复叶</option><option value="NEEDLE_BUNDLE">针叶束</option><option value="CLUSTER">预制叶簇</option></select></label>
+              </div>
+              <button id="resetLeafBtn" class="wide-button"><i data-lucide="rotate-ccw"></i><span>恢复内置叶片</span></button>
+            </section>
+
+            <section class="parameter-section">
+              <h2>分布规则</h2>
+              <label>叶片排列<select id="leafArrangement">
+                <option value="ALTERNATE">互生</option><option value="OPPOSITE">对生</option>
+                <option value="WHORLED">轮生</option><option value="CLUSTERED">簇生</option>
+              </select></label>
+              <div class="field-grid">
+                <label>密度（片/m）<input id="leafDensity" type="number" value="22" min="0" max="120" step="1"></label>
+                <label>长度（m）<input id="leafScale" type="number" value="0.16" min="0.01" max="1.2" step="0.01"></label>
+                <label>宽长比<input id="leafAspect" type="number" value="0.46" min="0.04" max="1.5" step="0.01"></label>
+                <label>尺寸变化<input id="leafScaleVariation" type="number" value="0.22" min="0" max="0.8" step="0.01"></label>
+                <label>新老叶分层<input id="leafAgeLayering" type="number" value="0" min="0" max="1" step="0.05" title="根据枝梢与树冠位置分配标记为嫩叶、过渡叶、成熟叶的单元；0 为原有随机分布"></label>
+                <label>枝丫内层半径<input id="leafShootInner" type="number" value="0.3" min="0.05" max="0.8" step="0.01"></label>
+                <label>枝丫外层起点<input id="leafShootOuter" type="number" value="0.58" min="0.1" max="0.95" step="0.01"></label>
+                <label>中层混合枝丫<input id="leafShootMidMix" type="number" value="0.32" min="0" max="0.8" step="0.01"></label>
+                <label>外层嫩绿枝丫<input id="leafShootOuterYoung" type="number" value="0.4" min="0" max="0.8" step="0.01"></label>
+                <label>深绿枝丫总占比<input id="leafShootMatureShare" type="number" value="0.4" min="0" max="1" step="0.01"></label>
+                <label>混合枝丫总占比<input id="leafShootMixedShare" type="number" value="0.5" min="0" max="1" step="0.01"></label>
+                <label>起始区域<input id="leafZoneStart" type="number" value="0.3" min="0" max="0.9" step="0.01"></label>
+                <label>末端聚集<input id="tipCluster" type="number" value="0.18" min="0" max="1" step="0.01"></label>
+                <label>向外展开<input id="leafOutward" type="number" value="0.72" min="0" max="1.5" step="0.01"></label>
+                <label>叶片下垂<input id="leafDroop" type="number" value="0.18" min="0" max="1" step="0.01"></label>
+                <label>扭转变化（°）<input id="leafTwist" type="number" value="18" min="0" max="180" step="1"></label>
+                <label>最小间距（m）<input id="leafMinSpacing" type="number" value="0.025" min="0" max="0.4" step="0.005"></label>
+                <label>单簇叶片数<input id="clusterLeafCount" type="number" value="5" min="1" max="24" step="1"></label>
+                <label>簇展开角（°）<input id="clusterSpread" type="number" value="42" min="0" max="160" step="1"></label>
+                <label>叶柄长度（m）<input id="petioleLength" type="number" value="0.025" min="0" max="0.4" step="0.005"></label>
+                <label>向光响应<input id="leafLightResponse" type="number" value="0.2" min="-1" max="1" step="0.05"></label>
+                <label>枝干净距（m）<input id="branchClearance" type="number" value="0.012" min="0" max="0.3" step="0.005"></label>
+              </div>
+              <div class="switch-list">
+                <label><span>按枝丫位置分区配色</span><input id="leafShootZoning" type="checkbox"></label>
+                <label><span>按整树占比分配枝丫</span><input id="leafShootQuota" type="checkbox"></label>
+                <label><span>空间避让</span><input id="collisionAvoidance" type="checkbox" checked></label>
+                <label><span>双面叶片</span><input id="leafDoubleSided" type="checkbox" checked></label>
+              </div>
+            </section>
+
+            <section class="parameter-section">
+              <div class="section-title"><h2>叶片体积遮罩</h2><span>局部排除/保留</span></div>
+              <div class="field-grid">
+                <label>模式<select id="maskMode"><option value="EXCLUDE">排除</option><option value="INCLUDE">仅保留</option></select></label>
+                <label>形状<select id="maskShape"><option value="SPHERE">球体</option><option value="BOX">盒体</option></select></label>
+                <label>中心 X<input id="maskX" type="number" value="0" step="0.1"></label><label>中心 Y<input id="maskY" type="number" value="0" step="0.1"></label>
+                <label>中心 Z<input id="maskZ" type="number" value="1" step="0.1"></label><label>尺寸/半径<input id="maskSize" type="number" value="0.5" min="0.01" max="20" step="0.05"></label>
+              </div>
+              <button id="addMaskBtn" class="wide-button"><i data-lucide="circle-off"></i><span>添加叶片遮罩</span></button>
+              <div id="maskList" class="modifier-list"></div>
+            </section>
+
+            <section class="parameter-section">
+              <div class="section-title"><h2>统一附着物层</h2><span id="attachmentLayerCount">1 层</span></div>
+              <div class="field-grid">
+                <label>类型<select id="attachmentType"><option value="LEAF">叶片</option><option value="NEEDLE">针叶</option><option value="FLOWER">花</option><option value="FRUIT">果实</option><option value="THORN">刺</option><option value="DEAD_LEAF">枯叶</option><option value="CUSTOM">自定义网格</option></select></label>
+                <label>层名称<input id="attachmentName" type="text" value="附着层"></label>
+                <label>密度倍率<input id="attachmentDensity" type="number" value="1" min="0" max="5" step="0.05"></label>
+                <label>尺寸倍率<input id="attachmentScale" type="number" value="1" min="0.02" max="5" step="0.05"></label>
+                <label>最低层级<input id="attachmentOrderMin" type="number" value="1" min="0" max="3"></label>
+                <label>最高层级<input id="attachmentOrderMax" type="number" value="3" min="0" max="3"></label>
+                <label>起始位置<input id="attachmentStart" type="number" value="0.3" min="0" max="1" step="0.05"></label>
+                <label>结束位置<input id="attachmentEnd" type="number" value="1" min="0" max="1" step="0.05"></label>
+                <label>最低健康度<input id="attachmentHealthMin" type="number" value="0" min="0" max="1" step="0.05"></label>
+                <label>最低向光量<input id="attachmentLightMin" type="number" value="0" min="0" max="1" step="0.05"></label>
+                <label>季节<select id="attachmentSeason"><option value="ANY">全部</option><option value="BUD">萌芽</option><option value="SPRING">春</option><option value="SUMMER">夏</option><option value="AUTUMN">秋</option><option value="WINTER">冬</option><option value="DEAD">枯死</option></select></label>
+                <label>源网格索引<input id="attachmentSource" type="number" value="-1" min="-1" max="31"></label>
+              </div>
+              <button id="addAttachmentLayerBtn" class="wide-button"><i data-lucide="layers-3"></i><span>添加附着物层</span></button>
+              <div id="attachmentLayerList" class="modifier-list"></div>
+            </section>
+
+            <section class="parameter-section">
+              <h2>附属生长物</h2>
+              <div class="switch-list">
+                <label><span>生成芽点</span><input id="budsEnabled" type="checkbox"></label>
+                <label><span>生成果实</span><input id="fruitEnabled" type="checkbox"></label>
+              </div>
+              <label>果实密度<input id="fruitDensity" type="number" value="0.05" min="0" max="0.5" step="0.01"></label>
+            </section>
+          </div>
+
+          <div class="tab-page" data-page="edit">
+            <section id="bundlePanel" class="parameter-section">
+              <div class="section-title"><h2>枝束选择与变换</h2><span id="bundleSelectionCount">0 枝</span></div>
+              <div class="bundle-tool-grid" role="toolbar" aria-label="枝束编辑工具">
+                <button data-viewport-tool="SELECT" title="点选枝条 (V；Q 也可用)" aria-keyshortcuts="V Q"><i data-lucide="mouse-pointer-2"></i></button>
+                <button data-viewport-tool="BOX_SELECT" title="框选枝条"><i data-lucide="box-select"></i></button>
+                <button data-viewport-tool="LASSO_SELECT" title="套索选择"><i data-lucide="lasso-select"></i></button>
+                <button data-viewport-tool="BUNDLE_MOVE" title="移动枝束"><i data-lucide="move-3d"></i></button>
+                <button data-viewport-tool="BUNDLE_ROTATE" title="旋转枝束"><i data-lucide="rotate-3d"></i></button>
+                <button data-viewport-tool="BUNDLE_SCALE" title="缩放枝束形状"><i data-lucide="scaling"></i></button>
+              </div>
+              <label>区域选择<select id="regionOperation"><option value="REPLACE">替换选择</option><option value="ADD">添加到选择（Shift）</option><option value="SUBTRACT">从选择减去（Ctrl）</option></select></label>
+              <div class="bundle-tool-grid" role="toolbar" aria-label="选择范围操作">
+                <button data-selection-action="ALL" title="全选可见枝条"><i data-lucide="square-check"></i></button>
+                <button data-selection-action="NONE" title="清空选择"><i data-lucide="square"></i></button>
+                <button data-selection-action="INVERT" title="反选可见枝条"><i data-lucide="replace"></i></button>
+                <button data-selection-action="SUBTREE" title="选择完整枝束"><i data-lucide="network"></i></button>
+                <button data-selection-action="GROW" title="扩大选择一级"><i data-lucide="list-plus"></i></button>
+                <button data-selection-action="SHRINK" title="收缩选择一级"><i data-lucide="list-minus"></i></button>
+              </div>
+              <button id="isolateSelectionBtn" class="wide-button" title="隔离选中枝束或恢复全树（/）" aria-pressed="false"><i data-lucide="focus"></i><span>隔离 / 显示全部</span></button>
+              <div class="subtool-block" id="branchMountPanel">
+                <div class="section-title"><h2>枝束挂接调整</h2></div>
+                <div class="switch-list"><label><span>点选时显示枝根三轴旋转环</span><input id="mountRotationHandles" type="checkbox" checked></label></div>
+                <p id="branchMountHint" class="hint">请选择一束承重侧枝。</p>
+                <p class="hint">整树快捷键：Shift+D 复制整束并放置；G 沿枝移动，靠近其他枝干可换挂点；R 绕枝根旋转，再按 X/Y/Z 选择轴；两者保持枝长。S 从枝根缩放承重枝干及下级枝干，单元枝只跟随挂点、大小保持。Alt+S 只调枝干粗细：选整枝调整束，选中间点调后段。左键或 Enter 确认，Esc 取消。</p>
+                <div class="field-grid">
+                  <label>沿母干位置（%）<input id="mountAttach" type="number" min="0" max="100" step="1" value="50"></label>
+                  <label>环绕方向（°）<input id="mountAzimuth" type="number" min="-180" max="180" step="5" value="0"></label>
+                  <label>展开角度（°）<input id="mountElevation" type="number" min="-170" max="170" step="5" value="0"></label>
+                </div>
+                <p class="hint">点选枝条后，拖动枝根连接点可沿母干移动整束；拖动红 X、绿 Y、蓝 Z 旋转环可调整倾斜和朝向，旋转时枝根固定。松手确认，Esc 取消。也可输入位置：0% 母干根部，100% 母干末端。数值角度相对开始挂接编辑时的姿态；展开正值向外下压，负值向上收拢。回车或离开输入框更新，单元枝尺寸不变。</p>
+              </div>
+              <div id="bundleTransformOptions" hidden>
+                <label>变换中心<select id="bundlePivot"><option value="CENTER">共同中心</option><option value="ACTIVE_ROOT">当前枝根</option><option value="INDIVIDUAL">各自枝根</option><option value="CUSTOM">自定义中心</option></select></label>
+                <div class="field-grid bundle-three-fields">
+                  <label>中心 X<input id="bundlePivotX" type="number" value="0" step="0.05"></label>
+                  <label>中心 Y<input id="bundlePivotY" type="number" value="0" step="0.05"></label>
+                  <label>中心 Z<input id="bundlePivotZ" type="number" value="0" step="0.05"></label>
+                </div>
+                <button id="editBundlePivot" class="wide-button" title="用移动手柄调整自定义中心"><i data-lucide="crosshair"></i><span>编辑变换中心</span></button>
+                <div class="switch-list"><label><span>固定连接点</span><input id="bundleKeepRoots" type="checkbox" checked></label></div>
+                <div class="section-title"><h2 id="bundleNumericLabel">移动距离（m）</h2></div>
+                <div class="field-grid bundle-three-fields">
+                  <label>X<input id="bundleValueX" type="number" value="0" step="0.1"></label>
+                  <label>Y<input id="bundleValueY" type="number" value="0" step="0.1"></label>
+                  <label>Z<input id="bundleValueZ" type="number" value="0" step="0.1"></label>
+                </div>
+                <button id="applyBundleTransform" class="wide-button"><i data-lucide="check"></i><span>应用变换</span></button>
+              </div>
+            </section>
+            <section id="sculptPanel" class="parameter-section">
+              <div class="section-title"><h2>树势雕刻</h2><span id="sculptTargetCount">0 根枝条</span></div>
+              <div class="sculpt-mode-grid" role="toolbar" aria-label="树势雕刻工具">
+                <button data-viewport-tool="RETRACT" title="沿原枝路回缩：按住向下拖动"><i data-lucide="move-down-left"></i></button>
+                <button data-viewport-tool="GRAB" title="拉动 (B)：区域抓取" aria-keyshortcuts="B"><i data-lucide="hand"></i></button>
+                <button data-viewport-tool="COMB" title="保长梳理 (C)：沿拖动方向弯曲，保持枝长与粗细" aria-keyshortcuts="C"><i data-lucide="wind"></i></button>
+                <button data-viewport-tool="BEND_BRUSH" title="弯压枝束"><i data-lucide="corner-down-right"></i></button>
+                <button data-viewport-tool="SMOOTH_BRUSH" title="平滑枝条"><i data-lucide="waves"></i></button>
+                <button data-viewport-tool="PUSH_PULL" title="前后推拉"><i data-lucide="move-3d"></i></button>
+                <button data-viewport-tool="SPREAD" title="收拢与展开"><i data-lucide="expand"></i></button>
+                <button data-viewport-tool="TWIST_BRUSH" title="扭转枝束"><i data-lucide="rotate-3d"></i></button>
+                <button data-viewport-tool="GUIDE" title="走势引导"><i data-lucide="route"></i></button>
+                <button data-viewport-tool="PROTECT" title="绘制保护蒙版，Alt 擦除"><i data-lucide="shield-plus"></i></button>
+              </div>
+              <p class="hint">V 点选 · C 保长梳理 · B 拉动。F 调半径，Shift+F 调强度；左键确认 / Esc 取消。枝干上 Shift 临时平滑；Shift 框选加选，Ctrl 框选减选，Ctrl 空白框清空。</p>
+              <div class="range-field"><div><label for="sculptRadius">笔刷半径（px）</label><output id="sculptRadiusValue">160</output></div><input id="sculptRadius" type="range" min="20" max="700" step="5" value="160" title="F 调整半径；[ 缩小，] 放大"></div>
+              <div class="range-field"><div><label for="sculptStrength">强度</label><output id="sculptStrengthValue">0.65</output></div><input id="sculptStrength" type="range" min="0.05" max="1" step="0.05" value="0.65"></div>
+              <div class="range-field"><div><label for="sculptHardness">硬度</label><output id="sculptHardnessValue">0.20</output></div><input id="sculptHardness" type="range" min="0" max="0.9" step="0.05" value="0.2"></div>
+              <div class="field-grid">
+                <label>影响范围<select id="sculptScope"><option value="SURFACE">表层</option><option value="THROUGH">穿透</option><option value="SPHERE">空间球</option></select></label>
+                <label>影响深度（m）<input id="sculptDepth" type="number" min="0.05" max="30" step="0.1" value="1.5"></label>
+                <label>操作方向<select id="sculptDirection"><option value="VIEW">视图平面</option><option value="X">X 轴</option><option value="Y">Y 轴</option><option value="Z">Z 轴</option></select></label>
+                <label>枝条范围<select id="sculptSelection"><option value="SELECTED">选中枝条及子枝</option><option value="DIRECT">仅选中枝条</option><option value="ALL">全树</option></select></label>
+              </div>
+              <div class="range-field"><div><label for="sculptFlexibility">柔顺度</label><output id="sculptFlexibilityValue">0.70</output></div><input id="sculptFlexibility" type="range" min="0" max="1" step="0.05" value="0.7"></div>
+              <div class="range-field"><div><label for="sculptLength">长度保持</label><output id="sculptLengthValue">0.85</output></div><input id="sculptLength" type="range" min="0" max="1" step="0.05" value="0.85"></div>
+              <div class="switch-list"><label><span>保护主干</span><input id="sculptProtectTrunk" type="checkbox" checked></label></div>
+              <button id="clearSculptMask" class="wide-button"><i data-lucide="shield-off"></i><span>清除保护蒙版</span></button>
+            </section>
+            <section class="parameter-section">
+              <div class="section-title"><h2>分级规则</h2><span>0-3 级</span></div>
+              <div id="levelRuleList" class="level-rule-list"></div>
+            </section>
+            <section class="parameter-section profile-editor">
+              <h2>沿枝条分布曲线</h2>
+              <div class="profile-row"><span>侧枝数量</span><input class="authoring-control" data-profile="branch_density" data-point="0" type="number" value="1" min="0" max="3" step="0.05"><input class="authoring-control" data-profile="branch_density" data-point="1" type="number" value="1" min="0" max="3" step="0.05"><input class="authoring-control" data-profile="branch_density" data-point="2" type="number" value="1" min="0" max="3" step="0.05"></div>
+              <div class="profile-row"><span>侧枝长度</span><input class="authoring-control" data-profile="branch_length" data-point="0" type="number" value="0.82" min="0" max="3" step="0.05"><input class="authoring-control" data-profile="branch_length" data-point="1" type="number" value="1" min="0" max="3" step="0.05"><input class="authoring-control" data-profile="branch_length" data-point="2" type="number" value="0.68" min="0" max="3" step="0.05"></div>
+              <div class="profile-row"><span>叶片密度</span><input class="authoring-control" data-profile="leaf_density" data-point="0" type="number" value="0.45" min="0" max="3" step="0.05"><input class="authoring-control" data-profile="leaf_density" data-point="1" type="number" value="1" min="0" max="3" step="0.05"><input class="authoring-control" data-profile="leaf_density" data-point="2" type="number" value="1.2" min="0" max="3" step="0.05"></div>
+              <div class="profile-row"><span>半径轮廓</span><input class="authoring-control" data-profile="radius_taper" data-point="0" type="number" value="1" min="0" max="3" step="0.05"><input class="authoring-control" data-profile="radius_taper" data-point="1" type="number" value="1" min="0" max="3" step="0.05"><input class="authoring-control" data-profile="radius_taper" data-point="2" type="number" value="1" min="0" max="3" step="0.05"></div>
+            </section>
+            <section class="parameter-section">
+              <div class="section-title"><h2>当前枝条</h2><span id="selectedBranchLabel">未选择</span></div>
+              <div id="selectionEmpty" class="empty-state">在视口或右侧层级树中选择枝条</div>
+              <div id="branchEditor" hidden>
+                <label>批量应用方式<select id="localApplyMode"><option value="ABSOLUTE">统一赋值</option><option value="RELATIVE">相对调整（倍率 / 增量）</option></select></label>
+                <div class="field-grid">
+                  <label>长度倍率<input id="localLength" type="number" value="1" min="0.05" max="4" step="0.05"></label>
+                  <label>粗度倍率<input id="localRadius" type="number" value="1" min="0.05" max="4" step="0.05"></label>
+                  <label>弯曲倍率<input id="localBend" type="number" value="1" min="0" max="4" step="0.05"></label>
+                  <label>叶量倍率<input id="localLeaves" type="number" value="1" min="0" max="4" step="0.05"></label>
+                  <label>旋转 X（°）<input id="localRotX" type="number" value="0" step="1"></label><label>旋转 Y（°）<input id="localRotY" type="number" value="0" step="1"></label>
+                  <label>旋转 Z（°）<input id="localRotZ" type="number" value="0" step="1"></label><label>偏移 Z（m）<input id="localOffsetZ" type="number" value="0" step="0.02"></label>
+                </div>
+                <div class="switch-list">
+                  <label><span>锁定当前形状</span><input id="localLocked" type="checkbox"></label>
+                  <label><span>隐藏整条分支</span><input id="localHidden" type="checkbox"></label>
+                </div>
+                <div class="button-grid">
+                  <button id="resetBranchEdit"><i data-lucide="rotate-ccw"></i><span>重置</span></button>
+                  <button id="addChildBranch" title="局部增减枝束：给选中枝补分枝，或画新枝并自动带下级"><i data-lucide="git-fork"></i><span>增减枝束</span></button>
+                  <button id="pruneBranch" title="删除选中枝干及其子枝（Delete），Ctrl+Z 撤销"><i data-lucide="trash-2"></i><span>删除枝干</span></button>
+                  <button id="addLeafToBranch"><i data-lucide="leaf"></i><span>补叶</span></button>
+                  <button id="clearBranchLeaves"><i data-lucide="eraser"></i><span>清叶</span></button>
+                  <button id="duplicateBranch" title="Shift+D 复制整束枝条并放置，Esc 取消副本"><i data-lucide="copy-plus"></i><span>复制枝 Shift+D</span></button>
+                  <button id="mirrorBranch"><i data-lucide="flip-horizontal-2"></i><span>镜像枝</span></button>
+                </div>
+                <div class="subtool-block">
+                  <div class="section-title"><strong>曲线塑形</strong><span id="pointLabel" title="上一点 [ · 下一点 ] · 根部 Home · 枝梢 End">未选择</span></div>
+                  <button id="rebuildControlCurveBtn" type="button" title="保留当前控制点，按点位重新生成枝干走势；可撤销">按当前点更新走势</button>
+                  <p class="hint">点选中间黄色锚点后，按 R 或拖动三轴旋转环：固定前段，保长转动后段及挂接子枝。按 G 可沿当前枝条滑动该点（树形不变）。按 S 可只缩放后段并重新排列后段控制点，装配单元枝保持大小。选整枝时仍绕枝根操作。</p>
+                  <div class="curve-mode-toolbar" role="toolbar" aria-label="曲线编辑模式">
+                    <button data-curve-mode="DIRECT" title="精确移动 (1)"><i data-lucide="move-3d"></i><span>精确</span></button>
+                    <button class="active" data-curve-mode="SOFT_MOVE" title="柔性移动 (2)"><i data-lucide="blend"></i><span>柔性</span></button>
+                    <button data-curve-mode="BEND" title="弯曲枝段 (3)"><i data-lucide="route"></i><span>弯曲</span></button>
+                    <button data-curve-mode="TIP_IK" title="末端牵引 (4)"><i data-lucide="waypoints"></i><span>牵引</span></button>
+                    <button data-curve-mode="SEGMENT" title="移动后续枝段 (5)"><i data-lucide="move-up-right"></i><span>段落</span></button>
+                    <button data-curve-mode="SMOOTH" title="平滑局部曲线 (6)"><i data-lucide="waves"></i><span>平滑</span></button>
+                  </div>
+                  <div class="field-grid">
+                    <label>X<input id="pointX" type="number" value="0" step="0.02"></label><label>Y<input id="pointY" type="number" value="0" step="0.02"></label>
+                    <label>Z<input id="pointZ" type="number" value="0" step="0.02"></label><label>影响半径（m）<input id="pointFalloff" type="number" value="0.35" min="0.01" max="10" step="0.05"></label>
+                    <label>坐标空间<select id="pointCoordinateSpace"><option value="WORLD">世界</option><option value="LOCAL">沿枝条</option></select></label>
+                    <label>坐标约束<select id="pointConstraint"><option value="FREE">自由</option><option value="X">X 轴</option><option value="Y">Y 轴</option><option value="Z">Z 轴</option><option value="XY">XY 平面</option><option value="XZ">XZ 平面</option><option value="YZ">YZ 平面</option></select></label>
+                    <label>吸附间距（m）<input id="pointSnap" type="number" value="0" min="0" max="1" step="0.01"></label>
+                    <label>影响衰减<select id="pointFalloffProfile"><option value="SMOOTH">平滑</option><option value="GAUSSIAN">高斯</option><option value="LINEAR">线性</option><option value="SHARP">紧致</option></select></label>
+                    <label>长度保持<input id="pointPreserveLength" type="range" value="0.75" min="0" max="1" step="0.05"></label>
+                    <label>切线模式<select id="tangentMode"><option value="SMOOTH">平滑联动</option><option value="FREE">自由切线</option></select></label>
+                    <label>手柄长度（m）<input id="tangentLength" type="number" value="0.12" min="0.01" max="2" step="0.01"></label>
+                    <label>目标锚点数<input id="curveKnotCount" type="number" value="7" min="4" max="64" step="1"></label>
+                    <label>平滑强度<input id="curveSmoothStrength" type="range" value="0.45" min="0.05" max="1" step="0.05"></label>
+                  </div>
+                  <div class="switch-list">
+                    <label><span>固定枝根</span><input id="curveLockRoot" type="checkbox" checked></label>
+                    <label><span>子枝跟随连接</span><input id="curveAffectChildren" type="checkbox" checked></label>
+                    <label><span>拖动实体预览</span><input id="curveLivePreview" type="checkbox" checked></label>
+                  </div>
+                  <div class="button-grid">
+                    <button id="applyPointBtn"><i data-lucide="move-3d"></i><span>应用点位</span></button>
+                    <button id="pinPointBtn" title="固定或解除当前锚点 (P)"><i data-lucide="pin"></i><span>固定/解除</span></button>
+                    <button id="smoothCurveBtn" title="平滑当前锚点影响范围 (Shift+S)"><i data-lucide="waves"></i><span>平滑一次</span></button>
+                  </div>
+                  <div class="subtool-divider"><strong>点数与修剪</strong><span id="curvePointStats">0 个锚点</span></div>
+                  <div class="field-grid">
+                    <label>精简容差（m）<input id="curveSimplifyTolerance" type="number" value="0.02" min="0.0005" max="0.5" step="0.005"></label>
+                    <label>加密级别<select id="curveSubdivisionLevels"><option value="1">1 级</option><option value="2">2 级</option><option value="3">3 级</option></select></label>
+                  </div>
+                  <div class="button-grid curve-topology-actions">
+                    <button id="insertBeforeBtn" title="在当前点前一段插入锚点 (Shift+I / Shift+Insert)"><i data-lucide="circle-plus"></i><span>前段加点</span></button>
+                    <button id="insertPointBtn" title="在当前点后一段插入锚点 (I / Insert)"><i data-lucide="circle-plus"></i><span>后段加点</span></button>
+                    <button id="subdivideNeighborhoodBtn" title="加密当前点两侧的曲线段 (D)"><i data-lucide="list-plus"></i><span>局部加密</span></button>
+                    <button id="subdivideAllBtn" title="细分整条曲线的全部线段 (Shift+D)"><i data-lucide="rows-3"></i><span>全部细分</span></button>
+                    <button id="smartSimplifyBtn" title="在容差内自动删除冗余锚点 (J)"><i data-lucide="combine"></i><span>智能精简</span></button>
+                    <button id="redistributeKnotsBtn" title="按目标数量沿弧长重新分布 (M)"><i data-lucide="align-justify"></i><span>匹配点数</span></button>
+                    <button id="trimTipBtn" title="保留根部到当前点并删除枝梢 (T)"><i data-lucide="scissors"></i><span>修剪枝梢</span></button>
+                    <button id="trimRootBtn" title="保留当前点到枝梢并删除根侧 (Shift+T)"><i data-lucide="scissors-line-dashed"></i><span>修剪根侧</span></button>
+                    <button id="removePointBtn" title="Delete 删除所选控制点；端点和固定点保留"><i data-lucide="minus"></i><span>删除所选点</span></button>
+                    <button id="resetCurveBtn"><i data-lucide="rotate-ccw"></i><span>重置曲线</span></button>
+                  </div>
+                </div>
+                <div class="subtool-block">
+                  <div class="section-title"><strong>拓扑手术</strong><span>保持稳定 ID</span></div>
+                  <label>新父级 Stable ID<input id="reparentTarget" type="text" placeholder="例如 R1.2"></label>
+                  <label>连接位置<input id="reparentAttach" type="number" value="0.72" min="0.02" max="0.98" step="0.01"></label>
+                  <div class="button-grid">
+                    <button id="reparentBranchBtn"><i data-lucide="corner-up-left"></i><span>重设父级</span></button>
+                    <button id="splitBranchBtn"><i data-lucide="split"></i><span>从选中点分段</span></button>
+                    <button id="extendBranchBtn"><i data-lucide="move-up-right"></i><span>延长枝条</span></button>
+                    <button id="suppressBranchBtn"><i data-lucide="eye-off"></i><span>抑制/恢复</span></button>
+                  </div>
+                </div>
+              </div>
+            </section>
+            <section class="parameter-section">
+              <div class="section-title"><h2>多选与选择集</h2><span id="multiSelectCount">0 枝</span></div>
+              <div class="path-row"><input id="selectionSetName" type="text" placeholder="选择集名称"><button id="saveSelectionSet" title="保存选择集"><i data-lucide="bookmark-plus"></i></button></div>
+              <div id="selectionSetList" class="selection-set-list"></div>
+            </section>
+            <section class="parameter-section">
+              <h2>叶片画笔</h2>
+              <div class="brush-modes">
+                <button class="brush-mode active" data-brush="SELECT" title="选择枝条"><i data-lucide="mouse-pointer-2"></i></button>
+                <button class="brush-mode" data-brush="ADD" title="在枝条上添加叶片"><i data-lucide="paintbrush"></i></button>
+                <button class="brush-mode" data-brush="ERASE" title="擦除范围内叶片"><i data-lucide="eraser"></i></button>
+              </div>
+              <div class="field-grid">
+                <label>画笔半径（m）<input id="leafBrushRadius" type="number" value="0.2" min="0.02" max="2" step="0.02"></label>
+                <label>单次数量<input id="leafBrushCount" type="number" value="3" min="1" max="20" step="1"></label>
+              </div>
+            </section>
+            <section class="parameter-section">
+              <h2>非破坏修改栈</h2>
+              <div class="field-grid">
+                <label>修改类型<select id="modifierType"><option value="BEND">定向弯曲</option><option value="TWIST">整体扭转</option><option value="GRAVITY">附加重力</option><option value="FLATTEN">轴向压平</option><option value="SCALE">渐变缩放</option><option value="NOISE">形态扰动</option></select></label>
+                <label>作用轴<select id="modifierAxis"><option value="X">X</option><option value="Y">Y</option><option value="Z">Z</option></select></label>
+                <label>强度<input id="modifierAmount" type="number" value="0.2" min="-3" max="3" step="0.05"></label>
+                <label>最低层级<input id="modifierOrderMin" type="number" value="0" min="0" max="3"></label>
+                <label>最高层级<input id="modifierOrderMax" type="number" value="3" min="0" max="3"></label>
+                <label>起始位置<input id="modifierStart" type="number" value="0" min="0" max="1" step="0.05"></label>
+                <label>结束位置<input id="modifierEnd" type="number" value="1" min="0" max="1" step="0.05"></label>
+              </div>
+              <button id="addModifierBtn" class="wide-button"><i data-lucide="list-plus"></i><span>添加修改器</span></button>
+              <div id="modifierList" class="modifier-list"></div>
+            </section>
+          </div>
+
+          <div class="tab-page" data-page="state">
+            <section class="parameter-section">
+              <h2>生长状态</h2>
+              <label>季节<select id="season">
+                <option value="BUD">萌芽</option><option value="SPRING">春季嫩叶</option><option value="SUMMER" selected>夏季茂盛</option>
+                <option value="AUTUMN">秋季变色</option><option value="WINTER">冬季裸枝</option><option value="DEAD">枯死</option>
+              </select></label>
+              <label>枝龄<select id="age"><option value="YOUNG">幼枝</option><option value="MATURE" selected>成熟枝</option><option value="OLD">老枝</option></select></label>
+              <div class="range-field"><div><label for="health">健康度</label><output id="healthValue">100%</output></div><input id="health" type="range" value="1" min="0" max="1" step="0.01"></div>
+              <div class="range-field"><div><label for="leafLoss">脱叶比例</label><output id="leafLossValue">0%</output></div><input id="leafLoss" type="range" value="0" min="0" max="1" step="0.01"></div>
+              <div class="field-grid">
+                <label>年龄进度<input id="ageProgress" type="number" value="0.55" min="0" max="1" step="0.05"></label>
+                <label>季节进度<input id="seasonProgress" type="number" value="0.5" min="0" max="1" step="0.05"></label>
+                <label>生长活力<input id="growthVigor" type="number" value="1" min="0.1" max="1.5" step="0.05"></label>
+                <label>枯梢比例<input id="deadTipRatio" type="number" value="0" min="0" max="1" step="0.05"></label>
+                <label>复芽强度<input id="regrowth" type="number" value="0" min="0" max="1" step="0.05"></label>
+                <label>风塑形<input id="windShape" type="number" value="0" min="-1" max="1" step="0.05"></label>
+                <label>顶端优势<input id="apicalDominance" type="number" value="0.55" min="0" max="1" step="0.05"></label>
+                <label>空间竞争<input id="competition" type="number" value="0.2" min="0" max="1" step="0.05"></label>
+                <label>个体尺度<input id="individualScale" type="number" value="1" min="0.25" max="3" step="0.05"></label>
+                <label>环境受力<select id="environmentLoad"><option value="NONE">无</option><option value="SNOW">雪压</option><option value="PREVAILING_WIND">长期偏风</option><option value="CLIMBING">攀附下垂</option></select></label>
+                <label>受力强度<input id="environmentLoadAmount" type="number" value="0" min="0" max="1" step="0.05"></label>
+              </div>
+            </section>
+            <section class="parameter-section">
+              <h2>损伤状态</h2>
+              <label>损伤类型<select id="damageMode"><option value="INTACT">完整</option><option value="PRUNED">修剪</option><option value="BROKEN">折断</option><option value="STORM">风损</option></select></label>
+              <label>切口样式<select id="cutStyle"><option value="FLAT">平切</option><option value="SAW">锯切</option><option value="TORN">撕裂</option></select></label>
+              <div class="range-field"><div><label for="damageAmount">损伤程度</label><output id="damageAmountValue">0%</output></div><input id="damageAmount" type="range" value="0" min="0" max="1" step="0.01"></div>
+            </section>
+            <section class="parameter-section color-section">
+              <h2>材质色板</h2>
+              <div class="color-grid">
+                <label>树皮<input id="barkColor" type="color" value="#60452f"></label>
+                <label>夏叶<input id="leafColor" type="color" value="#3f7c45"></label>
+                <label>秋叶<input id="autumnColor" type="color" value="#b45d2b"></label>
+                <label>芽点<input id="budColor" type="color" value="#b7cf70"></label>
+                <label>果实<input id="fruitColor" type="color" value="#a94739"></label>
+              </div>
+            </section>
+
+            <section class="parameter-section">
+              <div class="section-title"><h2>状态时间线</h2><span id="timelineLabel">50%</span></div>
+              <input id="timelineTime" class="authoring-control" type="range" value="0.5" min="0" max="1" step="0.01">
+              <div class="switch-list"><label><span>应用时间线</span><input id="timelineEnabled" class="authoring-control" type="checkbox"></label><label><span>循环预览</span><input id="timelineLoop" class="authoring-control" type="checkbox"></label></div>
+              <div class="button-grid">
+                <button id="addTimelineKeyBtn"><i data-lucide="key-round"></i><span>记录关键帧</span></button>
+                <button id="savePoseBtn"><i data-lucide="bookmark"></i><span>保存姿态</span></button>
+              </div>
+              <div id="timelineKeyList" class="modifier-list"></div>
+            </section>
+
+            <section class="parameter-section">
+              <h2>分层风动力</h2>
+              <div class="field-grid">
+                <label>根部刚度<input id="rootStiffness" class="authoring-control" type="number" value="1" min="0" max="2" step="0.05"></label>
+                <label>枝条刚度<input id="branchStiffness" class="authoring-control" type="number" value="0.58" min="0" max="2" step="0.05"></label>
+                <label>末端刚度<input id="tipStiffness" class="authoring-control" type="number" value="0.18" min="0" max="2" step="0.05"></label>
+                <label>叶片颤动<input id="leafFlutter" class="authoring-control" type="number" value="0.72" min="0" max="2" step="0.05"></label>
+                <label>阵风频率<input id="gustFrequency" class="authoring-control" type="number" value="0.45" min="0" max="4" step="0.05"></label>
+                <label>湍流<input id="windTurbulence" class="authoring-control" type="number" value="0.3" min="0" max="1" step="0.05"></label>
+              </div>
+            </section>
+          </div>
+
+          <div class="tab-page" data-page="output">
+            <section class="parameter-section">
+              <h2>风动画数据</h2>
+              <label>编码模式<select id="windMode"><option value="VERTEX_COLOR">顶点色轻量模式</option><option value="HIERARCHY_TEXTURE">层级纹理模式</option></select></label>
+              <div class="range-field"><div><label for="windStrength">预览风力</label><output id="windStrengthValue">42%</output></div><input id="windStrength" type="range" value="0.42" min="0" max="1" step="0.01"></div>
+              <div class="channel-contract">
+                <span><b>R</b> 枝端弯曲</span><span><b>G</b> 层级/相位</span><span><b>B</b> 叶片颤动</span><span><b>A</b> 健康/随机</span>
+              </div>
+            </section>
+            <section class="parameter-section">
+              <h2>预览与模型预算</h2>
+              <label>视口精度（不影响高模导出）<select id="previewLod"><option value="0">完整精度</option><option value="1">标准预览</option><option value="2">简化预览</option><option value="3">远景预览</option></select></label>
+              <div class="field-grid">
+                <label>最大三角面<input id="maxTriangles" type="number" value="180000" min="1000" max="6000000" step="1000"></label>
+                <label>最大叶片<input id="maxLeaves" type="number" value="1800" min="0" max="160000" step="50"></label>
+              </div>
+              <div class="switch-list">
+                <label><span>导出四档 LOD</span><input id="exportLods" type="checkbox"></label>
+                <label><span>按材质合并</span><input id="mergeByMaterial" type="checkbox" checked></label>
+              </div>
+              <label>UE 简易碰撞<select id="collisionMode"><option value="NONE">不生成</option><option value="ROOT_CAPSULE">根部胶囊体</option><option value="MAIN_BRANCHES">主枝胶囊组</option><option value="CONVEX_PROXY">整体凸代理</option></select></label>
+              <label>导出预设<select id="exportProfile"><option value="STANDARD">常规植物</option><option value="HERO">近景高质量</option><option value="MOBILE">移动端</option><option value="SHADOW">阴影代理</option></select></label>
+              <div class="field-grid">
+                <label>生成时间门槛（ms）<input id="generationBudgetMs" type="number" value="750" min="50" max="10000" step="50"></label>
+                <label>批量数量<input id="batchCount" type="number" value="4" min="1" max="64" step="1"></label>
+                <label>Seed 步长<input id="batchSeedStep" type="number" value="101" min="1" max="100000" step="1"></label>
+                <label>UE 目标目录<input id="ueDestination" type="text" value="/Game/BranchForge"></label>
+                <label>验证地图<input id="testMap" type="text" value="/Game/Maps/BranchForge_Validation"></label>
+                <label>采样时长（s）<input id="captureDuration" type="number" value="10" min="1" max="120" step="1"></label>
+                <label>Nanite 策略<select id="nanitePolicy"><option value="AUTO">自动</option><option value="ENABLED">启用</option><option value="DISABLED">禁用</option></select></label>
+              </div>
+              <div class="switch-list">
+                <label><span>输出根部 Socket</span><input id="exportSockets" type="checkbox" checked></label>
+                <label><span>输出 PCG 元数据</span><input id="exportPcgMetadata" type="checkbox" checked></label>
+                <label><span>输出 UE 自动导入脚本</span><input id="exportUeScript" type="checkbox" checked></label>
+                <label><span>创建材质实例配置</span><input id="exportMaterialSetup" type="checkbox" checked></label>
+                <label><span>导出时间线姿态</span><input id="exportStateVariants" type="checkbox"></label>
+              </div>
+            </section>
+            <section class="parameter-section">
+              <div class="section-title"><h2>配方与变体矩阵</h2><span id="recipeBadge">未命名配方</span></div>
+              <label>配方名称<input id="recipeName" class="authoring-control" type="text" value="未命名配方"></label>
+              <label>标签<input id="recipeTags" class="authoring-control" type="text" placeholder="阔叶, 夏季, PVE"></label>
+              <div class="field-grid">
+                <label>季节矩阵<input id="matrixSeasons" type="text" value="SUMMER,AUTUMN"></label>
+                <label>年龄矩阵<input id="matrixAges" type="text" value="MATURE,OLD"></label>
+                <label>健康矩阵<input id="matrixHealth" type="text" value="1,0.65"></label>
+                <label>最大组合<input id="matrixLimit" type="number" value="16" min="1" max="64"></label>
+              </div>
+              <button id="buildVariantMatrixBtn" class="wide-button"><i data-lucide="table-properties"></i><span>生成变体矩阵候选</span></button>
+            </section>
+            <section class="parameter-section">
+              <h2>输出位置</h2>
+              <p id="exportFormatNote" class="vine-note">高模 GLB：模型、材质和贴图打包成一个文件，直接导入 UE。</p>
+              <div class="path-row"><input id="outputPath" type="text" readonly><button id="pickOutputBtn" title="选择模型输出位置"><i data-lucide="folder-search"></i></button></div>
+              <button id="batchExportBtn" class="wide-button"><i data-lucide="layers-3"></i><span>导出候选变体</span></button>
+            </section>
+          </div>
+        </div>
+      </aside>
+
+      <section class="viewport-area">
+        <div class="viewport-toolbar">
+          <div class="segmented" aria-label="视口显示模式">
+            <button class="view-mode active" data-view="SOLID" title="实体预览"><i data-lucide="box"></i></button>
+            <button class="view-mode" data-view="WIREFRAME" title="线框预览"><i data-lucide="scan"></i></button>
+            <button class="view-mode" data-view="WIND" title="风权重预览"><i data-lucide="wind"></i></button>
+            <button class="view-mode" data-view="SKELETON" title="枝条骨架"><i data-lucide="share-2"></i></button>
+          </div>
+          <div id="branchEditScopeBar"><label><span id="branchEditScopeLabel">裁切 / 雕刻范围</span><select id="branchEditScope" aria-label="编辑作用范围"><option value="SELECTED">选中枝条及子枝</option><option value="DIRECT">仅选中枝条</option><option value="ALL">全树</option></select></label><label id="unitBrushEffectRow" hidden>笔刷<select id="unitBrushEffect" aria-label="完整单元枝笔刷"><option value="TURN">整支转向</option><option value="ALIGN">取样对齐</option><option value="SPREAD">散开 / 收拢</option><option value="SCALE">大小刷</option><option value="JITTER">自然扰动</option></select></label><label id="unitCombOrientationRow" hidden>方向<select id="unitCombOrientation" aria-label="单元枝梳理方向"><option value="DRAG">跟随拖动</option><option value="DOWN">枝梢向下</option><option value="ROLL">沿枝翻转</option></select></label><span class="temporary-selection-hint" title="空白处 Shift 框选加选，Ctrl 框选减选；主枝干雕刻时在枝干上 Shift 拖动临时平滑">空白 Shift 加选 · Ctrl 减选</span><span id="branchEditScopeCount" aria-live="polite">请先选择枝条</span><span id="unitAssemblyScopeSummary" hidden aria-live="polite"></span></div>
+          <div class="viewport-tools">
+            <button id="toggleGridBtn" class="active" title="显示网格"><i data-lucide="grid-3x3"></i></button>
+            <button id="fitViewBtn" title="适应视图并保留观察方向"><i data-lucide="maximize"></i></button>
+            <button id="snapshotBtn" title="保存预览图"><i data-lucide="camera"></i></button>
+          </div>
+        </div>
+        <canvas id="viewport" tabindex="0" aria-label="植物三维编辑视口"></canvas>
+        <div class="viewport-tool-rail" role="toolbar" aria-label="视口编辑工具">
+          <button class="active" data-viewport-tool="SELECT" title="选择与控制点编辑 (V；Q 也可用)" aria-keyshortcuts="V Q"><i data-lucide="mouse-pointer-2"></i></button>
+          <button data-viewport-tool="BOX_SELECT" title="框选枝条"><i data-lucide="box-select"></i></button>
+          <button data-viewport-tool="LASSO_SELECT" title="套索选择"><i data-lucide="lasso-select"></i></button>
+          <button data-viewport-tool="BUNDLE_MOVE" title="移动枝束"><i data-lucide="move-3d"></i></button>
+          <button data-viewport-tool="BUNDLE_ROTATE" title="旋转枝束"><i data-lucide="rotate-3d"></i></button>
+          <button data-viewport-tool="BUNDLE_SCALE" title="缩放枝束形状"><i data-lucide="scaling"></i></button>
+          <span class="tool-separator"></span>
+          <button data-viewport-tool="PRUNE" title="自由剪刀刷 (Shift+Delete)"><i data-lucide="scissors"></i></button>
+          <button data-viewport-tool="LINE_PRUNE" title="直线裁切"><i data-lucide="slash"></i></button>
+          <button data-viewport-tool="ERASE_BRANCH" title="整枝删除刷"><i data-lucide="trash-2"></i></button>
+          <span class="tool-separator"></span>
+          <button data-viewport-tool="GRAB" title="拉动 (B)：区域抓取" aria-keyshortcuts="B"><i data-lucide="hand"></i></button>
+          <button data-viewport-tool="COMB" title="保长梳理 (C)：沿拖动方向弯曲，保持枝长与粗细" aria-keyshortcuts="C"><i data-lucide="wind"></i></button>
+          <button data-viewport-tool="BEND_BRUSH" title="弯压枝束"><i data-lucide="corner-down-right"></i></button>
+          <button data-viewport-tool="PUSH_PULL" title="推拉刷：上下拖动调整观察深度"><i data-lucide="move-3d"></i></button>
+          <button data-viewport-tool="SMOOTH_BRUSH" title="曲线平滑刷"><i data-lucide="waves"></i></button>
+          <button data-viewport-tool="THICKNESS" title="粗细刷：向上刷粗，向下刷细"><i data-lucide="circle-gauge"></i></button>
+          <button data-viewport-tool="RETRACT" title="沿原枝路回缩：按住向下拖动"><i data-lucide="move-down-left"></i></button>
+          <button data-viewport-tool="GROW" title="枝梢生长刷"><i data-lucide="move-up-right"></i></button>
+          <button data-viewport-tool="FORK" title="分叉笔：从母枝向外绘制新枝"><i data-lucide="git-fork"></i></button>
+          <button data-viewport-tool="SIMPLIFY_BRUSH" title="局部精简刷"><i data-lucide="combine"></i></button>
+          <button data-viewport-tool="REFINE_BRUSH" title="局部加密刷"><i data-lucide="list-plus"></i></button>
+          <span class="tool-separator"></span>
+          <button data-viewport-tool="LEAF_ADD" title="添加叶片"><i data-lucide="leaf"></i></button>
+          <button data-viewport-tool="LEAF_ERASE" title="擦除叶片"><i data-lucide="eraser"></i></button>
+          <button data-viewport-tool="WIND_SOFT" title="降低枝条刚度"><i data-lucide="feather"></i></button>
+          <button data-viewport-tool="WIND_STIFF" title="提高枝条刚度"><i data-lucide="shield"></i></button>
+        </div>
+        <svg id="pruneStrokeOverlay" class="prune-stroke-overlay" aria-hidden="true"><polyline id="pruneStrokePath"></polyline><g id="pruneHitMarkers"></g></svg>
+        <svg id="sculptOverlay" class="sculpt-overlay" aria-hidden="true" hidden><g id="sculptWeights"></g><polyline id="sculptGuide"></polyline><circle id="sculptOuter"></circle><circle id="sculptInner"></circle></svg>
+        <svg id="regionOverlay" class="region-overlay" aria-hidden="true" hidden><polygon id="regionPath"></polygon></svg>
+        <div id="isolationBadge" class="isolation-badge" hidden>隔离编辑</div>
+        <div class="viewport-badge"><span id="lodBadge">完整预览</span><span>Z-UP</span><span id="exportUnitBadge">高模 GLB</span></div>
+        <div class="axis-widget"><b class="axis-z">Z</b><b class="axis-x">X</b><b class="axis-y">Y</b></div>
+        <div id="busyOverlay" class="busy-overlay" hidden><div class="spinner"></div><strong id="busyTitle">正在生成枝条</strong></div>
+        <div class="variant-tray" aria-labelledby="branchPrefabTitle">
+          <header class="branch-prefab-heading">
+            <strong id="branchPrefabTitle">预制枝干</strong>
+            <span id="branchPrefabHint" role="status">拖到树干上安装</span>
+            <button id="addBranchPrefabBtn" class="branch-prefab-add" title="保存选中整枝为预制枝干（含下级与完整单元枝）" aria-label="保存选中整枝为预制枝干"><i data-lucide="plus"></i><span>保存选中整枝</span></button>
+          </header>
+          <div id="branchPrefabList" aria-labelledby="branchPrefabTitle"></div>
+        </div>
+      </section>
+
+      <aside class="inspector-panel">
+        <header class="inspector-header"><div><h2>资产检查</h2><span id="validationBadge" data-state="busy">等待生成</span></div></header>
+        <div class="inspector-scroll">
+          <section class="inspector-section">
+            <h3>几何统计</h3>
+            <dl class="stats-grid">
+              <div><dt>枝段</dt><dd id="statBranches">0</dd></div><div><dt>叶片</dt><dd id="statLeaves">0</dd></div>
+              <div><dt>顶点</dt><dd id="statVertices">0</dd></div><div><dt>三角面</dt><dd id="statTriangles">0</dd></div>
+              <div><dt>层级元素</dt><dd id="statElements">0</dd></div><div><dt>材质槽</dt><dd id="statMaterials">0</dd></div>
+            </dl>
+          </section>
+          <section class="inspector-section">
+            <div class="section-title"><h3>LOD 预算</h3><span id="budgetLabel">--</span></div>
+            <div id="lodBars" class="lod-bars"></div>
+          </section>
+          <section class="inspector-section">
+            <h3>层级摘要</h3>
+            <div id="hierarchySummary" class="hierarchy-summary"></div>
+          </section>
+          <section class="inspector-section branch-outliner-section">
+            <div class="section-title"><h3>枝条层级树</h3><span id="overrideCount">0 个局部修改</span></div>
+            <div id="branchOutliner" class="branch-outliner"></div>
+          </section>
+          <section class="inspector-section">
+            <h3>材质与通道</h3>
+            <ul id="channelList" class="check-list"></ul>
+          </section>
+          <section class="inspector-section grow">
+            <h3>问题与建议</h3>
+            <ul id="issueList" class="issue-list"></ul>
+          </section>
+        </div>
+      </aside>
+    </main>
+
+    <footer class="statusbar">
+      <div><span id="statusDot" data-state="busy"></span><span id="statusText">初始化生成内核</span></div>
+      <div><span id="leafSourceStatus">叶片：内置阔叶</span><span id="renderInfo">WebGL</span></div>
+    </footer>
+    <div id="toast" class="toast" hidden></div>
+  </div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

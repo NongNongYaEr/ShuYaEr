@@ -1,0 +1,209 @@
+.app-shell { grid-template-rows: 56px 38px minmax(0, 1fr) 26px; }
+.viewport-tool-rail[hidden] { display: none; }
+.quick-shaping-tools { position: absolute; z-index: 9; left: 56px; bottom: var(--prefab-clearance,78px); display: flex; gap: 3px; padding: 4px; background: #19221e; border: 1px solid #44564b; border-radius: 4px; }
+.quick-shaping-tools button { width: 29px; height: 30px; padding: 5px; background: transparent; }
+.quick-shaping-tools svg { width: 17px; height: 17px; }
+.quick-shaping-tools button.active { color: #efd26e; border-color: #c1a34d; }
+.multiview .quick-shaping-tools { bottom: calc(50% + 8px); left: 8px; }
+#pendingToolDialog { max-width: min(480px, calc(100% - 24px)); border: 1px solid #6e8576; border-radius: 5px; background: #1b2521; color: #e0e9e2; padding: 20px; }
+#pendingToolDialog::backdrop { background: #0008; }
+#pendingToolDialog .wb-row { flex-wrap: wrap; }
+#pendingToolDialog button, .continuous-tool button, #shapingActionDock button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 30px; padding: 5px 8px; border: 1px solid #53695b; border-radius: 3px; background: #25352b; color: #dbe6df; font-size: 11px; }
+#pendingToolDialog svg { width: 15px; height: 15px; }
+.continuous-tool .field-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.continuous-tool .wb-check { display: flex; align-items: center; gap: 8px; }
+.continuous-tool .wb-check input { width: 15px; }
+#strokeState, #influenceTarget { display: block; color: #84c8d1; font-size: 11px; overflow-wrap: anywhere; margin: 7px 0; }
+#shapingActionDock { border-top: 1px solid #3a5144; }
+#shapingActionDock:empty { display: none; }
+#shapingActionDock .form-actions { position: static; margin: 0; }
+.array-palette-row { display: grid; grid-template-columns: 42px minmax(0, 1fr) 45px 28px; align-items: center; gap: 5px; margin: 6px 0; }
+.array-palette-row img { width: 42px; height: 36px; object-fit: contain; background: #0c120f; }
+.array-palette-row span { overflow-wrap: anywhere; font-size: 11px; }
+.array-mix summary { color: #a5c8c4; padding: 7px 0; cursor: pointer; }
+.array-mix .wb-check { display: flex; gap: 8px; align-items: center; }
+.array-mix .wb-check input { width: 15px; }
+#shapingContext:has(.continuous-tool:not([hidden])) #shapingContextBody { max-height: 390px; }
+@media (max-width: 760px) { #shapingContext:has(.continuous-tool:not([hidden])) #shapingContextBody { max-height: none; } .quick-shaping-tools { left: 56px; gap: 1px; padding: 2px; } .quick-shaping-tools button { width: 27px; } }
+.shaping-tool-group { width: 100%; border-bottom: 1px solid #46514c; padding: 3px 0; }
+.shaping-tool-group > summary { list-style: none; cursor: pointer; color: #9fc0b4; font-size: 10px; text-align: center; padding: 3px 0; }
+.shaping-tool-buttons { display: grid; gap: 3px; }
+#branchFormContext strong { display: block; overflow-wrap: anywhere; margin-bottom: 8px; }
+#branchFormContext label:has(> output) { grid-template-columns: 1fr auto; }
+#branchFormContext label > input[type="range"] { grid-column: 1 / -1; }
+#branchFormContext output { color: #dfbf6c; }
+.form-brush-modes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; margin: 8px 0; }
+#branchFormContext button, #branchArrayContext button { min-height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 5px; font-size: 11px; border: 1px solid #485b50; border-radius: 3px; background: #243028; color: #d4e0d8; }
+#branchFormContext button.active { border-color: #d5b558; color: #efcf6f; }
+#branchFormContext .field-grid, #branchArrayContext .field-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.form-actions { position: sticky; bottom: 0; z-index: 2; background: #1b2521; margin-bottom: 0; padding: 6px 0; }
+.form-actions button:not(:first-child), #volumeUndo, #arrayDelete { flex: 0 0 30px; }
+#arrayProfileCanvas { width: 100%; height: 110px; display: block; touch-action: none; margin: 8px 0; }
+#arrayStatus, #volumeCount { font-size: 11px; color: #97c9cc; overflow-wrap: anywhere; }
+.operation-targets summary { font-size: 11px; cursor: pointer; color: #a5c3b7; margin: 6px 0; }
+#shapingContext:has(#branchFormContext:not([hidden]), #branchArrayContext:not([hidden])) #shapingContextBody { max-height: 470px; }
+@media (max-width: 760px) { #shapingContext:has(#branchFormContext:not([hidden]), #branchArrayContext:not([hidden])) #shapingContextBody { max-height: none; } }
+.branch-workspace-bar { display: flex; align-items: center; gap: 14px; padding: 3px 12px; background: #1b211f; border-bottom: 1px solid #3b4541; min-width: 0; }
+.branch-workspace-modes { display: flex; align-self: stretch; gap: 2px; }
+.branch-workspace-bar button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 4px 10px; border-radius: 3px; font-size: 12px; background: transparent; }
+.branch-workspace-bar button.active { color: #e4c56d; border-color: #85733f; background: #302f24; }
+.branch-workspace-bar svg { width: 15px; height: 15px; flex-shrink: 0; }
+#branchWorkspaceState { color: #a4b0ac; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: auto; }
+#openBranchAssembly[hidden], body[data-workbench="VINE"] #openBranchAssembly { display: none !important; }
+#branchAssemblyCount { color: #e3c66e; font-weight: 700; }
+.branch-workbench { font-size: 12px; }
+.branch-workbench input, .branch-workbench select { width: 100%; min-width: 0; }
+.branch-workbench input[type="search"] { height: 30px; padding: 5px 8px; background: #101613; border: 1px solid #3b4841; border-radius: 4px; color: #d3ded8; }
+.branch-workbench button { min-height: 29px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; font-size: 11px; padding: 5px 7px; }
+.branch-workbench svg { width: 15px; height: 15px; flex: 0 0 15px; }
+.wb-row { display: flex; align-items: end; gap: 7px; margin: 8px 0; }
+.wb-row > label { flex: 1; min-width: 0; margin: 0; }
+.wb-row > button { flex: 1; }
+.wb-row > button[aria-label] { flex: 0 0 30px; }
+.wb-tools { display: flex; gap: 5px; margin: 7px 0; flex-wrap: wrap; }
+.wb-tools button { width: 32px; height: 31px; padding: 6px; }
+.branch-workbench button.active { border-color: #d6b658; color: #e4c56d; background: #302f24; }
+.branch-workbench details { padding: 8px 0; border-top: 1px solid #35413c; }
+.branch-workbench summary { cursor: pointer; color: #c6d1cd; padding: 4px 0 8px; }
+.branch-workbench .wb-check { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.branch-workbench .wb-check input { width: 15px; height: 15px; }
+.wb-library-heading { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; border-top: 1px solid #3b4541; }
+.wb-library { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin: 8px 0; max-height: 300px; overflow: auto; }
+.wb-library > p { grid-column: 1 / -1; color: #95a5a1; margin: 10px 0; }
+.wb-library .wb-asset { display: flex; flex-direction: column; align-items: stretch; text-align: left; padding: 4px; border-radius: 4px; min-width: 0; }
+.wb-asset img { width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: #111916; }
+.wb-asset span { overflow-wrap: anywhere; font-size: 11px; line-height: 16px; }
+.wb-asset small { color: #9caaa5; font-size: 10px; }
+.wb-assembly { margin-top: 12px; }
+.wb-assembly-zone { margin: 9px 0; padding: 8px; border: 1px solid #3b5248; border-radius: 6px; background: #18251f; }
+.wb-assembly-zone > strong { display: block; margin-bottom: 6px; font-size: 12px; }
+.wb-assembly-card { display: flex; align-items: center; gap: 7px; margin: 5px 0; padding: 5px; border-radius: 4px; background: #2b4034; font-size: 11px; }
+.wb-assembly-card img { flex: 0 0 68px; width: 68px; height: 51px; object-fit: contain; border-radius: 3px; background: #111916; }
+.wb-assembly-card span { flex: 1; min-width: 0; cursor: pointer; overflow-wrap: anywhere; line-height: 1.3; }
+.wb-assembly-card small { display: block; margin-top: 4px; color: #b6cabc; font-size: 10px; }
+.wb-assembly-card button { flex: 0 0 auto; padding: 0 5px; }
+.wb-assembly-card { flex-wrap: wrap; }
+.wb-assembly-card .wb-card-scale { flex: 1 0 100%; display: flex; align-items: center; justify-content: flex-end; gap: 8px; font-size: 11px; margin: 0; }
+.wb-assembly-card .wb-card-scale input { width: 76px; min-width: 0; box-sizing: border-box; }
+.wb-assembly-scale { padding: 8px; background: #202f27; border: 1px solid #4a6958; border-radius: 4px; }
+.wb-assembly-scale > label { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
+.wb-assembly-scale input { width: 86px; box-sizing: border-box; }
+.wb-assembly-scale > small { display: block; margin-top: 6px; color: #b6cabc; font-size: 10px; line-height: 1.5; }
+.wb-assembly-scale > button { margin-top: 6px; width: 100%; }
+.wb-card-thickness { flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 5px; }
+.wb-card-thickness small { margin: 0; color: #e3c37b; }
+.wb-assembly-card .wb-card-thickness button { padding: 4px 6px; font-size: 11px; }
+.skeleton-thickness { margin-bottom: 12px; padding: 10px; border: 1px solid #4a6958; border-radius: 5px; background: #18251e; }
+.skeleton-thickness p, .skeleton-thickness small { display: block; color: #b6cabc; font-size: 11px; line-height: 1.5; margin: 7px 0; }
+.skeleton-thickness canvas { display: block; width: 100%; height: auto; background: #101a14; border-radius: 4px; margin: 8px 0; touch-action: none; }
+.skeleton-curve-values { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 4px; }
+.skeleton-curve-values label { font-size: 10px; text-align: center; }
+.skeleton-curve-values input { width: 100%; min-width: 0; padding: 4px 2px; box-sizing: border-box; }
+.wb-assembly-drop { padding: 7px; border: 1px dashed #5b8270; border-radius: 4px; color: #adc6b8; font-size: 11px; text-align: center; }
+.wb-assembly-drop:hover { background: #345440; }
+.wb-assembly-count { display: flex; align-items: end; flex-wrap: wrap; gap: 6px; margin: 10px 0 6px; }
+.wb-assembly-count > span { width: 100%; font-size: 12px; }
+.wb-assembly-count label { flex: 1; min-width: 100px; font-size: 11px; }
+.wb-assembly-count input { width: 100%; box-sizing: border-box; }
+[data-workbench="TREE"] .wb-branch-only, [data-workbench="BRANCH"] .wb-tree-only { display: none !important; }
+[data-workbench="BRANCH"] :is(.wb-tree-parameters, #generatorPanel, #spatialControlsPanel, #branchRulesPanel, #mainSizePanel) { display: none !important; }
+.wb-section-controls[hidden] { display: none; }
+.parameter-panel.has-shaping-context { grid-template-rows: 48px 42px 27px auto minmax(0, 1fr); }
+#shapingContext { border-bottom: 1px solid #56625b; padding: 8px 12px; background: #1b2521; min-height: 0; font-size: 11px; }
+#shapingContext[hidden], #shapingContext [hidden] { display: none !important; }
+.shaping-context-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
+.shaping-context-heading button, #shapingContext .wb-tools button { width: 28px; height: 27px; padding: 4px; }
+#shapingContext svg { width: 15px; height: 15px; }
+#shapingContextBody { max-height: 325px; overflow: auto; padding-right: 2px; }
+#shapingContext label { display: grid; gap: 5px; margin-bottom: 8px; color: #b8c9c1; }
+#shapingContext input, #shapingContext select { width: 100%; min-width: 0; background: #111915; color: #d9e5de; border: 1px solid #47574c; border-radius: 3px; min-height: 27px; padding: 3px 6px; }
+#shapingContext input[type="range"] { padding: 0; min-height: 16px; }
+#shapingContext .wb-check { display: flex; align-items: center; }
+#shapingContext input[type="checkbox"] { width: 15px; min-height: 15px; height: 15px; }
+#shapingContext .wb-tools { flex-wrap: nowrap; }
+#shapingContext .wb-tools select { flex: 1; width: 0; }
+#sectionProfileCanvas { display: block; width: 100%; height: 90px; touch-action: none; margin: 7px 0; }
+#sculptQuickContext label { grid-template-columns: 1fr auto; }
+#sculptQuickContext label > input, #sculptQuickContext label > select { grid-column: 1 / -1; }
+.shaping-viewport-tools { border-top: 1px solid #46514c; padding-top: 4px; display: grid; gap: 3px; }
+.multiview-switch { position: absolute; top: 66px; right: 12px; display: flex; gap: 4px; z-index: 6; }
+.multiview-switch button { width: 28px; height: 27px; padding: 5px; }
+.multiview-switch svg { width: 16px; height: 16px; }
+.orthographic-pane { position: absolute; width: 50%; height: 50%; border: 1px solid #425048; z-index: 2; overflow: hidden; background: #101915; }
+.orthographic-pane[hidden] { display: none; }
+.orthographic-pane canvas { width: 100%; height: 100%; display: block; touch-action: none; }
+.orthographic-label { position: absolute; z-index: 2; left: 7px; top: 7px; padding: 3px 5px; font-size: 10px; color: #c4d5cd; background: #17211de6; pointer-events: none; }
+.plane-XZ { top: 0; right: 0; }.plane-XY { left: 0; bottom: 0; }.plane-YZ { right: 0; bottom: 0; }
+.multiview #viewport { width: 50%; height: 50%; }
+.multiview .viewport-tool-rail { max-height: calc(50% - 60px); }
+.multiview .variant-tray, .multiview .axis-widget { display: none; }
+.multiview .viewport-badge { display: none; }
+.multiview .multiview-switch { top: 52px; right: calc(50% + 8px); }
+.multiview .viewport-toolbar { right: calc(50% + 8px); }
+.multiview::after { content: '透视'; position: absolute; left: 60px; bottom: calc(50% + 8px); z-index: 5; font-size: 10px; color: #bdcfc5; pointer-events: none; }
+#branchPlacementBar { position: absolute; z-index: 8; left: 60px; right: 12px; bottom: calc(var(--prefab-clearance,78px) - 4px); display: flex; align-items: center; gap: 8px; padding: 7px 9px; border: 1px solid var(--selected-line); background: var(--surface); font-size: 11px; }
+body.branch-placement-active .quick-shaping-tools { display: none; }
+#branchPlacementBar[hidden] { display: none; }
+#placementTarget { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+#branchPlacementBar label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+#branchPlacementBar button { flex: 0 0 28px; width: 28px; height: 28px; padding: 5px; }
+#branchPlacementBar svg { width: 16px; height: 16px; }
+.multiview #branchPlacementBar { bottom: calc(50% + 6px); left: 8px; right: calc(50% + 8px); flex-wrap: wrap; }
+#deformationContext output { float: right; color: #e2c274; }
+#deformationContext label:has(> input[type="range"]) { grid-template-columns: 1fr auto; }
+#deformationContext label > input[type="range"] { grid-column: 1 / -1; }
+#shapingContext:has(#deformationContext:not([hidden])) #shapingContextBody { max-height: 425px; }
+#deformationContext .field-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+#deformationContext .wb-row, #instanceEditContext .wb-row { align-items: center; }
+#deformationContext > .wb-row:last-child { position: sticky; bottom: 0; z-index: 1; background: #1b2521; margin-bottom: 0; padding: 6px 0; }
+#deformationContext button, #instanceEditContext button { min-height: 29px; font-size: 11px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 4px; }
+#deformationState { color: #80c9d5; margin-left: auto; }
+.retained-operation { border-bottom: 1px solid #46514c; padding: 8px 0; }
+.retained-operation .wb-tools input[type="text"] { flex: 1; width: 0; }
+.retained-operation .wb-tools span { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 10px; }
+.retained-operation .wb-tools button { flex: 0 0 28px; }
+#retainedShapeStack > button { width: 100%; min-height: 30px; margin-top: 8px; padding: 5px 8px; color: #d9e5de; background: #243129; border: 1px solid #46574c; border-radius: 3px; font-size: 11px; }
+#spaceIssues { display: grid; gap: 4px; max-height: 110px; overflow: auto; font-size: 11px; }
+#spaceIssues button { overflow-wrap: anywhere; }
+#symmetryStatus, #assetVersionImpact { font-size: 11px; overflow-wrap: anywhere; margin: 6px 0; color: #96c8cc; }
+#symmetryContext label:has(> output) { grid-template-columns: 1fr auto; }
+#symmetryContext label > input[type="range"] { grid-column: 1 / -1; }
+#symmetryContext output { color: #e2c274; }
+#deformationContext input[type="number"]:invalid { border-color: #d58f6b; }
+#symmetryContext .wb-row button { min-width: 0; white-space: normal; }
+#assetVersionDialog { width: min(680px, calc(100% - 24px)); max-height: calc(100% - 32px); overflow: auto; box-sizing: border-box; padding: 18px; border: 1px solid #566960; border-radius: 6px; color: #d9e5de; background: #17201c; }
+#assetVersionDialog::backdrop { background: #0009; }
+#assetVersionDialog h3 { font-size: 16px; margin: 0 0 12px; overflow-wrap: anywhere; }
+.asset-version-images { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.asset-version-images figure { margin: 0; min-width: 0; }
+.asset-version-images img { width: 100%; aspect-ratio: 1; object-fit: contain; display: block; background: #0c1210; }
+.asset-version-images figcaption { font-size: 12px; margin-top: 6px; }
+#assetVersionAffected { max-height: 140px; overflow: auto; overflow-wrap: anywhere; font-size: 12px; margin: 12px 0; }
+#assetVersionDialog .wb-row { justify-content: flex-end; }
+#instanceEditTarget { display: block; overflow-wrap: anywhere; line-height: 1.6; }
+#instanceLocalBar { position: absolute; z-index: 7; left: 60px; right: 12px; bottom: calc(var(--prefab-clearance,78px) + 36px); display: flex; align-items: center; gap: 7px; padding: 6px 9px; background: #22312eeF; border: 1px solid #73948a; font-size: 11px; }
+#instanceLocalBar[hidden] { display: none; }
+#instanceLocalLabel { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+#instanceLocalBar button { width: 28px; height: 28px; flex: 0 0 28px; padding: 5px; }
+#instanceLocalBar svg { width: 16px; height: 16px; }
+.multiview #instanceLocalBar { left: 8px; right: calc(50% + 8px); bottom: calc(50% + 45px); }
+@media (max-width: 760px) {
+  #shapingContext:has(#deformationContext:not([hidden])) #shapingContextBody { max-height: none; }
+  .branch-workspace-bar { gap: 6px; padding: 4px 8px; min-height: 39px; }
+  .branch-workspace-bar button { font-size: 11px; padding: 5px; }
+  #branchWorkspaceState { display: none; }
+  #extractBranchBtn { margin-left: auto; }
+  .wb-library { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  #shapingContextBody { max-height: none; }
+  .multiview .viewport-toolbar { max-width: calc(50% - 16px); }
+  .multiview .viewport-tools { display: none; }
+  .multiview .segmented button { width: 27px; height: 26px; }
+  .multiview .viewport-badge { display: none; }
+  .multiview .multiview-switch { top: 50px; }
+  .multiview .viewport-tool-rail { top: 83px; max-height: calc(50% - 90px); }
+  #branchPlacementBar { left: 8px; right: 8px; gap: 5px; }
+}
+
+body[data-unit-editing="on"] #branchEditScopeBar { display:none; }
+#unitEditorPanel button, #unitRulesPanel button { white-space:normal; }
+#ueIssues button { display:block; width:100%; text-align:left; overflow-wrap:anywhere; }

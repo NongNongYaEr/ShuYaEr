@@ -1,0 +1,18 @@
+{
+  "mode": "built-in image_gen",
+  "createdAt": "2026-10-27",
+  "references": [
+    "web/brand/tree-duck-v5.png",
+    "web/brand/guide-resources-v1.png"
+  ],
+  "assets": [
+    {
+      "file": "web/brand/resource-search-v1.png",
+      "prompt": "Use case: illustration-story. Asset type: one small decorative UI illustration for the resource center in Tree Duck plant authoring software. Input images: image 1 is the canonical Tree Duck character identity reference; image 2 is the same character and illustrated style reference. Preserve the exact recognizable mascot identity: fluffy yellow duck, large expressive dark brown eyes with white highlights, orange broad duck beak, cream-white swept spiky tuft, charcoal work goggles worn on forehead (eyes unobstructed), cobalt blue work jacket with round brass buttons. Friendly curious expression. Clean polished cartoon shading and strong smooth dark outlines matching the references, slightly simplified for readability at 160 pixels. One duck only, half-body or three-quarter body, balanced compact silhouette, centered with generous clear outer padding. True transparent background, isolated cutout, no environment, no colored rectangle, no glow, no large drop shadow, no lettering, no watermark, no UI, no panels. Primary request: Tree Duck gently examining a single green leaf through a small brass magnifying glass held in one wing, other wing resting near a tiny simple botanical sample tray. Magnifier and leaf visibly readable, goggles stay on forehead. Small calm helpful discovery gesture. Avoid unnecessary tiny details or additional tools."
+    },
+    {
+      "file": "web/brand/resource-organize-v1.png",
+      "prompt": "Use case: illustration-story. Asset type: one small decorative UI illustration for the resource center in Tree Duck plant authoring software. Input images: image 1 is the canonical Tree Duck character identity reference; image 2 is the same character and illustrated style reference. Preserve the exact recognizable mascot identity: fluffy yellow duck, large expressive dark brown eyes with white highlights, orange broad duck beak, cream-white swept spiky tuft, charcoal work goggles worn on forehead (eyes unobstructed), cobalt blue work jacket with round brass buttons. Friendly curious expression. Clean polished cartoon shading and strong smooth dark outlines matching the references, slightly simplified for readability at 160 pixels. One duck only, half-body or three-quarter body, balanced compact silhouette, centered with generous clear outer padding. True transparent background, isolated cutout, no environment, no colored rectangle, no glow, no large drop shadow, no lettering, no watermark, no UI, no panels. Primary request: Tree Duck standing behind one small open wooden resource crate, carefully placing one leafy branch into the crate with one wing and inviting with the other. Show a simple tidy crate and two or three green leaves; this symbolizes reusable plant assets stored in a resource package. Keep the crate compact and the duck face clearly readable. Avoid clutter, packing tape, shipping labels, extra crates and floating symbols."
+    }
+  ]
+}

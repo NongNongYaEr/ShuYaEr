@@ -1,16 +1,20 @@
-# Local configuration and credentials
+.runtime/
+导出/
+node_modules/
+*.exe
+*.dll
+*.blend1
+assets/
+web/assets/
+!web/assets/.gitkeep
+runtime/native/*.json
+runtime/native/*.hlsl
+
+# Local credentials and developer output
 .env
 .env.*
 !.env.example
-*.pem
-*.key
-
-# Local tools and logs
-.codex/
-.agents/
 *.log
-
-# Operating system files
-.DS_Store
-Thumbs.db
-desktop.ini
+*.pdb
+*.obj
+.vs/

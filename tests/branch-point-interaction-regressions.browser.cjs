@@ -1,0 +1,11 @@
+// Run existing real UI tests against an isolated static server. No app session,
+// live draft, project-library API or user preset folder is written.
+const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),{spawn}=require('node:child_process');
+const root=path.resolve(__dirname,'..'),web=path.join(root,'web'),mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.png':'image/png','.jpg':'image/jpeg','.svg':'image/svg+xml','.glb':'model/gltf-binary'};
+const server=http.createServer((req,res)=>{
+ const url=new URL(req.url,'http://localhost');res.setHeader('Cache-Control','no-store');
+ if(url.pathname==='/api/project-document'){const id=url.searchParams.get('id'),file=/^template-[a-f0-9]+$/.test(id||'')?path.join(root,'assets/tree-template-library',id+'.branch.json'):'';if(file&&fs.existsSync(file)){res.setHeader('Content-Type','application/json');fs.createReadStream(file).pipe(res);return;}}
+ if(url.pathname.startsWith('/api/')){res.setHeader('Content-Type','application/json');if(/project-session|project-library|saved-projects|branch-thumbnails|trunk-section-presets|trunk-presets$/.test(url.pathname))res.end(JSON.stringify({success:true,items:[]}));else{res.statusCode=404;res.end(JSON.stringify({success:false,message:'Isolated regression server'}));}return;}
+ const file=path.resolve(web,url.pathname==='/'?'index.html':'.'+decodeURIComponent(url.pathname));if(!file.startsWith(web+path.sep)||!fs.existsSync(file)||!fs.statSync(file).isFile()){res.statusCode=404;res.end();return;}res.setHeader('Content-Type',mime[path.extname(file)]||'application/octet-stream');fs.createReadStream(file).pipe(res);
+});
+(async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));try{for(const test of process.argv.slice(2)){if(!/^[a-z0-9-]+\.browser\.cjs$/.test(test))throw Error('Invalid regression name');const code=await new Promise((resolve,reject)=>{const child=spawn(process.execPath,[path.join(__dirname,test),'http://127.0.0.1:'+server.address().port],{cwd:root,windowsHide:true,stdio:'inherit'});child.on('error',reject);child.on('exit',resolve);});if(code)throw Error(test+' exited '+code);}}finally{server.closeAllConnections();await new Promise(r=>server.close(r));}})().catch(e=>{console.error(e);process.exitCode=1;});

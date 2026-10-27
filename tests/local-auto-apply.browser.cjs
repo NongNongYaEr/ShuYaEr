@@ -1,0 +1,42 @@
+const {chromium}=require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+(async()=>{
+ const out=path.resolve('.runtime/local-auto-apply');fs.mkdirSync(out,{recursive:true});const report={checks:[],errors:[]};
+ const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});let page;
+ try{
+  page=await browser.newPage({viewport:{width:1600,height:1050}});page.setDefaultTimeout(60000);page.on('pageerror',e=>report.errors.push(e.stack));
+  const wait=()=>page.waitForFunction(()=>{const f=window.__branchForge;return f?.asset&&!document.getElementById('brandStartup')&&!f.asset.group.userData.pending_rebuild&&f.asset.authoring===f.authoring&&!f.workbench.busy&&document.querySelector('#busyOverlay').hidden;});
+  const state=()=>page.evaluate(()=>({a:structuredClone(window.__branchForge.authoring),h:window.__branchForge.historyState,leaves:window.__branchForge.asset.placements.length}));
+  const select=async id=>page.locator('#branchOutliner button').filter({has:page.locator('span',{hasText:new RegExp('^'+id.replaceAll('.','\\.')+'$')})}).click();
+  await page.goto(process.argv[2]);await wait();await select('R1.1');assert.equal(await page.locator('#applyBranchEdit').count(),0);
+  const initial=await state(),slider=page.locator('#localLeaves').locator('xpath=ancestor::label').locator('input[type="range"]');
+  await slider.scrollIntoViewIfNeeded();const box=await slider.boundingBox();
+  await page.mouse.move(box.x+box.width*.4,box.y+box.height/2);await page.mouse.down();await page.mouse.move(box.x+box.width*.65,box.y+box.height/2,{steps:8});await wait();
+  const preview=await state();assert.equal(preview.h.undo,initial.h.undo);assert(preview.a.overrides['R1.1'].leaf_density>1);assert.notEqual(preview.leaves,initial.leaves);
+  await page.mouse.up();await wait();const committed=await state();assert.equal(committed.h.undo,initial.h.undo+1);assert.deepEqual(committed.a,preview.a);
+  await page.click('#undoBtn');await wait();assert.deepEqual((await state()).a,initial.a);await page.click('#redoBtn');await wait();assert.deepEqual((await state()).a,committed.a);
+  report.checks.push('真实滑块拖动实时重建叶片；松手只增加一次撤销，撤销/重做还原');
+  await page.selectOption('#localApplyMode','RELATIVE');const base=await state();await page.fill('#localLeaves','1.5');await wait();await page.fill('#localLeaves','2');await wait();
+  assert.equal((await state()).a.overrides['R1.1'].leaf_density,Math.min(4,base.a.overrides['R1.1'].leaf_density*2));
+  await page.locator('#localLeaves').press('Tab');await wait();assert.equal((await state()).h.undo,base.h.undo+1);assert.equal(await page.inputValue('#localLeaves'),'1');
+  const escapeBase=await state();await page.fill('#localLeaves','0.5');await wait();await page.keyboard.press('Escape');await wait();assert.deepEqual((await state()).a,escapeBase.a);assert.deepEqual((await state()).h,escapeBase.h);
+  await page.fill('#localLeaves','0.7');await page.fill('#localLeaves','');await page.locator('#localLeaves').press('Tab');await wait();assert.deepEqual((await state()).a,escapeBase.a);
+  await page.selectOption('#localApplyMode','ABSOLUTE');await page.locator('#branchNumericAdvanced > summary').click();await page.fill('#localRotZ','15');await page.locator('#localRotZ').press('Enter');await wait();assert.equal((await state()).a.overrides['R1.1'].rotation[2],15);
+  const rotationBase=await state();await page.fill('#localLeaves','2');await page.locator('#localLeaves').press('Tab');await wait();assert.deepEqual((await state()).a.overrides['R1.1'].rotation,rotationBase.a.overrides['R1.1'].rotation);
+  await page.check('#localLocked');await wait();assert.equal((await state()).a.overrides['R1.1'].locked,true);await page.check('#localHidden');await wait();assert.equal((await state()).a.overrides['R1.1'].hidden,true);await page.click('#undoBtn');await wait();await select('R1.1');
+  report.checks.push('相对倍率不累乘；数值回车/失焦自动提交；Esc与无效输入取消；修改叶量保留旋转，锁定/隐藏即时生效');
+  await page.locator('#branchNumericAdvanced > summary').click();await slider.scrollIntoViewIfNeeded();const cancelBase=await state(),cancelBox=await slider.boundingBox();
+  await page.mouse.move(cancelBox.x+cancelBox.width*.7,cancelBox.y+cancelBox.height/2);await page.mouse.down();await page.mouse.move(cancelBox.x+cancelBox.width*.8,cancelBox.y+cancelBox.height/2,{steps:5});await wait();await page.keyboard.press('Escape');await page.mouse.up();await wait();assert.deepEqual((await state()).a,cancelBase.a);assert.deepEqual((await state()).h,cancelBase.h);
+  const scrub=page.locator('#localLeaves').locator('xpath=ancestor::label').locator('.parameter-scrub'),sb=await scrub.boundingBox();await page.mouse.move(sb.x+10,sb.y+5);await page.mouse.down();await page.mouse.move(sb.x+35,sb.y+5,{steps:5});await wait();await page.keyboard.press('Escape');await page.mouse.up();await wait();assert.deepEqual((await state()).a,cancelBase.a);assert.deepEqual((await state()).h,cancelBase.h);
+  await page.locator('#branchOutliner button').filter({has:page.locator('span',{hasText:/^R1\.2$/})}).click({modifiers:['Control']});const mixedBase=await state();
+  await page.fill('#localLeaves','1.5');await page.locator('#localLeaves').press('Tab');await wait();const mixed=await state();assert.equal(mixed.a.overrides['R1.1'].leaf_density,1.5);assert.equal(mixed.a.overrides['R1.2'].leaf_density,1.5);assert.deepEqual(mixed.a.overrides['R1.1'].rotation,mixedBase.a.overrides['R1.1'].rotation);assert.deepEqual(mixed.a.overrides['R1.2'].rotation,mixedBase.a.overrides['R1.2']?.rotation || [0,0,0]);
+  report.checks.push('实际拖滑块和拖文字取消均不新增历史；混合选择只修改目标属性');
+  await select('R1.1');await page.locator('#localLeaves').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(out,'自动应用.png')});
+  const savedState=await state();
+  await page.evaluate(()=>{const original=window.fetch;window.fetch=async function(url,options){if(url==='/api/save-project'){const prefix=await options.body.slice(0,12).text(),line=prefix.indexOf('\n'),offset=line+1+Number(prefix.slice(0,line));const link=document.createElement('a');link.href=URL.createObjectURL(options.body.slice(offset));link.download='auto.branch.json';link.click();return new Response(JSON.stringify({success:true,path:'独立验收下载'}),{headers:{'Content-Type':'application/json'}});}return original.apply(this,arguments);};});
+  await page.click('#saveProjectBtn');await page.locator('#projectSaveDialog [value="FILE"]').check();const [download]=await Promise.all([page.waitForEvent('download'),page.click('#psSubmit')]);const saved=path.join(out,'自动应用保存.branch.json');await download.saveAs(saved);
+  await page.reload();await wait();await page.locator('#projectInput').setInputFiles(saved);await page.waitForFunction(()=>window.__branchForge.authoring.overrides['R1.1']?.leaf_density===1.5);await wait();const reloaded=await state();delete reloaded.a.workbench;delete savedState.a.workbench;assert.deepEqual(reloaded.a,savedState.a);assert.equal(reloaded.leaves,savedState.leaves);
+  report.checks.push('实际工程保存并重新加载，自动应用的参数与叶片数量保持');
+  assert.deepEqual(report.errors,[]);report.passed=true;console.log(JSON.stringify(report));
+ }catch(e){if(page)await page.screenshot({path:path.join(out,'失败现场.png')});throw e;}finally{await browser.close();fs.writeFileSync(path.join(out,'验收.json'),JSON.stringify(report,null,2));}
+})().catch(e=>{console.error(e);process.exitCode=1});

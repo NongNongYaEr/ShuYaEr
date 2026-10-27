@@ -1,0 +1,57 @@
+body:not([data-workbench="VINE"]) :is(#vinePanel, #surfaceGrowthPanel, #vegetationPanel) { display: none !important; }
+body[data-workbench="VINE"] [data-page="structure"] > .parameter-section:not(#vinePanel):not(#surfaceGrowthPanel):not(#vegetationPanel), body[data-workbench="VINE"] #branchWorkbenchPanel { display: none !important; }
+#surfaceGrowthPanel [data-surface-tool].active { background: #35492d; border-color: #b3c97d; }
+body[data-workbench="VINE"] #extractBranchBtn { display: none; }
+.vine-panel, .leaf-resources { font-size: 12px; }
+.vine-intro { color: #b0c3b6; line-height: 1.7; margin: 0 0 10px; }
+.vine-note { color: #93aba0; font-size: 11px; line-height: 1.65; overflow-wrap: anywhere; }
+.vine-presets { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-bottom: 14px; }
+.vine-presets button { display: grid; justify-items: start; gap: 5px; padding: 10px; min-width: 0; background: #182a22; border: 1px solid #3c5546; border-radius: 6px; text-align: left; }
+.vine-presets button.active { border-color: #c5b568; background: #303828; }
+.vine-presets small { color: #9ab4a3; font-size: 10px; }
+.vine-glyph { display: block; width: 100%; height: 43px; color: #a8ce81; font-size: 30px; line-height: 35px; text-align: center; background: repeating-linear-gradient(100deg, transparent 0 11px, #6f995c55 12px 15px, transparent 16px 25px); border-top: 5px solid #66844b; border-radius: 2px 2px 45% 20%; }
+.vine-single { width: 20%; margin: auto; border: 0; }
+.vine-bundle { width: 55%; margin: auto; border: 0; }
+.vine-wall { background-color: #55794866; border-radius: 35% 25%; }
+.vine-panel .field-grid, .leaf-resources .field-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.vine-panel .wb-check { display: flex; align-items: center; gap: 8px; }
+.vine-panel .wb-check input { width: 15px; }
+.vine-panel button, .leaf-resources button { min-height: 31px; padding: 6px 8px; font-size: 11px; }
+.vine-panel details { border-top: 1px solid #3c5145; margin-top: 12px; padding-top: 10px; }
+.vine-panel summary { cursor: pointer; color: #c6d6c9; margin-bottom: 9px; }
+#surfaceRegionPanel [data-region-style].active { background: #304b38; border-color: #95be76; color: #edffdd; }
+.vine-tools { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+#leafTexturePreview { width: 100%; max-height: 140px; object-fit: contain; background: repeating-conic-gradient(#38413a 0% 25%, #232a25 0% 50%) 0 0 / 16px 16px; }
+#vineLibrary, #leafResourceList { width: 100%; margin-top: 8px; }
+.plant-kind { margin-bottom: 12px; }
+#floweringPanel[hidden], .vine-presets[hidden] { display: none; }
+.bloom-styles, .bloom-states { display: flex; gap: 5px; margin: 8px 0; }
+.bloom-styles button, .bloom-states button { flex: 1; padding: 8px 3px; }
+.bloom-styles button.active, #bloomErase.active { background: #5b2647; border-color: #dc70b1; color: #ffe6f4; }
+#floweringPanel { padding-bottom: 8px; margin-bottom: 12px; border-bottom: 1px solid #65445a; }
+#flowerTexturePreview { width: 100%; max-height: 140px; object-fit: contain; background: #17231b; }
+#flowerResourcePanel .wb-check { display: flex; align-items: center; gap: 8px; } #flowerResourcePanel .wb-check input { width: 15px; }
+@media(max-width:760px) { .branch-workspace-bar { gap: 3px; padding-inline: 5px; } .branch-workspace-bar button { padding-inline: 6px; font-size: 11px; } #branchWorkspaceState { display: none; } }
+#vegetationPanel [hidden], #surfaceGrowthPanel [hidden] { display: none !important; }
+.surface-guide-panel[hidden], .surface-guide-panel [hidden] { display: none !important; }
+.surface-guide-panel h3 { display:flex; justify-content:space-between; gap:8px; }
+.surface-guide-panel h3 small { color:var(--accent,#f5d970); }
+.surface-guide-cards { display:grid; gap:6px; max-height:260px; overflow-y:auto; margin:10px 0; }
+.surface-guide-card { text-align:left; border-left:3px solid var(--guide-color); padding:9px 10px; display:grid; gap:4px; width:100%; }
+.surface-guide-card strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
+.surface-guide-card small { font-size:11px; opacity:.75; }
+.surface-guide-card.active { background:rgba(255,216,72,.12); border-color:#e1c45d; }
+.surface-guide-settings { padding-top:8px; border-top:1px solid #45494e; }
+.surface-guide-settings > label { display:block; margin:10px 0; font-size:12px; }
+.surface-guide-settings .field-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:10px 0; }
+.surface-guide-settings input:not([type=checkbox]) { width:100%; min-width:0; box-sizing:border-box; }
+.surface-guide-settings .wb-row { display:grid; grid-template-columns:1fr 1fr; gap:5px; }
+.surface-guide-row { display:grid; grid-template-columns:18px minmax(0,1fr); align-items:center; gap:6px; }
+.surface-guide-row > input { width:15px; height:15px; margin:0; accent-color:var(--accent,#f5d970); }
+.surface-guide-card.primary { box-shadow:inset 0 0 0 1px #e1c45d; }
+.surface-guide-panel > .wb-row, #guideSelectionOperations .wb-row { display:grid; grid-template-columns:1fr 1fr; gap:5px; margin:6px 0; }
+.surface-guide-panel .guide-target { display:grid; gap:6px; padding-top:10px; border-top:1px solid #45494e; font-weight:600; }
+.surface-guide-panel input[data-mixed="true"] { border-style:dashed; }
+.surface-guide-panel .wb-check { display:flex; align-items:center; gap:5px; font-size:12px; }
+.surface-guide-panel .surface-guide-cards { max-height:220px; }
+#guideSelectionOperations { margin-top:12px; padding-top:10px; border-top:1px solid #45494e; }

@@ -1,0 +1,210 @@
+/* The everyday asset browser: clear places, larger previews, botanical identity. */
+#resourceCenterDialog { --rb-tint:color-mix(in srgb,var(--brand-soft) 24%,var(--surface)); }
+#resourceCenterDialog .rc-heading { padding:17px 24px; background:var(--rs-pane); }
+#resourceCenterDialog .rc-heading-title small { font-size:10px; letter-spacing:1px; }
+#resourceCenterDialog .rc-heading h2 { font-size:22px; }
+#resourceCenterDialog .rc-heading-mark { width:42px; height:42px; }
+#resourceCenterDialog .rc-layout { grid-template-columns:190px minmax(0,1fr) 306px; }
+#resourceCenterDialog.rc-details-closed .rc-layout { grid-template-columns:190px minmax(0,1fr); }
+#resourceCenterDialog .rc-sidebar { padding:26px 12px 20px; background:color-mix(in srgb,var(--field) 43%,var(--surface)); }
+#resourceCenterDialog .rc-sidebar>strong { font-size:10px; letter-spacing:1px; margin-bottom:12px; }
+#resourceCenterDialog .rc-locations { gap:8px; margin-bottom:30px; }
+#resourceCenterDialog .rc-locations button { min-height:64px; background:color-mix(in srgb,var(--surface-2) 30%,transparent); }
+#resourceCenterDialog .rc-locations button[aria-pressed=true] { background:var(--rb-tint); }
+#resourceCenterDialog .rc-sidebar nav button { font-size:12px; }
+#resourceCenterDialog .rc-locations strong { font-size:13px; }
+#resourceCenterDialog .rc-locations small { font-size:10px; }
+#resourceCenterDialog .rc-scope-count { background:color-mix(in srgb,var(--field) 70%,transparent); font-size:10px; }
+#resourceCenterDialog .rc-sidebar-note { padding:16px 10px 0; margin-top:22px; border-top:1px solid var(--rs-line); line-height:1.9; }
+#resourceCenterDialog .rc-browser { padding:22px 24px 0; }
+#resourceCenterDialog .rc-browser-heading {
+  position:relative; display:flex; align-items:center; min-height:128px; gap:24px;
+  padding:12px 20px 12px 12px; margin:0 0 20px; border-radius:8px;
+  background:radial-gradient(ellipse at 6% 100%,color-mix(in srgb,var(--category-color) 9%,transparent),transparent 50%),linear-gradient(100deg,color-mix(in srgb,var(--category-color) 6%,var(--surface)),transparent 78%);
+}
+#resourceCenterDialog .rc-category-intro { display:flex; align-items:center; gap:18px; min-width:0; flex:1; }
+#resourceCenterDialog .rc-category-copy { min-width:0; }
+#resourceCenterDialog .rc-browser-heading h3 { font-size:27px; font-weight:650; margin:3px 0 5px; line-height:1.35; letter-spacing:.2px; }
+#resourceCenterDialog .rc-browser-heading p { font-size:12px; line-height:1.7; margin:0; max-width:430px; color:var(--muted); }
+#resourceCenterDialog .rc-breadcrumb { font-size:10px; min-height:16px; line-height:1.5; }
+#resourceCenterDialog .rc-breadcrumb button { min-height:16px; font-size:10px; }
+#resourceCenterDialog .rc-category-actions { display:flex; flex-direction:column; align-items:center; gap:7px; flex-shrink:0; }
+#resourceCenterDialog #resourceCreate { background:var(--rs-raised); font-weight:550; min-height:37px; padding-inline:13px; }
+#resourceCenterDialog .rc-category-actions>small { color:var(--quiet); font-size:10px; white-space:nowrap; }
+#resourceCenterDialog .rc-browser-mascot { position:static; display:block; width:156px; height:104px; object-fit:contain; object-position:center; flex-shrink:0; }
+#resourceCenterDialog .rc-types { gap:7px; border:0; margin:0 0 16px; padding:0; }
+#resourceCenterDialog .rc-types button { gap:7px; padding:9px 10px; min-height:42px; border-radius:6px; color:var(--muted); background:color-mix(in srgb,var(--field) 50%,transparent); }
+#resourceCenterDialog .rc-types button:hover:not(:disabled) { background:var(--rs-raised); }
+#resourceCenterDialog .rc-types button[aria-pressed=true] { background:var(--brand-soft); color:var(--accent-text); }
+#resourceCenterDialog .rc-types button[aria-pressed=true]::after { display:none; }
+#resourceCenterDialog .rc-types [data-type-count] { min-width:18px; padding:0 3px; margin-left:2px; text-align:center; color:var(--muted); font-size:10px; background:color-mix(in srgb,var(--field) 45%,transparent); border-radius:3px; }
+#resourceCenterDialog .rc-searchbar { gap:8px; }
+#resourceCenterDialog .rc-search { border-color:transparent; min-height:40px; background:color-mix(in srgb,var(--field) 78%,var(--surface)); }
+#resourceCenterDialog .rc-search:focus-within { border-color:color-mix(in srgb,var(--focus) 62%,transparent); }
+#resourceCenterDialog .rc-search input { font-size:12px; }
+#resourceCenterDialog .rc-searchbar>button { color:var(--muted); font-size:11px; }
+#resourceCenterDialog .rc-searchbar select { font-size:11px; background:var(--field); border-color:transparent; }
+#resourceCenterDialog .rc-list-heading { min-height:42px; font-size:11px; }
+#resourceCenterDialog .rc-list-heading button { font-size:10px; }
+#resourceCenterDialog .rc-grid { grid-template-columns:repeat(4,minmax(0,1fr)); gap:24px 20px; padding:3px 5px 28px 1px; }
+#resourceCenterDialog[data-card-size=large] .rc-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+#resourceCenterDialog .rc-thumbnail { border-radius:4px; }
+#resourceCenterDialog .rc-card-main { padding-bottom:8px; border-radius:4px; }
+#resourceCenterDialog .rc-card-main strong { font-size:13px; line-height:1.55; min-height:39px; margin:11px 8px 3px; font-weight:550; }
+#resourceCenterDialog .rc-card-meta { padding:2px 8px 0; }
+#resourceCenterDialog .rc-card-summary { color:var(--muted); font-size:11px; }
+#resourceCenterDialog .rc-card-version { color:var(--quiet); font-size:10px; background:transparent; }
+#resourceCenterDialog .rc-card.focused .rc-card-main { background:color-mix(in srgb,var(--brand-soft) 24%,transparent); }
+#resourceCenterDialog .rc-card.focused .rc-thumbnail::after { height:2px; }
+#resourceCenterDialog .rc-details { padding:23px 20px; background:color-mix(in srgb,var(--field) 24%,var(--surface)); }
+#resourceCenterDialog .rc-detail-heading h3 { font-size:20px; margin:13px 0 5px; font-weight:600; line-height:1.5; word-break:keep-all; overflow-wrap:anywhere; text-wrap:balance; }
+#resourceCenterDialog .rc-detail-kind { color:var(--quiet); font-size:11px; margin:0 0 17px; }
+#resourceCenterDialog .rc-detail-preview { border-radius:4px; }
+#resourceCenterDialog .rc-detail-meta { font-size:11px; margin:11px 0 17px; }
+#resourceCenterDialog .rc-primary-actions { padding:9px 0 14px; gap:7px; margin-bottom:18px; background:color-mix(in srgb,var(--field) 24%,var(--surface)); }
+#resourceCenterDialog .rc-primary-actions>button { min-height:39px; font-size:12px; }
+#resourceCenterDialog .rc-detail-section { margin-bottom:24px; }
+#resourceCenterDialog .rc-detail-section h4 { font-size:10px; font-weight:550; letter-spacing:.8px; color:var(--quiet); margin-bottom:14px; }
+#resourceCenterDialog .rc-facts dl { font-size:12px; row-gap:13px; }
+#resourceCenterDialog .rc-secondary-actions { border-color:var(--rs-line); gap:8px; }
+#resourceCenterDialog .rc-secondary-actions button { background:transparent; padding:7px 0; min-height:30px; font-size:11px; }
+#resourceCenterDialog .rc-footer { min-height:34px; font-size:10px; }
+@media(max-width:1400px) {
+  #resourceCenterDialog .rc-layout { grid-template-columns:170px minmax(0,1fr) 276px; }
+  #resourceCenterDialog.rc-details-closed .rc-layout { grid-template-columns:170px minmax(0,1fr); }
+  #resourceCenterDialog .rc-browser { padding:18px 18px 0; }
+  #resourceCenterDialog .rc-browser-heading { padding:12px 16px 12px 10px; gap:20px; }
+  #resourceCenterDialog .rc-browser-heading h3 { font-size:25px; }
+  #resourceCenterDialog .rc-category-actions>small { display:none; }
+  #resourceCenterDialog .rc-category-actions { align-self:flex-end; }
+  #resourceCenterDialog .rc-grid { grid-template-columns:repeat(3,minmax(0,1fr)); gap:22px 16px; }
+  #resourceCenterDialog[data-card-size=large] .rc-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  #resourceCenterDialog .rc-types { gap:6px; }
+  #resourceCenterDialog .rc-types button { padding:8px; min-height:38px; font-size:11px; }
+  #resourceCenterDialog .rc-details { padding:21px 17px; }
+}
+@media(max-width:1150px) {
+  #resourceCenterDialog .rc-layout { grid-template-columns:154px minmax(0,1fr) 246px; }
+  #resourceCenterDialog.rc-details-closed .rc-layout { grid-template-columns:154px minmax(0,1fr); }
+  #resourceCenterDialog .rc-browser-heading { padding:14px; min-height:110px; }
+  #resourceCenterDialog .rc-browser-mascot { width:96px; height:64px; }
+  #resourceCenterDialog .rc-browser-heading p { display:none; }
+  #resourceCenterDialog .rc-browser-heading h3 { font-size:23px; }
+  #resourceCenterDialog .rc-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  #resourceCenterDialog[data-card-size=large] .rc-grid { grid-template-columns:minmax(0,1fr); }
+}
+@media(max-width:820px) {
+  #resourceCenterDialog .rc-layout,#resourceCenterDialog.rc-details-closed .rc-layout { grid-template-columns:138px minmax(0,1fr); }
+  #resourceCenterDialog .rc-browser { padding:13px 12px 0; }
+  #resourceCenterDialog .rc-browser-heading { min-height:85px; padding:12px; margin-bottom:13px; }
+  #resourceCenterDialog .rc-browser-heading h3 { font-size:21px; }
+  #resourceCenterDialog .rc-category-actions { align-self:center; }
+  #resourceCenterDialog .rc-category-intro { gap:0; }
+  #resourceCenterDialog .rc-types { margin-bottom:12px; gap:5px; }
+  #resourceCenterDialog .rc-types button { min-height:32px; padding:6px 7px; font-size:10px; gap:5px; }
+  #resourceCenterDialog .rc-types .resource-icon { width:16px; height:16px; }
+  #resourceCenterDialog .rc-types [data-type-count] { display:none; }
+  #resourceCenterDialog .rc-sidebar { padding:18px 8px; }
+  #resourceCenterDialog .rc-sidebar nav button { padding-inline:8px; font-size:11px; }
+  #resourceCenterDialog .rc-locations strong { font-size:11px; }
+  #resourceCenterDialog .rc-locations small { font-size:9px; }
+  #resourceCenterDialog .rc-grid { gap:18px 12px; }
+  #resourceCenterDialog .rc-details { padding:20px; }
+}
+@media(max-width:600px) {
+  #resourceCenterDialog .rc-layout,#resourceCenterDialog.rc-details-closed .rc-layout { grid-template-columns:118px minmax(0,1fr); }
+  #resourceCenterDialog .rc-browser-heading { flex-wrap:wrap; gap:10px; }
+  #resourceCenterDialog .rc-category-actions { align-self:flex-start; }
+  #resourceCenterDialog .rc-category-intro { width:100%; flex-basis:100%; }
+  #resourceCenterDialog .rc-grid,#resourceCenterDialog[data-card-size=large] .rc-grid { grid-template-columns:minmax(0,1fr); }
+}
+
+
+/* Each resource category has its own botanical subject, notes and restrained tint. */
+#resourceCenterDialog { --category-color:var(--accent-text); }
+#resourceCenterDialog[data-resource-type=plant] { --category-color:#89b798; }
+#resourceCenterDialog[data-resource-type=prefab] { --category-color:#cfb783; }
+#resourceCenterDialog[data-resource-type=branch] { --category-color:#80b5ad; }
+#resourceCenterDialog[data-resource-type=units] { --category-color:#ce9eb2; }
+#resourceCenterDialog[data-resource-type=material] { --category-color:#c69f77; }
+#resourceCenterDialog .rc-browser-heading h3 { font-size:26px; margin:2px 0 3px; }
+#resourceCenterDialog .rc-browser-heading p { max-width:410px; font-size:12px; line-height:1.65; }
+#resourceCenterDialog .rc-category-tags { list-style:none; display:flex; flex-wrap:wrap; gap:5px 12px; padding:0; margin:8px 0 0; }
+#resourceCenterDialog .rc-category-tags li { display:inline-flex; align-items:center; gap:5px; color:var(--muted); font-size:10px; line-height:1.6; white-space:nowrap; }
+#resourceCenterDialog .rc-category-tags li::before { content:''; width:3px; height:3px; border-radius:50%; background:color-mix(in srgb,var(--text) 48%,var(--category-color)); flex-shrink:0; }
+#resourceCenterDialog .rc-category-actions>small { max-width:160px; text-align:center; white-space:normal; line-height:1.7; }
+@media(max-width:1400px) {
+  #resourceCenterDialog .rc-browser-heading { min-height:124px; }
+  #resourceCenterDialog .rc-category-intro { gap:16px; }
+  #resourceCenterDialog .rc-browser-heading h3 { font-size:24px; }
+  #resourceCenterDialog .rc-browser-mascot { width:138px; height:92px; }
+  #resourceCenterDialog .rc-category-tags { gap:4px 9px; margin-top:6px; }
+  #resourceCenterDialog .rc-category-actions { align-self:center; }
+}
+@media(max-width:1150px) {
+  #resourceCenterDialog .rc-browser-heading { padding:12px 14px 12px 10px; min-height:106px; }
+  #resourceCenterDialog .rc-browser-mascot { width:96px; height:64px; }
+  #resourceCenterDialog .rc-category-intro { gap:12px; }
+  #resourceCenterDialog .rc-browser-heading p { display:none; }
+  #resourceCenterDialog .rc-category-tags { gap:3px 9px; }
+}
+@media(max-width:820px) {
+  #resourceCenterDialog .rc-browser-heading { min-height:94px; padding:11px 12px; gap:10px; }
+  #resourceCenterDialog .rc-browser-heading h3 { font-size:21px; }
+  #resourceCenterDialog .rc-category-tags { gap:2px 8px; margin-top:5px; }
+  #resourceCenterDialog .rc-category-tags li { font-size:9px; }
+  #resourceCenterDialog .rc-browser-mascot { display:none; }
+  #resourceCenterDialog .rc-category-intro { gap:0; }
+}
+
+
+/* Header identity and unmistakable category entry points. */
+#resourceCenterDialog { --entry-fill:var(--category-color); }
+#resourceCenterDialog[data-resource-type=all] { --entry-fill:var(--accent); }
+#resourceCenterDialog .rc-heading { padding-block:14px; }
+#resourceCenterDialog .rc-heading-mark { display:grid; width:52px; height:52px; flex-shrink:0; padding:0; background:transparent; border-radius:0; }
+#resourceCenterDialog .rc-heading-mark img { display:block; width:100%; height:100%; object-fit:contain; user-select:none; }
+#resourceCenterDialog .rc-category-actions { gap:8px; }
+#resourceCenterDialog #resourceCreate {
+  width:200px; min-width:200px; height:64px; min-height:64px; padding:11px 12px; gap:10px;
+  justify-content:flex-start; text-align:left; border-radius:8px;
+  background:var(--entry-fill); color:#17211e; border:1px solid color-mix(in srgb,#17211e 12%,transparent);
+  box-shadow:0 2px 0 #0002; transition:filter 120ms,transform 120ms,box-shadow 120ms;
+}
+#resourceCenterDialog #resourceCreate:hover:not(:disabled) { background:var(--entry-fill); filter:brightness(1.07); transform:translateY(-1px); box-shadow:0 3px 0 #0002; }
+#resourceCenterDialog #resourceCreate:active:not(:disabled) { transform:translateY(0); box-shadow:none; }
+#resourceCenterDialog #resourceCreate:focus-visible { outline:2px solid var(--focus); outline-offset:4px; }
+#resourceCenterDialog #resourceCreate .rc-entry-symbol { display:grid; place-items:center; width:32px; height:36px; flex-shrink:0; background:#ffffff24; border-radius:6px; }
+#resourceCenterDialog #resourceCreate .rc-entry-symbol svg { width:22px; height:22px; stroke-width:1.9; }
+#resourceCenterDialog #resourceCreate .rc-entry-copy { display:grid; gap:3px; flex:1; min-width:0; }
+#resourceCenterDialog #resourceCreate .rc-entry-copy small { font-size:10px; font-weight:500; line-height:1.3; opacity:.8; white-space:nowrap; }
+#resourceCenterDialog #resourceCreate .rc-entry-copy strong { font-size:13px; font-weight:650; line-height:1.4; white-space:nowrap; }
+#resourceCenterDialog #resourceCreate .rc-entry-arrow { display:grid; place-items:center; flex-shrink:0; opacity:.75; }
+#resourceCenterDialog #resourceCreate .rc-entry-arrow svg { width:16px; height:16px; stroke-width:2; }
+#resourceCenterDialog #resourceCreate:disabled { opacity:1; cursor:not-allowed; background:color-mix(in srgb,var(--category-color) 10%,var(--surface)); color:var(--muted); border-color:color-mix(in srgb,var(--category-color) 25%,transparent); box-shadow:none; }
+#resourceCenterDialog #resourceCreate:disabled .rc-entry-symbol { background:color-mix(in srgb,var(--category-color) 12%,transparent); }
+#resourceCenterDialog #resourceCreate:disabled .rc-entry-arrow { opacity:.3; }
+#resourceCenterDialog[data-resource-type=package] .rc-category-actions { display:none; }
+@media(max-width:1400px) {
+  #resourceCenterDialog #resourceCreate { width:188px; min-width:188px; padding-inline:10px; gap:8px; }
+  #resourceCenterDialog #resourceCreate .rc-entry-copy strong { font-size:12px; }
+}
+@media(max-width:1150px) {
+  #resourceCenterDialog #resourceCreate { width:180px; min-width:180px; min-height:60px; height:60px; padding:9px 10px; }
+  #resourceCenterDialog #resourceCreate .rc-entry-symbol { width:29px; height:34px; }
+}
+@media(max-width:820px) {
+  #resourceCenterDialog .rc-heading-mark { width:44px; height:44px; }
+  #resourceCenterDialog #resourceCreate { width:174px; min-width:174px; }
+  #resourceCenterDialog #resourceCreate .rc-entry-copy small { font-size:9px; }
+  #resourceCenterDialog #resourceCreate .rc-entry-copy strong { font-size:11px; }
+}
+@media(max-width:600px) {
+  #resourceCenterDialog .rc-heading-mark { display:grid; width:36px; height:36px; }
+  #resourceCenterDialog .rc-category-actions { width:100%; }
+  #resourceCenterDialog #resourceCreate { width:100%; min-width:0; }
+}
+@media(prefers-reduced-motion:reduce) {
+  #resourceCenterDialog #resourceCreate { transition:none; }
+  #resourceCenterDialog #resourceCreate:hover:not(:disabled) { transform:none; }
+}

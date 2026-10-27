@@ -1,0 +1,103 @@
+{
+  "trees": 8,
+  "branches": 44,
+  "units": 8,
+  "prefabs": 1,
+  "samples": [
+    {
+      "category": "TREE",
+      "species": "CAMPHOR",
+      "name": "香樟",
+      "file": "tree-camphor-v1.json"
+    },
+    {
+      "category": "SHRUB",
+      "species": "AZALEA",
+      "name": "杜鹃",
+      "file": "tree-azalea-v1.json"
+    },
+    {
+      "category": "POTTED",
+      "species": "FIDDLE_FIG",
+      "name": "琴叶榕",
+      "file": "tree-fiddle_fig-v1.json"
+    },
+    {
+      "category": "VINE",
+      "species": "IVY",
+      "name": "常春藤",
+      "file": "ivy-v1.json"
+    },
+    {
+      "category": "FLOWERING_VINE",
+      "species": "BOUGAINVILLEA",
+      "name": "三角梅",
+      "file": "bougainvillea-v1.json"
+    },
+    {
+      "category": "GRASS",
+      "species": "SCENE_GRASS",
+      "name": "草叶",
+      "file": "scene-grass-v1.json"
+    },
+    {
+      "category": "HERB",
+      "species": "SCENE_BROADLEAF",
+      "name": "大叶草本",
+      "file": "scene-broadleaf-v1.json"
+    },
+    {
+      "category": "FLOWER",
+      "species": "SCENE_FLOWER",
+      "name": "黄色小花",
+      "file": "scene-flower-v1.json"
+    }
+  ],
+  "requiredBranchIds": [
+    "FINISHED_CAMPHOR_SIDE_MATURE_V1",
+    "FINISHED_CAMPHOR_SIDE_MIXED_V1",
+    "FINISHED_CAMPHOR_SIDE_YOUNG_V1",
+    "FINISHED_CAMPHOR_TIP_MATURE_V1",
+    "FINISHED_CAMPHOR_TIP_MIXED_V1",
+    "FINISHED_CAMPHOR_TIP_YOUNG_V1",
+    "FINISHED_AZALEA_SIDE_MATURE_V1",
+    "FINISHED_AZALEA_SIDE_MIXED_V1",
+    "FINISHED_AZALEA_SIDE_YOUNG_V1",
+    "FINISHED_AZALEA_TIP_MATURE_V1",
+    "FINISHED_AZALEA_TIP_MIXED_V1",
+    "FINISHED_AZALEA_TIP_YOUNG_V1",
+    "FINISHED_FIDDLE_FIG_SIDE_MATURE_V1",
+    "FINISHED_FIDDLE_FIG_SIDE_MIXED_V1",
+    "FINISHED_FIDDLE_FIG_SIDE_YOUNG_V1",
+    "FINISHED_FIDDLE_FIG_TIP_MATURE_V1",
+    "FINISHED_FIDDLE_FIG_TIP_MIXED_V1",
+    "FINISHED_FIDDLE_FIG_TIP_YOUNG_V1",
+    "FINISHED_IVY_SIDE_MATURE_V1",
+    "FINISHED_IVY_SIDE_MIXED_V1",
+    "FINISHED_IVY_SIDE_YOUNG_V1",
+    "FINISHED_IVY_TIP_MATURE_V1",
+    "FINISHED_IVY_TIP_MIXED_V1",
+    "FINISHED_IVY_TIP_YOUNG_V1",
+    "FINISHED_BOUGAINVILLEA_SIDE_MATURE_V1",
+    "FINISHED_BOUGAINVILLEA_SIDE_MIXED_V1",
+    "FINISHED_BOUGAINVILLEA_SIDE_YOUNG_V1",
+    "FINISHED_BOUGAINVILLEA_TIP_MATURE_V1",
+    "FINISHED_BOUGAINVILLEA_TIP_MIXED_V1",
+    "FINISHED_BOUGAINVILLEA_TIP_YOUNG_V1",
+    "FINISHED_SCENE_GRASS_SIDE_MATURE_V1",
+    "FINISHED_SCENE_GRASS_SIDE_MIXED_V1",
+    "FINISHED_SCENE_GRASS_SIDE_YOUNG_V1",
+    "FINISHED_SCENE_GRASS_TIP_MATURE_V1",
+    "FINISHED_SCENE_GRASS_TIP_MIXED_V1",
+    "FINISHED_SCENE_GRASS_TIP_YOUNG_V1",
+    "FINISHED_SCENE_BROADLEAF_SIDE_MATURE_V1",
+    "FINISHED_SCENE_BROADLEAF_SIDE_MIXED_V1",
+    "FINISHED_SCENE_BROADLEAF_SIDE_YOUNG_V1",
+    "FINISHED_SCENE_BROADLEAF_TIP_MATURE_V1",
+    "FINISHED_SCENE_BROADLEAF_TIP_MIXED_V1",
+    "FINISHED_SCENE_BROADLEAF_TIP_YOUNG_V1",
+    "FINISHED_SCENE_FLOWER_SIDE_MATURE_V1",
+    "FINISHED_SCENE_FLOWER_TIP_MATURE_V1"
+  ],
+  "excludedVerificationOnlyAsset": "prepared-aca902b0-b643-4bfb-9881-6eefd4d9621e"
+}

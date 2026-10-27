@@ -1,0 +1,10 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "1.0",
+  "FriendlyName": "BranchForge Static Vegetation Workbench",
+  "Description": "Editor-only native assembly update bridge for the BranchForge USD workbench.",
+  "Category": "Editor",
+  "CanContainContent": false,
+  "Modules": [{ "Name": "BranchForgeStaticWorkbench", "Type": "Editor", "LoadingPhase": "Default" }]
+}

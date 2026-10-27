@@ -1,0 +1,42 @@
+.branch-workflow-nav[hidden], .branch-workflow[hidden] { display: none !important; }
+body[data-branch-workflow="on"] .parameter-tabs { display: none; }
+body[data-branch-workflow="on"] .variant-tray { display: none; }
+body[data-branch-workflow="on"] label:has(#batchCount, #batchSeedStep),
+body[data-branch-workflow="on"] .field-grid:has(#matrixSeasons),
+body[data-branch-workflow="on"] #buildVariantMatrixBtn { display: none !important; }
+.branch-workflow-nav { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 3px; align-items: stretch; padding: 6px 8px; border-bottom: 1px solid var(--line-soft); min-width: 0; }
+.branch-workflow-nav button { min-width: 0; padding: 5px 2px; border-color: transparent; background: transparent; font-size: 12px; white-space: nowrap; }
+.branch-workflow-nav button.active { color: var(--yellow,#e4c56d); border-color: #7b6b3f; background: #302e22; }
+.branch-workflow-nav button:focus-visible { outline: 2px solid var(--blue,#80bddd); outline-offset: 1px; }
+.branch-workflow-stage { display: none; padding: 12px; min-width: 0; }
+.branch-workflow[data-stage="CREATE"] [data-workflow-page="CREATE"],
+.branch-workflow[data-stage="ADJUST"] [data-workflow-page="ADJUST"],
+.branch-workflow[data-stage="ASSETS"] [data-workflow-page="ASSETS"],
+.branch-workflow[data-stage="ASSEMBLE"] [data-workflow-page="ASSEMBLE"],
+.branch-workflow[data-stage="EXPORT"] [data-workflow-page="EXPORT"],
+.branch-workflow[data-searching="true"] > .branch-workflow-stage { display: block; }
+.branch-workflow-heading { margin: 0 0 10px; color: var(--text,#d3ded8); font-size: 13px; font-weight: 600; }
+.branch-workflow-search-unit { min-width: 0; }
+.branch-workflow-search-unit[data-search-hidden="true"] { display: none !important; }
+.branch-workflow .branch-workflow-advanced { margin-top: 12px; border-top: 1px solid var(--line-soft,#35413c); }
+.branch-workflow .branch-workflow-advanced > summary { font-size: 11px; color: var(--muted,#a0afa6); line-height: 1.5; }
+body[data-branch-workflow="on"] .branch-workflow .tab-page { display: block !important; }
+body[data-branch-workflow="on"] #branchWorkbenchPanel { display: none !important; }
+.branch-workflow .tab-page > .parameter-section { margin-inline: -12px; }
+.branch-workflow .parameter-group-body { padding-inline: 12px; }
+.branch-workflow .field-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+.branch-workflow :is(input,select,label,.wb-row) { min-width: 0; }
+.branch-workflow .wb-row { flex-wrap: wrap; }
+.branch-workflow .wb-row > button { flex: 1 1 95px; }
+.branch-workflow .wb-row > label { flex: 1 1 110px; }
+.branch-workflow .parameter-number { min-width: 0; }
+.branch-workflow .parameter-number input { width: 0; min-width: 0; }
+.branch-workflow .vine-note { overflow-wrap: anywhere; line-height: 1.55; }
+.branch-workflow #treeSpeciesLibrary { border-top: 0; }
+.branch-workflow #treeSpeciesCreate { width: 100%; margin-top: 8px; }
+.branch-workflow #treeSpeciesReplace { width: 100%; margin-bottom: 12px; }
+.branch-workflow #branchQuickPanel > summary { font-weight: 600; }
+.branch-workflow [hidden] { display: none !important; }
+@media (max-width:760px) {
+  .branch-workflow-nav { min-height: 44px; }
+}
