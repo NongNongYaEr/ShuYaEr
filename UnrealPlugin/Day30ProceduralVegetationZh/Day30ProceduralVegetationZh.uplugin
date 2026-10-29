@@ -1,0 +1,34 @@
+{
+  "FileVersion": 3,
+  "Version": 2,
+  "VersionName": "0.2.68",
+  "FriendlyName": "TreeDuck PVE Bridge",
+  "Description": "TreeDuck V2/V3 PVE workbench bridge with original trunk materials, pinned skin and native wind export.",
+  "Category": "Editor",
+  "CreatedBy": "OpenAI Codex",
+  "CreatedByURL": "",
+  "DocsURL": "",
+  "MarketplaceURL": "",
+  "SupportURL": "",
+  "EngineVersion": "5.8.0",
+  "CanContainContent": false,
+  "IsBetaVersion": true,
+  "Installed": true,
+  "Modules": [
+    {
+      "Name": "Day30ProceduralVegetationZh",
+      "Type": "Editor",
+      "LoadingPhase": "Default"
+    }
+  ],
+  "Plugins": [
+    {
+      "Name": "ProceduralVegetationEditor",
+      "Enabled": true
+    },
+    {
+      "Name": "DynamicWind",
+      "Enabled": true
+    }
+  ]
+}

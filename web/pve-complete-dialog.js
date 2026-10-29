@@ -60,6 +60,7 @@ export function createPveCompleteExporter({ api, save, ready, status, button, pr
       }
       if (job.maintenance_warnings?.length) $('pveDetail').textContent += '\n' + job.maintenance_warnings.join('\n');
       if (models?.historical_complete_models) $('pveDetail').textContent += '\n历史完整模型用于保留旧副本的枝叶造型；枝叶整体一致的副本经校验后复用模型，不会拆成独立叶花果。';
+      if (job.resolved_assembly?.imported_trunk) $('pveDetail').textContent += '\n雕刻 / AI 树干已包含原网格、材质和控制点权重。请打开输出文件夹，按《树干UE导出说明.txt》生成 UE 静态 / 风动骨骼资产；后台导出脚本为 export_imported_trunk_assets.ps1。';
       if (job.package_kind === 'vine') $('pveDetail').textContent += '\n藤干、叶层和连接细茎已合为完整藤蔓装配。承载模型不导出，无需单独绑定叶片。';
       $('pveDirectory').textContent = '输出目录：' + job.output_dir;
       if (job.keep_history && job.previous_dir) $('pveDirectory').textContent += '\n历史备份：' + job.previous_dir;

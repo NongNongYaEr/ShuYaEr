@@ -1,4 +1,6 @@
 import {deriveLodBranches} from './branch-lod.js';
+import {importedTrunkHostIds,buildImportedTrunkMeshes,disposeImportedTrunkTextures} from './imported-trunk-runtime.js';
+import {resolveTrunkAttachmentFrames,trunkInstanceSurfaceFrame,captureTrunkCarrierMotion,followTrunkCarrierMotion,resolveTrunkCarrierFrames} from './imported-trunk-attachments.js';
 import {encodeGeometryRuntime,encodeSweepBranch} from './geometry-transfer.js';
 import {createSweptBranchGeometry,tangentFrame,pointOnPolyline,tangentOnPolyline,adaptiveCurvePoints,ensureGeometryTangents,resamplePoints} from './branch-sweep-kernel.js';
 export {createSweptBranchGeometry} from './branch-sweep-kernel.js';
@@ -16,7 +18,7 @@ import { buildFoliageUnitSources } from './foliage-unit.js';
 import { sampleLeafMaterial, sampleLeafMaterialName, normalizeLeafMaterial } from './leaf-material-data.js';
 import { resolveSampleMaterial, sampleMaterialId } from './sample-materials.js';
 import { completeInstanceMatrix } from './branch-instance-matrix.js';
-import { branchMountAt } from './branch-mount-frame.js';
+import { branchMountAt,transportMountFrames } from './branch-mount-frame.js';
 import { transformBranchShape, sampleTangent, resolveInstanceShape, resolveInstanceAsset } from './branch-workbench-data.js';
 import { sampleFoliagePlacements, localSampleBranches, mountSamplePlacement, sampleInstanceUnitEditing } from './sample-foliage.js';
 import { sectionAt, branchRadiusAt, branchSampleTs } from './branch-shaping.js';
@@ -87,6 +89,7 @@ export const SPECIES_PRESETS = {
 
 export const DEFAULT_SETTINGS = {
   export_format: 'GLB',
+  export_rigged: false,
   schema_version: 4,
   object_name: '程序化树枝单元',
   species_profile: 'BROADLEAF',
@@ -321,6 +324,7 @@ export function normalizeSettings(raw = {}) {
     value.high_detail_mesh_budget ? 45000 : 10000));
   value.export_material_setup = value.export_material_setup !== false;
   value.export_format = value.export_format === 'GLB' ? 'GLB' : 'FBX';
+  value.export_rigged = value.export_format==='GLB'&&value.export_rigged===true;
   value.export_state_variants = Boolean(value.export_state_variants);
   value.nanite_policy = ['AUTO', 'ENABLED', 'DISABLED'].includes(value.nanite_policy) ? value.nanite_policy : 'AUTO';
   value.ue_destination = String(value.ue_destination || '/Game/BranchForge').replace(/\\/g, '/');
@@ -581,6 +585,8 @@ function damageAllowsBranch(settings, rng, order, childIndex) {
 }
 
 export function branchInstanceFrame(instance, parent, settings) {
+  const surface=trunkInstanceSurfaceFrame(instance,parent);
+  if(surface)return {position:surface.position.clone(),direction:surface.direction.clone(),scale:instance.scale*(1+(createRng(instance.seed)()*2-1)*instance.variation)};
   const tangent = parent ? tangentOnPolyline(parent.points, instance.attach) : new THREE.Vector3(0, 0, 1);
   const position = parent ? pointOnPolyline(parent.points, instance.attach) : new THREE.Vector3(...(instance.frame?.position || [0, 0, 0]));
   let direction = childDirection(tangent, radians(instance.angle), radians(instance.azimuth), settings, createRng(instance.seed));
@@ -772,6 +778,8 @@ function* buildBranchGraphSteps(settings, state, rawAuthoring, hadInstances = fa
   }
   else if (authoring.branch_shape) appendShape(authoring.branch_shape.branches);
   else if (authoring.vine) appendShape((authoring.flowering.enabled ? createFloweringShape(authoring.vine, authoring.seeds.shape, authoring.flowering.style) : createVineShape(authoring.vine, authoring.seeds.shape)).branches);
+  const graphImportedHosts=importedTrunkHostIds(authoring);
+  for(const branch of branches)if(graphImportedHosts.has(branch.stableId)){branch.importedTrunkHost=true;const mount=authoring.imported_trunks.mounts.find(m=>Object.values(m.guide_map).includes(branch.stableId));branch.importedTrunkSource={mount,asset:authoring.imported_trunks.assets.find(a=>a.id===mount.asset_id)};}
   yield {stage:'graph-shape'};
   const addManual = (manual) => {
     if (branches.some((b) => b.stableId === manual.id)) return;
@@ -809,7 +817,7 @@ function* buildBranchGraphSteps(settings, state, rawAuthoring, hadInstances = fa
       const matrix=completeInstanceMatrix(instance,shape,parent,settings,branchInstanceFrame),scale=new THREE.Vector3().setFromMatrixScale(matrix).x;
       const records=shape.branches.map(r=>({...r,points:r.points.map(p=>new THREE.Vector3(...p).applyMatrix4(matrix).toArray()),knots:r.knots?.map(p=>new THREE.Vector3(...p).applyMatrix4(matrix).toArray()),length:r.length*scale,start_radius:r.start_radius*scale*instance.radius_scale,end_radius:r.end_radius*scale*instance.radius_scale}));
       const startIndex=branches.length;appendShape(records,instance.id,parent,instance.attach,instance.junction);
-      for(const branch of branches.slice(startIndex)){branch.shootRole=instance.shootRole;branch.mountMatrix=branchMountAt(parent,instance.attach)?.clone()||new THREE.Matrix4();}
+      for(const branch of branches.slice(startIndex)){branch.shootRole=instance.shootRole;branch.mountMatrix=branchMountAt(parent,instance.attach)?.clone()||new THREE.Matrix4();if(instance.trunk_anchor)branch.trunkAnchorPlacement=matrix;}
       prefabPending.splice(n--,1);progress=true;
     }}
   }
@@ -823,7 +831,8 @@ function* buildBranchGraphSteps(settings, state, rawAuthoring, hadInstances = fa
     records.forEach((r) => { r.start_radius *= instance.radius_scale; r.end_radius *= instance.radius_scale; });
     const startIndex = branches.length;
     appendShape(records, instance.id, parent, instance.attach, instance.junction);
-    for (const branch of branches.slice(startIndex)) branch.shootRole = instance.shootRole;
+    const trunkPlacement=instance.trunk_anchor?completeInstanceMatrix(instance,shape,parent,settings,branchInstanceFrame):null;
+    for (const branch of branches.slice(startIndex)){branch.shootRole = instance.shootRole;if(trunkPlacement)branch.trunkAnchorPlacement=trunkPlacement;}
     yield {stage:'graph-instances'};
   }
   authoring.manual_branches.forEach(addManual);
@@ -870,11 +879,37 @@ function* buildBranchGraphSteps(settings, state, rawAuthoring, hadInstances = fa
     };
     updateOrders(child, parent.order + 1);
   });
-  for(const step of applySculptLayerSteps(branches, authoring.sculpt_layers, authoring.overrides, authoring.topology.suppressed)){appendPrefabInstances();yield step;}
+  // Construction layers can introduce a carrier after the initial manual pass.
+  // Resume its ordinary recipe children at that boundary with fresh numeric IDs.
+  let pendingManual=authoring.manual_branches.filter(m=>!branches.some(b=>b.stableId===m.id));
+  function appendLateManual(){
+    if(!pendingManual.length)return;
+    for(const b of branches)nextId=Math.max(nextId,b.id+1);
+    let previous;
+    do{
+      previous=pendingManual.length;
+      for(const manual of pendingManual){const parent=branches.find(b=>b.stableId===manual.parent);if(parent&&!parent.instanceId&&!parent.unitOwner)addManual(manual);}
+      pendingManual=pendingManual.filter(m=>!branches.some(b=>b.stableId===m.id));
+    }while(pendingManual.length&&pendingManual.length<previous);
+  }
+  const sculptSteps=applySculptLayerSteps(branches, authoring.sculpt_layers, authoring.overrides, authoring.topology.suppressed);while(true){const before=captureTrunkCarrierMotion(authoring,branches),next=sculptSteps.next();if(next.done)break;followTrunkCarrierMotion(branches,before);appendLateManual();appendPrefabInstances();yield next.value;}
   appendPrefabInstances();
   applyProceduralGrowth(branches, authoring);
   applyBranchSymmetry(branches, authoring.symmetry_groups);
   applySkeletonThickness(branches, authoring.workbench, settings);
+  resolveTrunkCarrierFrames(authoring,branches);
+  if(authoring.imported_trunks&&authoring.branch_instances.some(i=>i.trunk_anchor)){
+    resolveTrunkAttachmentFrames(authoring,branches);
+    // Move the entire installed family once. Its source mesh, leaf positions
+    // and nested-unit boundaries remain unchanged by the surface attachment.
+    for(const instance of authoring.branch_instances){
+      if(!instance.trunk_anchor)continue;
+      const shape=resolveInstanceShape(instance,authoring.branch_library),parent=branches.find(b=>b.stableId===instance.parent),root=branches.find(b=>b.instanceId===instance.id&&b.parentId===parent?.id);
+      if(!shape||!root?.trunkAnchorPlacement)throw Error('树干挂接的完整单元枝缺少装配基准：'+instance.id);
+      const desired=completeInstanceMatrix(instance,shape,parent,settings,branchInstanceFrame),delta=desired.multiply(root.trunkAnchorPlacement.clone().invert()),queue=[root.id],visited=new Set();
+      while(queue.length){const id=queue.shift(),branch=branches.find(b=>b.id===id);if(!branch||visited.has(id))continue;visited.add(id);const previous={...branch},points=cloneAxis(branch.points,p=>p.clone().applyMatrix4(delta)),frames=transportMountFrames(previous,points,delta);branch.points=points;branch.controlPoints=branch.controlPoints?.map(p=>p.clone().applyMatrix4(delta));if(frames)Object.assign(branch,frames);for(const child of branch.children)queue.push(child);}
+    }
+  }
   for(const b of branches)if(b.radiusEdits?.length)b.radiusSettings=settings;
   // Resolve surface recipes only after all skeleton and instance attachment
   // calculations. Units retain their source geometry and original transforms.
@@ -1663,9 +1698,9 @@ function addDamageScars(group, branches, settings, materials) {
 function addJunctionCollars(group, branches, settings, material) {
   if (!settings.junction_collar) return [];
   const records = [];
-  branches.filter((branch) => branch.parentId >= 0 && !branch.skeletonRadius).forEach((branch) => {
+  branches.filter((branch) => branch.parentId >= 0 && !branch.skeletonRadius && !branch.importedTrunkHost).forEach((branch) => {
     const parent = branches.find((candidate) => candidate.id === branch.parentId);
-    if (!parent) return;
+    if (!parent || parent.importedTrunkHost) return;
     const geometry = new THREE.SphereGeometry(branch.startRadius * (1.28 + settings.junction_flare * 0.5), Math.max(6, settings.radial_segments), 5);
     const radiusFactor=radiusFactorAt(branch,0);geometry.scale(radiusFactor,radiusFactor,radiusFactor);
     geometry.userData.radiusRings=[{t:0,center:[0,0,0],offset:0,count:geometry.getAttribute('position').count}];
@@ -1796,7 +1831,8 @@ export function createStructuralSweepJobs(rawSettings,rawAuthoring,lodIndex=0,{c
   const authoring=normalizeAuthoring(rawAuthoring,settings.seed);settings={...applyTimeline(vineSettings(settings,authoring.vine),authoring),wind_profile:authoring.wind_profile};
   const graph=buildBranchGraph(settings,stateFactors(settings),authoring,hadInstances),lod=LOD_PROFILES[clamp(lodIndex,0,3)];
   const adjusted=authoring.recipe.tags.includes('NATURAL_BRANCH_V2')||authoring.recipe.tags.includes('CN_TREE_STARTER')&&authoring.recipe.tags.includes('GINKGO')?{...lod,maxLevelOffset:Math.max(-1,lod.maxLevelOffset)}:lod;
-  return deriveLodBranches(graph,settings,adjusted).filter(b=>!b.unitOwner&&!b.instanceId&&!b.sourceAssetId&&!b.copySnapshot&&!b.localBundle).map(branch=>({id:branch.stableId,branch:encodeSweepBranch(branch),form:branch.trunkForm||null,lodIndex,settings,adaptiveCurveDetail:settings.curvature_detail*lod.segment,radialSegments:Math.max(4,Math.round(settings.radial_segments*lod.radial)),continuousBark:continuousBark&&(!branch.trunkForm||isDirectTrunkForm(branch.trunkForm))}));
+  const imported=importedTrunkHostIds(authoring);
+  return deriveLodBranches(graph,settings,adjusted).filter(b=>!imported.has(b.stableId)&&!b.unitOwner&&!b.instanceId&&!b.sourceAssetId&&!b.copySnapshot&&!b.localBundle).map(branch=>({id:branch.stableId,branch:encodeSweepBranch(branch),form:branch.trunkForm||null,lodIndex,settings,adaptiveCurveDetail:settings.curvature_detail*lod.segment,radialSegments:Math.max(4,Math.round(settings.radial_segments*lod.radial)),continuousBark:continuousBark&&(!branch.trunkForm||isDirectTrunkForm(branch.trunkForm))}));
 }
 
 function deriveLodPlacements(masterPlacements, branches, lod) {
@@ -1919,6 +1955,8 @@ function* buildBranchAssetSteps(rawSettings = {}, materials = null, leafSourceGe
   const unitBarkMaterials=new Map(),incomplete={group,materials:resolvedMaterials,ownsMaterials:ownedMaterials};let completed=false;
   try{
   const masterBranches = yield* buildBranchGraphSteps(settings, state, authoring, skeletonOnly && rawAuthoring?.branch_instances?.length > 0);
+  const importedHosts=importedTrunkHostIds(authoring);
+  for(const branch of masterBranches)if(importedHosts.has(branch.stableId))branch.importedTrunkHost=true;
   yield {stage:'graph-final'};
   // Ginkgo foliage lives on short spurs; dropping that entire tier makes LOD3 bare.
   const spurLod = authoring.recipe.tags.includes('CN_TREE_STARTER') && authoring.recipe.tags.includes('GINKGO')
@@ -1928,6 +1966,8 @@ function* buildBranchAssetSteps(rawSettings = {}, materials = null, leafSourceGe
   const foliageLod = authoring.recipe.tags.includes('NATURAL_BRANCH_V2')
     ? { ...spurLod, maxLevelOffset: Math.max(-1, spurLod.maxLevelOffset) } : spurLod;
   const branches = deriveLodBranches(masterBranches, settings, foliageLod);
+  for(const branch of masterBranches)if(importedHosts.has(branch.stableId)&&!branches.some(b=>b.stableId===branch.stableId))branches.push(branch);
+  if(importedHosts.size)branches.sort((a,b)=>a.id-b.id);
   // Complete units own their wood appearance. TREE's palette belongs only to
   // the structural skeleton, including when old edits require the graph path.
   const instancesById = new Map(authoring.branch_instances.map(i => [i.id, i]));
@@ -1985,6 +2025,7 @@ function* buildBranchAssetSteps(rawSettings = {}, materials = null, leafSourceGe
       parentIndex: parent ? parent.elementIndex : -1, pivot: branch.points[0].toArray(), axis: axis.toArray(),
       extent: branch.length, order: branch.order, phase: branch.windPhase,
     });
+    if(importedHosts.has(branch.stableId)){yield {stage:'imported-trunk-guides'};continue;}
     const sweepSource=branch.legacyRigidGeometry?.baseline || branch;
     const renderSource = settings.adaptive_tessellation && lodIndex < 2 && !sweepSource.surfaceNormals
       ? { ...sweepSource, points: adaptiveCurvePoints(sweepSource.points, settings.curvature_detail * lod.segment) }
@@ -2170,6 +2211,7 @@ function* buildBranchAssetSteps(rawSettings = {}, materials = null, leafSourceGe
       }finally{geometry.dispose();}
     });
   }
+  if(!skeletonOnly&&authoring.imported_trunks){const imported=buildImportedTrunkMeshes(authoring,masterBranches,elements);imported.meshes.forEach(mesh=>branchGroup.add(mesh));lookupRecords.push(...imported.lookup);imported.materials.forEach((material,i)=>unitBarkMaterials.set('imported:'+i,material));yield {stage:'imported-trunk-meshes'};}
   const lookupTexture = assignLookupUvs(lookupRecords, elements.length);
   group.traverse((object) => { if (object.isMesh && object.geometry) ensureGeometryTangents(object.geometry); });
   const geometryQualityCache=new WeakMap();
@@ -2214,6 +2256,7 @@ export function disposeBranchAssetAsync(asset,scheduling={}) {
   return runBuildSteps(disposeBranchAssetSteps(asset),{...rest,drainOnError:true});
 }
 function* disposeBranchAssetSteps(asset) {
+  disposeImportedTrunkTextures(asset?.group);
   asset?.activeEditPreview?.restore();
   if(asset?.disposeCompiledSampleSteps)yield* asset.disposeCompiledSampleSteps();
   else asset?.disposeCompiledSamples?.();

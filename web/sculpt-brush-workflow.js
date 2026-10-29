@@ -4,15 +4,15 @@ const STORAGE = 'treeDuck.sculptBrushes.v1';
 // Selection, trunk protection and document geometry stay shared and are never
 // restored from a brush preset.
 const fields = ['sculptRadius', 'sculptStrength', 'sculptHardness', 'sculptFlexibility', 'sculptLength', 'sculptScope', 'sculptDepth', 'sculptDirection'];
-export function createSculptBrushWorkflow({canvas, controls, getTool, blocked, refresh, hidePreview = () => {}, status}) {
+export function createSculptBrushWorkflow({canvas, controls, getTool, blocked, refresh, hidePreview = () => {}, status, brushTools = SCULPT_TOOLS, hudId = 'brushAdjustHud', storageKey = STORAGE}) {
   const $ = id => document.getElementById(id);
   const read = () => Object.fromEntries(fields.map(id => [id, $(id).value]));
   const defaults = read();
   let profiles = {}, current = '', loading = false, gesture = null, pointer = null, saveTimer = 0, swallowed = null, suppressContextUntil = 0;
-  try { const stored = JSON.parse(localStorage.getItem(STORAGE)); if (stored?.version === 1 && stored.brushes && typeof stored.brushes === 'object' && !Array.isArray(stored.brushes)) profiles = stored.brushes; } catch {}
-  const persist = () => { clearTimeout(saveTimer); saveTimer = 0; try {localStorage.setItem(STORAGE, JSON.stringify({version:1, brushes:profiles}));} catch {} };
+  try { const stored = JSON.parse(localStorage.getItem(storageKey)); if (stored?.version === 1 && stored.brushes && typeof stored.brushes === 'object' && !Array.isArray(stored.brushes)) profiles = stored.brushes; } catch {}
+  const persist = () => { clearTimeout(saveTimer); saveTimer = 0; try {localStorage.setItem(storageKey, JSON.stringify({version:1, brushes:profiles}));} catch {} };
   function remember() {
-    if (loading || gesture || !SCULPT_TOOLS.has(current)) return;
+    if (loading || gesture || !brushTools.has(current)) return;
     profiles[current] = read(); clearTimeout(saveTimer); saveTimer = setTimeout(persist, 180);
   }
   function write(id, value) {
@@ -28,13 +28,13 @@ export function createSculptBrushWorkflow({canvas, controls, getTool, blocked, r
   }
   function switchTool(next) {
     cancel(); remember(); current = next;
-    if (!SCULPT_TOOLS.has(next)) return;
+    if (!brushTools.has(next)) return;
     const values = profiles[next] || {...defaults, ...(next === 'SMOOTH_BRUSH' ? {sculptStrength:'0.35'} : {})};
     loading = true; try {for (const id of fields) write(id, values[id] ?? defaults[id]);} finally {loading = false;}
     remember();
   }
   for (const id of fields) $(id).addEventListener('input', remember);
-  const hud = document.createElement('div'); hud.id = 'brushAdjustHud'; hud.className = 'brush-adjust-hud'; hud.hidden = true;
+  const hud = document.createElement('div'); hud.id = hudId; hud.className = 'brush-adjust-hud'; hud.hidden = true;
   hud.innerHTML = '<svg aria-hidden="true"><circle class="brush-adjust-ring"></circle></svg><div role="status"><strong></strong><span>移动鼠标调整 · 左键 / Enter 确认 · 右键 / Esc 取消</span></div>';
   canvas.parentElement.append(hud);
   const consume = event => {event.preventDefault(); event.stopImmediatePropagation();};
@@ -65,7 +65,7 @@ export function createSculptBrushWorkflow({canvas, controls, getTool, blocked, r
     }
     if (event.key.toLowerCase() !== 'f' || event.ctrlKey || event.altKey || event.metaKey || event.repeat || event.isComposing
       || event.target?.isContentEditable || event.target?.matches?.('input,textarea,select') || document.querySelector('dialog[open]')
-      || !SCULPT_TOOLS.has(getTool()) || blocked() || !pointer?.onCanvas) return;
+      || !brushTools.has(getTool()) || blocked() || !pointer?.onCanvas) return;
     const bounds = canvas.getBoundingClientRect();
     if (pointer.x < bounds.left || pointer.x > bounds.right || pointer.y < bounds.top || pointer.y > bounds.bottom) return;
     consume(event);

@@ -67,12 +67,19 @@ def fake_unreal():
 
     def connect(source, source_pin, target, target_pin):
         calls['connections'].append((source, source_pin, target, target_pin))
+        assert source_pin != 'RGB', 'UE unnamed RGB output must use its default port'
+        assert target.kind != 'TextureSample' or target_pin == '', 'Texture coordinates use the default input'
+        return True
+
+    def connect_property(node, pin, prop):
+        assert pin != 'RGB'
+        node.properties['material_output'] = prop
         return True
 
     module.MaterialEditingLibrary = types.SimpleNamespace(
         delete_all_material_expressions=lambda material: material.nodes.clear(),
         create_material_expression=expression, connect_material_expressions=connect,
-        connect_material_property=lambda node, pin, prop: node.properties.update({'material_output': prop}),
+        connect_material_property=connect_property,
         recompile_material=lambda *_: True)
     module.log = lambda *_: None
     return module, calls

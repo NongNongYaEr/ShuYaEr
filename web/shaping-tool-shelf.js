@@ -4,6 +4,7 @@ export function organizeShapingTools(workflow = {}) {
     ['选择', ['SELECT', 'BOX_SELECT', 'LASSO_SELECT'], ['openBranchInfluence']],
     ['变换', ['BUNDLE_MOVE', 'BUNDLE_ROTATE', 'BUNDLE_SCALE'], ['openBranchPose']],
     ['梳理雕刻', ['GRAB', 'COMB', 'BEND_BRUSH', 'PUSH_PULL', 'SMOOTH_BRUSH', 'TWIST_BRUSH'], ['openBranchCage']],
+    ['单元枝笔刷', [], ['unitPaintTool','unitDensityTool','unitSizeTool']],
     ['修剪生长', ['PRUNE', 'LINE_PRUNE', 'ERASE_BRANCH', 'GROW', 'RETRACT', 'FORK', 'SPREAD'], ['openBranchStroke', 'openLocalBranches']],
     ['粗细截面', ['THICKNESS'], ['openBranchVolume', 'openSectionContext', 'openJunctionContext']],
     ['路径层级', ['GUIDE', 'PROTECT', 'SIMPLIFY_BRUSH', 'REFINE_BRUSH'], ['openBranchGuide', 'openBranchSpace', 'openShapeStack']],
@@ -11,11 +12,12 @@ export function organizeShapingTools(workflow = {}) {
   ];
   const captions = {SELECT:'点选',BOX_SELECT:'框选',LASSO_SELECT:'套索',openBranchInfluence:'影响范围',BUNDLE_MOVE:'移动 G',BUNDLE_ROTATE:'旋转 R',BUNDLE_SCALE:'缩放 S',openBranchPose:'姿态',GRAB:'拉动',COMB:'梳理',BEND_BRUSH:'弯曲',PUSH_PULL:'推拉',SMOOTH_BRUSH:'平滑',TWIST_BRUSH:'扭转',openBranchCage:'笼形',PRUNE:'修剪',LINE_PRUNE:'划线剪',ERASE_BRANCH:'删除枝',GROW:'延长',RETRACT:'回缩',FORK:'分叉',SPREAD:'展开',openBranchStroke:'绘枝',openLocalBranches:'加枝',THICKNESS:'粗细',openBranchVolume:'体积',openSectionContext:'截面',openJunctionContext:'接点',GUIDE:'引导',PROTECT:'保护',SIMPLIFY_BRUSH:'简化',REFINE_BRUSH:'细分',openBranchGuide:'导向线',openBranchSpace:'空间',openShapeStack:'造型层',LEAF_ADD:'补叶',LEAF_ERASE:'擦叶',WIND_SOFT:'柔风',WIND_STIFF:'硬风',openBranchArray:'阵列',openInstanceEditor:'实例',openBranchSymmetry:'对称'};
   Object.assign(captions, {SELECT:'点选 V', COMB:'梳理 C', GRAB:'拉动 B'});
+  Object.assign(captions,{unitPaintTool:'刷生成',unitDensityTool:'密度刷',unitSizeTool:'大小刷'});
   rail.replaceChildren();
   const heading = document.createElement('div'); heading.className = 'tool-catalog-heading';
   heading.innerHTML = '<span>造型工具</span><button type="button" id="expandShapingGroups" title="展开全部工具分组" aria-label="展开全部工具分组">全部</button>'; rail.append(heading);
   for (const [title, keys, ids] of groups) {
-    const group = document.createElement('details'); group.className = 'shaping-tool-group'; group.open = ['选择','变换','梳理雕刻'].includes(title);
+    const group = document.createElement('details'); group.className = 'shaping-tool-group'; group.open = ['选择','变换','梳理雕刻','单元枝笔刷'].includes(title);
     const summary = document.createElement('summary'); summary.textContent = title; summary.dataset.short = title.slice(0,2); summary.title = title; group.append(summary);
     const content = document.createElement('div'); content.className = 'shaping-tool-buttons'; group.append(content);
     buttons.filter((b) => keys.includes(b.dataset.viewportTool) || ids.includes(b.id)).forEach((b) => {

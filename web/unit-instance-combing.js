@@ -255,18 +255,27 @@ function fixedStrokeUpdate(entry, options, state, motion, influence, force) {
     effect: state.effect, progress: 0, instance: copyPlacement(entry.instance), frame: placementContext(entry).frame,
     targetRotation: state.targetRotation?.clone(), targetScaleRatio: state.targetScaleRatio,
   };
-  const progress = Math.min(1, stroke.progress + motion.length() / Math.max(.01, Number(options.worldRadius) || 1) * force * influence * 2);
-  if (progress === stroke.progress) return null;
+  const step = motion.length() / Math.max(.01, Number(options.worldRadius) || 1) * force * influence * 2;
+  // Size direction may change with Alt during the same pen. Integrate a signed
+  // amount from the original placement: changing direction never resets the
+  // baseline or jumps to a different fixed target, and the whole pen stays capped.
+  const sizeProgress = state.effect === 'SCALE'
+    ? clamp((stroke.sizeProgress ?? 0) + step * (options.sizeMode === 'SHRINK' ? -1 : 1), -1, 1) : null;
+  const progress = state.effect === 'SCALE' ? Math.abs(sizeProgress) : Math.min(1, stroke.progress + step);
+  if (state.effect === 'SCALE' ? sizeProgress === (stroke.sizeProgress ?? 0) : progress === stroke.progress) return null;
   const totalRotation = new THREE.Quaternion().slerp(stroke.targetRotation || new THREE.Quaternion(), progress);
   const after = state.effect === 'SCALE' ? copyPlacement(stroke.instance)
     : rotatedPlacement(entry, stroke.instance, stroke.frame || evaluatedInstanceFrame(stroke.instance, entry.shape, placementContext(entry).carriers, entry.settings), totalRotation);
-  after.scale = state.effect === 'SCALE' ? stroke.instance.scale * (1 + (stroke.targetScaleRatio - 1) * progress) : stroke.instance.scale;
+  const family = entry.familyScales || [stroke.instance.scale];
+  const sizeRatio = state.effect === 'SCALE' ? clamp(1 + Number(options.sizeLimitPercent ?? 20) / 100 * sizeProgress,
+    Math.max(...family.map(scale => INSTANCE_SCALE_MIN / scale)), Math.min(...family.map(scale => INSTANCE_SCALE_MAX / scale))) : 1;
+  after.scale = state.effect === 'SCALE' ? stroke.instance.scale * sizeRatio : stroke.instance.scale;
   after.radius_scale = stroke.instance.radius_scale;
   const before = copyPlacement(entry.instance), { matrix, frame } = placementDelta(entry, after);
   if (matrix.elements.every((value, index) => Math.abs(value - identityElements[index]) < 1e-13)) return null;
   const rotation = new THREE.Quaternion().setFromRotationMatrix(matrix.clone().extractRotation(matrix));
   const update = { id: entry.id, before, after, shape: entry.shape, rotation, matrix, weight: influence, effect: state.effect,
-    orientation: options.orientation || 'DRAG', familyIds: entry.familyIds, stroke: { ...stroke, progress } };
+    orientation: options.orientation || 'DRAG', familyIds: entry.familyIds, stroke: { ...stroke, progress, ...(sizeProgress !== null ? { sizeProgress } : {}) } };
   updateFrames.set(update, frame); return update;
 }
 

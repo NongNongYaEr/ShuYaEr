@@ -1,4 +1,5 @@
 import {markNativeModelChanged} from './native-model-changes.js';
+import {resolveTrunkAttachmentFrames} from './imported-trunk-attachments.js';
 import * as THREE from './vendor/three.module.min.js';
 import { branchMountAt } from './branch-mount-frame.js';
 import { completeInstanceMatrix } from './branch-instance-matrix.js';
@@ -22,6 +23,7 @@ const sampleBaseAuthoring=(a,managed)=>{const organAssets=a.branch_instances.len
 // building materials, generating foliage, sweeping vertices or scanning faces.
 export function createSampleCurveReference(settings,authoring,{buildCurves,graph,frame}){
   const managed=authoring.branch_instances.filter(i=>sampleAsset(i,authoring)?.sample),base=buildCurves(settings,sampleBaseAuthoring(authoring,managed));
+  resolveTrunkAttachmentFrames(authoring,base);
   const edited=editedSampleIds(authoring),families=new Map(),overrides=new Map();
   if(authoring.branch_instances.some(i=>edited.has(i.id)))for(const b of graph(settings,authoring)){let list=families.get(b.instanceId);if(!list)families.set(b.instanceId,list=[]);list.push(b);}
   for(const [id,value]of Object.entries(authoring.overrides)){const dot=id.indexOf('.');if(dot<0)continue;const owner=id.slice(0,dot);let list=overrides.get(owner);if(!list)overrides.set(owner,list=[]);list.push([id.slice(dot+1),{leaf_density:value.leaf_density}]);}
@@ -98,6 +100,7 @@ export function* compileSampleAssemblySteps(settings, authoring, sources, lod, m
   base.disposeCompiledSamples=()=>finishBuildSteps(base.disposeCompiledSampleSteps());
   try{
   yield {stage:'supports'};
+  resolveTrunkAttachmentFrames(authoring,base.masterBranches);
   let baseBranches = base.masterBranches.slice(), baseVisible = base.branches.slice(), baseElements = base.elements.slice();
   const baseLeaves = base.placements.slice(), baseMasterLeaves = base.masterPlacements.slice(), baseOrgans = base.treeOrgans.slice();
   const baseMeshes = []; base.group.traverse(o => { if (o.isMesh) baseMeshes.push(o); });
@@ -388,9 +391,41 @@ export function* compileSampleAssemblySteps(settings, authoring, sources, lod, m
       // Restore borrowed GPU preview geometry only after every reuse check has
       // passed, immediately before installing the new instance matrices.
       beforeCommit();
+      resolveTrunkAttachmentFrames(next,baseBranches);
       const changed=metadata(next);base.authoring=next;base.settings=nextSettings;updateMatrices(changed);updateQuality();
       // Geometry, material, topology and counts did not change; no vertex scan.
       markNativeModelChanged(base);base.group.userData.pending_rebuild=false;return true;
+    };
+    // Membership-only strokes keep the entire support mesh, decoded atlases,
+    // source geometry and native resource identities. Restrict this shortcut to
+    // validated flat placements of prototypes already owned by this assembly.
+    base.updateAssemblyMembers=(nextSettings,next,{beforeCommit=()=>{}}={})=>{
+      if(!base.isInstancedAssembly||hasEdits||nested||base.authoring.branch_instances.length===next.branch_instances.length||!equalData(settings,nextSettings))return false;
+      const rest=a=>{const {branch_instances,workbench,...other}=a;return other;};
+      const fixedWorkbench=a=>{const {assembly_voids,assembly_slots,assembly_scale,assembly_distribution,...rest}=a.workbench||{};return rest;};
+      if(!equalData(rest(base.authoring),rest(next))||!equalData(fixedWorkbench(base.authoring),fixedWorkbench(next)))return false;
+      const supports=new Map(baseBranches.map(b=>[b.stableId,b])),old=new Map(entries.map(e=>[e.i.id,e])),prepared=[];
+      for(const i of next.branch_instances){
+        if(!supports.has(i.parent))return false;
+        const before=old.get(i.id);if(before){if(!equalData(before.i,i))return false;prepared.push(before);continue;}
+        const item=sampleAsset(i,next);if(!i.linked||i.shape||!item?.sample)return false;
+        const p=prototypes.get(JSON.stringify([item.id,item.revision,'']));
+        if(!p||p.custom||!prototypeUnchanged(p))return false;
+        const members=entries.filter(e=>e.p===p),limit=Math.max(1,...members.map(e=>e.i.radius_scale));if(i.radius_scale>limit)return false;
+        const shape=resolveInstanceShape(i,next.branch_library),matrix=matrixFor(i,shape,supports);prepared.push({i,p,shape,matrix});
+      }
+      beforeCommit();entries.splice(0,entries.length,...prepared);managed.splice(0,managed.length,...next.branch_instances);
+      resolveTrunkAttachmentFrames(next,baseBranches);metadata(next);
+      for(const record of batches){
+        const members=entries.filter(e=>e.p===record.members[0]?.p||e.p.meshes.includes(record.mesh));record.members.splice(0,record.members.length,...members);
+        const {batch}=record,count=members.length;
+        if(count>batch.instanceMatrix.count)batch.instanceMatrix=new THREE.InstancedBufferAttribute(new Float32Array(Math.min(1600,2**Math.ceil(Math.log2(count)))*16),16);
+        batch.count=count;
+        if(batch.geometry.hasAttribute('sampleRadius'))batch.geometry.setAttribute('sampleRadius',new THREE.InstancedBufferAttribute(new Float32Array(members.map(e=>e.i.radius_scale)),1));
+      }
+      const live=new Set(entries.map(e=>e.i.id));for(const key of proxies.keys())if(!live.has(key.slice(0,key.indexOf(':'))))proxies.delete(key);
+      base.lookupTexture=lookup([],base.elements.length);base.group.userData.lookup_texture=base.lookupTexture;
+      base.authoring=next;base.settings=nextSettings;updateMatrices();updateReport();markNativeModelChanged(base);base.group.userData.pending_rebuild=false;return true;
     };
     base.updateSupportingBranches=(nextSettings,next,{beforeCommit=()=>{},branchGeometries}={})=>{
       if(!base.isInstancedAssembly||hasEdits||nested||!equalData(settings,nextSettings)
@@ -399,6 +434,7 @@ export function* compileSampleAssemblySteps(settings, authoring, sources, lod, m
       const started=performance.now();
       let stage=started;const timings={};const mark=key=>{const now=performance.now();timings[key]=now-stage;stage=now;};
       const candidate=build(nextSettings,base.materials,sources,lod,{...next,branch_instances:next.branch_instances.filter(i=>!managed.some(m=>m.id===i.id))},{branchGeometries});
+      try{resolveTrunkAttachmentFrames(next,candidate.masterBranches);}catch(error){dispose(candidate);throw error;}
       mark('build');
       const meshes=[];candidate.group.traverse(o=>{if(o.isMesh)meshes.push(o);});
       // Palette equality was checked in the document. The displayed mesh may
@@ -414,7 +450,7 @@ export function* compileSampleAssemblySteps(settings, authoring, sources, lod, m
       // GPU preview intact until the full replacement is ready.
       beforeCommit();
       const oldOwned = new Set(base.unitBarkMaterials || []), freshOwned = new Set(candidate.unitBarkMaterials || []);
-      const paletteKey = material => material?.userData?.bark_material ? JSON.stringify([
+      const paletteKey = material => material?.importedTrunk ? 'imported:'+material.importedTrunk.asset.id+':'+material.importedTrunk.asset.revision+':'+material.importedTrunk.asset.source.sha256+':'+JSON.stringify(material.importedTrunk.asset.materials[material.importedTrunk.index]) : material?.userData?.bark_material ? JSON.stringify([
         material.userData.bark_material, material.color.toArray(), material.roughness, material.normalScale.toArray(),
         ...['map','normalMap','roughnessMap'].map(slot => {
           const texture=material[slot];

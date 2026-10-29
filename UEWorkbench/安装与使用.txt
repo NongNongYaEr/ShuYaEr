@@ -1,0 +1,34 @@
+树鸭儿 UE 5.8 完整工作台 0.2.65
+
+适用 UE 5.8.0 / Windows x64 编辑器 / BuildId 55116800。
+软件继续使用 04_全资产开发中的树鸭儿 0.2.64；本包只更新 UE 工作台与桥接。
+
+安装
+1. 保存并退出目标 UE 工程。
+2. 解压整个包。PowerShell 中执行：
+   & './install-ue-workbench.ps1' -ProjectFile 'Z:/UEproject/Day30Man/Day30Man.uproject' -EngineRoot 'Z:/UEEngine/UE_5.8'
+3. 重开 UE，从「工具 → BranchForge PVE 工作台」进入，标题显示 0.2.65。
+   安装会校验文件与引擎版本，备份原文件。原有 init_unreal.py 入口、其他工作台与内容资产保留；缺少入口时才追加注册。
+   只检查不安装：在命令末尾添加 -VerifyOnly。
+   回滚：同一脚本传 -ProjectFile 及 -RestoreBackup '安装回执中的 backup 路径'。修改过的文件会停止自动回滚，避免覆盖后续编辑。
+
+导入雕刻 / AI 树干
+1. 在树鸭儿中保存工程，导出「UE/PVE 完整单元枝包」。保持整个导出目录完整。
+2. 工作台选择包内 whole.pve-skeleton.json，选择「新建：完整包自动导入」。
+3. 设置新的空内容目录，例如 /Game/Day30/Vegetation/Trees/TrunkV3，检查后创建。
+   V3 使用原雕刻网格、原材质、贴图与固定控制骨架。允许只有树干，没有单元枝；不会生成假叶片。
+   单元枝作为完整模型共享，调整装配不拆散其内部木枝、叶花果。
+4. 打开 PVE 图检查。成品导出选择该 PVE 后执行工作台的导出操作。
+   后台生成 SM_Trunk、SK_Trunk 和 SKEL_Trunk，并另启进程重载检查；每次输出到新目录。
+5. 静态展示使用 SM_Trunk。风动使用 SK_Trunk，在 Instanced Skinned Mesh 中配置 Dynamic Wind 变换提供器；普通 Static Mesh 不包含该骨骼风动。
+
+兼容与范围
+旧 V2 完整枝导入、原有树更新和旧工作台流程保留。V3 当前通过“完整包自动导入”新建；修改后再次导出到新版本目录，不覆盖已调好的旧 UE 资产。旧 V2 的原地同步与造型复用按钮对 V3 禁用并说明原因。
+无网格/无材质、缺少贴图、摘要不符、版本不支持、共享单元枝校验失败都会停止导入，显示具体错误并保留回执。源文件和已有树不改动。
+本包不执行外部导出包中的 Python 脚本；使用随工作台发布的受校验实现。
+
+记录
+安装回执与备份：目标工程 Saved/TreeDuckWorkbenchBackups。
+导入回执：Saved/PVEWorkflow/NewTrees。
+成品导出回执：Saved/PVEWorkflow/TrunkExports。
+这是 UE 5.8 原生 PVE / Dynamic Wind 路径；风动外形受 UE 风场参数影响，需要按实际场景调整。

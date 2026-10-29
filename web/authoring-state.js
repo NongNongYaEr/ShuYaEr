@@ -1,8 +1,10 @@
+import {recoverImportedTrunkCurveLayers} from './imported-trunk-curve-recovery.js';
 import { normalizeUnitEditing } from './unit-authoring.js';
+import {normalizeImportedTrunks,normalizeImportedTrunkShapeTimes} from './imported-trunk-runtime.js';
 import {normalizeAxisTimes} from './branch-axis.js';
 import {DEFAULT_WIND_PROFILE} from './wind-profile-defaults.js';
 import { normalizeGenerator, normalizeLayers, normalizeProfile, profileValue } from './generator-data.js';
-import { copy, normalizeBranchShape, normalizeBranchLibrary, normalizeBranchInstances } from './branch-workbench-data.js';
+import { copy, normalizeBranchShape, normalizeBranchLibrary, normalizeBranchInstances, resolveInstanceAsset } from './branch-workbench-data.js';
 import { normalizeSections, normalizeJunction } from './branch-shaping.js';
 import { normalizeSymmetryGroups } from './shape-operation-data.js';
 import { normalizeBranchArrays } from './branch-array-data.js';
@@ -192,6 +194,7 @@ export function normalizeAuthoring(raw = {}, fallbackSeed = 12037, previous = nu
     branch_library: previous&&source.branch_library===previous.branch_library?source.branch_library:normalizeBranchLibrary(source.branch_library),
     branch_instances: previous&&source.branch_instances===previous.branch_instances?source.branch_instances:normalizeBranchInstances(source.branch_instances, previous?.branch_instances),
     branch_arrays: normalizeBranchArrays(source.branch_arrays),
+    ...(source.imported_trunks!=null?{imported_trunks:previous&&source.imported_trunks===previous.imported_trunks?source.imported_trunks:normalizeImportedTrunks(source.imported_trunks)}:{}),
     influence_regions: normalizeInfluenceRegions(source.influence_regions),
     symmetry_groups: normalizeSymmetryGroups(source.symmetry_groups),
     version: AUTHORING_VERSION,
@@ -362,12 +365,24 @@ export function normalizeAuthoring(raw = {}, fallbackSeed = 12037, previous = nu
     tags: [...new Set((source.recipe?.tags || []).map((tag) => String(tag).trim()).filter(Boolean))].slice(0, 16),
     locked_parameters: [...new Set((source.recipe?.locked_parameters || []).map(String))],
   };
+  // Installed authored units own their complete wood, foliage and materials.
+  // Imported trunks and older projects may never have received the template's
+  // rendering tag. Infer it from the actual pinned sources on every load/edit,
+  // so zero carrier foliage cannot strip or reseed a healthy complete unit.
+  // Explicit INSTANCE_SEEDED layouts still retain their existing graph path.
+  if (!result.vine && !result.vegetation.enabled
+      && !result.recipe.tags.includes('SAMPLE_FOLIAGE_FROM_LIBRARY')
+      && result.branch_instances.some(instance => resolveInstanceAsset(
+        instance.linked ? instance : { ...instance, linked: true }, result.branch_library)?.sample)) {
+    result.recipe.tags.push('SAMPLE_FOLIAGE_FROM_LIBRARY');
+  }
   result.quality = {
     max_attachment_overlap: clamp(finite(source.quality?.max_attachment_overlap, 0.08), 0, 1),
     require_tangents: source.quality?.require_tangents !== false,
     require_uvs: source.quality?.require_uvs !== false,
   };
-  return result;
+  result.branch_shape=normalizeImportedTrunkShapeTimes(result.branch_shape,result.imported_trunks);
+  return recoverImportedTrunkCurveLayers(result);
 }
 
 export function cloneAuthoring(authoring) {

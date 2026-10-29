@@ -1,6 +1,7 @@
 ﻿# Data-only, streaming resource exchange. Request IDs select registered files;
 # client paths are never accepted. Child jobs have private work directories.
 . (Join-Path $script:AppDir 'scripts/plant-unit-thumbnail-server.ps1')
+. (Join-Path $script:AppDir 'scripts/trunk-model-server.ps1')
 $script:PlantPackRoot=Join-Path $script:AppDir 'assets/plant-package-library'
 if($env:BRANCHFORGE_SESSION_TEST_DIR){$script:PlantPackRoot=Join-Path $env:BRANCHFORGE_SESSION_TEST_DIR 'plant-package-library'}
 $script:PlantPackJobs=Join-Path $script:ConfigDir 'plant-pack-jobs'
@@ -34,15 +35,18 @@ function Get-PlantPackSources {
         }
     }
     foreach($kind in @('bark','detail','combination','profile','root')){$folder=Join-Path $script:TrunkPresetDir $kind;if(-not(Test-Path -LiteralPath $folder)){continue};foreach($file in Get-ChildItem -LiteralPath $folder -Filter '*.trunkpreset.json' -File){try{$meta=Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8|ConvertFrom-Json;$key='material:'+$kind+':'+[string]$meta.id;$script:PlantPackSources[$key]=@{key=$key;id=[string]$meta.id;type='material';name=[string]$meta.name;kind=$kind;file=$file.FullName};$rows.Add(@{key=$key;type='material';name=[string]$meta.name;revision=1})}catch{}}}
+    $trunkCatalog=Join-Path $script:TrunkModelDir 'catalog.json'
+    if(Test-Path -LiteralPath $trunkCatalog){$catalog=Get-Content -LiteralPath $trunkCatalog -Raw -Encoding UTF8|ConvertFrom-Json;foreach($item in $catalog.items){$key='trunk:'+([string]$item.id);$script:PlantPackSources[$key]=@{key=$key;type='trunk';trunkId=[string]$item.id;trunkLibrary=$script:TrunkModelDir;id=[string]$item.id;name=[string]$item.name;revision=[int]$item.revision};$rows.Add(@{key=$key;type='trunk';id=[string]$item.id;name=[string]$item.name;revision=[int]$item.revision;thumbnail=[string]$item.thumbnail;triangles=$item.triangles;dimensions=$item.dimensions})}}
     return @($rows.ToArray())
 }
 function Invoke-PlantPackRoute($Context,[string]$Path){
+    if(Invoke-TrunkModelRoute $Context $Path){return $true}
     if(Invoke-PlantUnitThumbnailRoute $Context $Path){return $true}
     if(-not $Path.StartsWith('/api/plant-packs/')){return $false};$method=$Context.Request.HttpMethod;$query=$Context.Request.QueryString
     if($Path -eq '/api/plant-packs/library' -and $method -eq 'GET'){$file=Join-Path $script:PlantPackRoot 'catalog.json';if(Test-Path -LiteralPath $file){$catalog=Get-Content -LiteralPath $file -Raw -Encoding UTF8|ConvertFrom-Json;foreach($asset in $catalog.assets){if($asset.type -eq 'units'){$null=Add-PlantUnitThumbnailToSummary $asset}};Send-Json $Context $catalog}else{Send-Json $Context @{success=$true;packages=@();assets=@()}};return $true}
     if($Path -eq '/api/plant-packs/sources' -and $method -eq 'GET'){Send-Json $Context @{success=$true;items=@(Get-PlantPackSources)};return $true}
     if($Path -eq '/api/plant-packs/upload' -and $method -eq 'POST'){
-        $kind=[string]$query['type'];if($kind -cnotin @('plantpack','plant','prefab','branch','units','material')){throw '上传类型无效'}
+        $kind=[string]$query['type'];if($kind -cnotin @('plantpack','plant','trunk','prefab','branch','units','material')){throw '上传类型无效'}
         $limit=if($kind -eq 'plantpack'){4294967296L}else{268435456L};if($Context.Request.ContentLength64 -gt $limit){throw '文件超过资源包容量限制'}
         $id=[Guid]::NewGuid().ToString('N');$folder=Get-PlantPackJob $id;New-Item -ItemType Directory -Force -Path $folder|Out-Null
         $name=if($kind -eq 'plantpack'){'input.plantpack'}else{'input.json'};$target=Join-Path $folder $name;$temp=$target+'.upload';$output=[IO.File]::Create($temp)

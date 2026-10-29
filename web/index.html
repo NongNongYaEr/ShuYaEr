@@ -48,6 +48,7 @@
 <link rel="stylesheet" href="/plant-unit-workbench.css">
 <link rel="stylesheet" href="/branch-asset-inspector.css">
 <link rel="stylesheet" href="/unit-preparation.css">
+<link rel="stylesheet" href="/unit-density.css">
 </head>
 <body>
   <div class="app-shell">
@@ -79,8 +80,9 @@
       <div class="brand-dialog-heading"><div><span class="brand-kicker">交付你的创作</span><h2 id="brandExportTitle">把植物带到你的场景</h2></div><button data-brand-close aria-label="关闭导出面板">×</button></div>
       <p class="brand-caption">保存工程用于继续编辑。导出用于 UE 或其他创作软件。</p>
       <div class="brand-export-grid">
-        <section class="brand-export-card"><h3>通用网格</h3><p>独立网格与贴图，选择适合目标软件的格式。</p>
-        <select id="exportFormat" aria-label="导出格式" title="导出格式"><option value="GLB">高模 GLB · PVE</option><option value="FBX">FBX · 传统导出</option></select>
+        <section class="brand-export-card"><h3>模型与骨骼</h3><p>模型、材质与贴图装入单文件，可选择附带真实骨骼绑定。</p>
+        <select id="exportFormat" aria-label="导出格式" title="导出格式"><option value="GLB">静态 GLB · 完整模型</option><option value="GLB_SKINNED">骨骼 GLB · 含蒙皮绑定</option><option value="FBX">FBX · 传统导出</option></select>
+        <p id="exportRiggedHint" class="vine-note" hidden>按当前造型绑定，完整单元枝整体跟随；内嵌贴图，默认不含动画。</p>
         <button id="exportBtn" class="icon-text accent"><i data-lucide="download"></i><span>导出高模 GLB</span></button>
         </section><section class="brand-export-card"><h3>UE · 骨架与装配</h3><p>首选完整单元枝包，交付可复用模型与实际装配。旧版骨架数据不含完整单元枝模型，仅用于兼容旧流程。</p>
         <button id="exportPveSkeletonBtn" class="icon-text" title="旧版骨架数据，不含完整单元枝模型；完整装配请选择 UE/PVE 完整单元枝包"><i data-lucide="network"></i><span>旧版骨架数据</span></button>

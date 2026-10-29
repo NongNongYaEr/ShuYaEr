@@ -43,6 +43,7 @@ export function captureBranchPrefab(asset,document,selected,leafSources=[],{id,n
   const roots=selectionRoots(asset.masterBranches,new Set(selected));
   if(roots.length!==1)throw Error('请选中一支大枝干；下级枝干和完整单元枝会一起保存');
   const root=roots[0];if(root.unitOwner||root.instanceId||root.symmetryGroup)throw Error('请选择承重骨架上的整支枝干，单元枝请使用单元枝成品库');
+  if(asset.authoring.imported_trunks?.mounts.some(m=>Object.values(m.guide_map).includes(root.stableId)))throw Error('导入树干请在树干整理台保存为树干素材；预制枝干用于保存挂接的大枝');
   const mother=asset.masterBranches.find(b=>b.id===root.parentId),tangent=lineTangent(root.points,0),reference=mother?lineTangent(mother.points,root.parentT):new THREE.Vector3(0,0,1);
   const local=basis(root.points[0],tangent,reference).invert();
   const captured=captureLinkedBranchDuplicate(asset,new Set([root.stableId]),'PFB',leafSources),{operation,copies,mapping}=captured;
@@ -95,7 +96,7 @@ const definition=a=>({shape:a.shape,sample:a.sample,versions:a.versions,revision
 const sameModel=(a,b)=>JSON.stringify(a,(key,value)=>key==='package_origins'?undefined:value)===JSON.stringify(b,(key,value)=>key==='package_origins'?undefined:value);
 // Pure, transactional insertion. All foreign identifiers are reconciled before
 // changing the draft. Installing the same prefab again reuses the same assets.
-export function insertBranchPrefab(document,prefab,{parent='',attach=0,matrix=new THREE.Matrix4(),parentTangent=null,token}={}){
+export function insertBranchPrefab(document,prefab,{parent='',attach=0,matrix=new THREE.Matrix4(),parentTangent=null,surface=null,token}={}){
   validateBranchPrefab(prefab);const doc=copy(document),a=doc.authoring,operation=copy(prefab.operation),copies=copy(prefab.copies);
   const assetIds=new Map();a.branch_library||=[];
   for(const incoming of prefab.library){
@@ -117,7 +118,7 @@ export function insertBranchPrefab(document,prefab,{parent='',attach=0,matrix=ne
   const remap=id=>{if(!id)return '';if(ids.has(id))return ids.get(id);const prefix=[...ids.keys()].sort((x,y)=>y.length-x.length).find(p=>id.startsWith(p+'.')||id.startsWith(p+':'));return prefix?ids.get(prefix)+id.slice(prefix.length):id;};
   const root=remap(operation.targets[0]);transformRecords(operation,matrix);
   for(const r of operation.records){r.id=remap(r.id);r.parent=r.root?parent:remap(r.parent);r.owner=remap(r.owner);r.sourceAssetId=assetIds.get(r.sourceAssetId)||r.sourceAssetId;
-    if(r.root){r.parentT=attach;r.frame=parent&&parentTangent?{position:new THREE.Vector3().setFromMatrixPosition(matrix).toArray(),tangent:parentTangent.toArray()}:null;}
+    if(r.root){r.parentT=attach;r.frame=parent&&parentTangent?{position:new THREE.Vector3().setFromMatrixPosition(matrix).toArray(),tangent:parentTangent.toArray(),...(surface?{position:surface.parent_position,trunk_anchor:surface.anchor,trunk_surface_matrix:surface.matrix.toArray()}: {})}:null;}
     for(const [key,sources,all]of [['leaves',leafIds,doc.leaf_meshes],['organs',organIds,a.tree_organs.units]])for(const u of r[key]||[]){u.id=remap(u.id);u.parent=remap(u.parent);u.source_id=sources.get(u.source_id)||u.source_id;if(u.source_id)u.source=all.findIndex(s=>s.id===u.source_id);if(u.metadata?.sourceAssetId)u.metadata.sourceAssetId=assetIds.get(u.metadata.sourceAssetId)||u.metadata.sourceAssetId;}
   }
   operation.targets=[root];

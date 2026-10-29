@@ -56,6 +56,7 @@ import { importSampleMaterials, remapSampleMaterial } from './sample-materials.j
 import { createAssemblyGroupControls } from './assembly-group-controls.js';
 import { resetBranchInstanceEdits } from './branch-instance-operations.js';
 import {createBranchPrefabWorkspace} from './branch-prefab-assets.js';
+import {createUnitBrushTools} from './unit-brush-tools.js';
 
 const uid = (prefix) => `${prefix}_${crypto.randomUUID().replaceAll('-', '')}`;
 const $ = (id) => document.getElementById(id);
@@ -169,6 +170,8 @@ export function createBranchWorkbench(api) {
   const installation = createBranchInstallation({ ...api, isTree: () => mode === 'TREE' && !api.getSkeletonEditMode(), values: () => ({ ...installValues(), junction: $('wbInstallBlend').checked ? normalizeJunction({}) : null }),
     linked: () => true, pinnedRevision:item=>$('wbInstallMode').value==='LINK'?0:item.revision, ensureAssets:ensureGroupAssets, matchRadius: () => $('wbAutoMatch').checked, assetById: (id) => library.find((a) => a.id === id),
     clearInstanceSelection: () => { selectedInstance = ''; }, installed: (id) => { selectedInstance = id; refresh(); }, setAttach: (value) => { $('wbInstallT').value = value; } });
+  const unitBrushes=createUnitBrushTools({...api,isTree:()=>mode==='TREE',isBusy:()=>busy,selectedAsset:assetById,
+    unitMode:()=>api.getTreeEditMode()==='UNIT'?Promise.resolve():api.requestUnitMode(),toastStatus:api.status,async ensureSource(id){if(busy)throw Error('工作区正在更新，请稍后再刷生成');busy=true;try{await ensureManagedAsset(id,true);await ensureGroupAssets([id]);await api.flush();}finally{busy=false;refresh();}}},context);
   const assemblyLinks = createUnitAssemblyUI({ ...api, isTree:()=>mode==='TREE', isBusy:()=>busy, library:()=>library,
     async editSource(assetId, role, instanceId) { const instance=api.getAuthoring().branch_instances.find(i=>instanceId?i.id===instanceId:i.asset_id===assetId&&(role==='EXTRA'?!i.linked||!['MATURE','MIXED','YOUNG'].includes(i.shootRole):i.shootRole===role)); if(instance)await editUnitSource(instance);else await openAsset(library.find(item=>item.id===assetId)); } });
   const hangDirections={X:[1,0,0],'-X':[-1,0,0],Y:[0,1,0],'-Y':[0,-1,0],Z:[0,0,1],'-Z':[0,0,-1]};
@@ -669,6 +672,7 @@ export function createBranchWorkbench(api) {
     if (api.getSkeletonEditMode()) throw Error('枝干编辑中已暂停单元枝安装，请先返回整树预览');
     const item = assetById(); if (!item) throw new Error('请先选择枝条素材');
     await api.flush(); const parent = api.getSelection(); if (!parent) throw new Error('请先在整树中选择挂接枝条');
+    if(api.getAsset().masterBranches.find(b=>b.stableId===parent)?.importedTrunkHost){installation.begin(item);api.toast('请在导入树干表面点选安装，右键或 Esc 取消');return;}
     const instanceId = uid('INST');
     const estimated = api.getAsset().masterBranches.length + item.shape.branches.length;
     const limit=assemblyBranchLimit(api.getAuthoring());
@@ -876,7 +880,7 @@ export function createBranchWorkbench(api) {
       installedOptionsSignature = optionsSignature;
     }
     select.value = selectedInstance;
-    const current = installedInstances.find((i) => i.id === selectedInstance);
+    const current = installedInstances.find((i) => i.id === selectedInstance);$('wbInstallT').disabled=Boolean(current?.trunk_anchor);$('wbInstallT').title=current?.trunk_anchor?'表面挂点请按 G 拖到树干表面调整':'沿母枝调整挂接位置';
     if (current) for (const [key, field] of Object.entries({ attach: 'T', angle: 'Angle', azimuth: 'Azimuth', roll: 'Roll', scale: 'Scale', variation: 'Variation', seed: 'Seed' })) $('wbInstall' + field).value = current[key];
     $('wbUnlink').disabled = !current?.linked; $('wbRemoveInstance').disabled = !current;
     if (mode === 'BRANCH') {
@@ -973,7 +977,7 @@ export function createBranchWorkbench(api) {
       const instance = api.getAuthoring().branch_instances.find((i) => i.id === selectedInstance);
       if (!numericBaseline || !api.isEditing()) numericBaseline = { authoring: copy(api.getAuthoring()), instance: copy(instance), branches: api.getAsset().masterBranches, baseBranches: instanceEditBase(api.getAuthoring(), instance.id, api.getAsset().masterBranches, api.getSettings()) };
       api.begin(); try { api.preview((a) => { const i = a.branch_instances.find((b) => b.id === selectedInstance); if (!i) return;
-        const values={...installValues(),frame:null},changed=Object.entries(values).some(([key,value])=>JSON.stringify(value)!==JSON.stringify(numericBaseline.instance[key]));
+        const values={...installValues(),frame:null};if(numericBaseline.instance.trunk_anchor){values.attach=numericBaseline.instance.attach;values.frame=copy(numericBaseline.instance.frame);const normal=new THREE.Vector3(...values.frame.direction),axis=new THREE.Vector3(...values.frame.parent_tangent).normalize(),across=new THREE.Vector3().crossVectors(axis,normal);if(across.lengthSq()<1e-10)across.set(1,0,0);normal.applyAxisAngle(across.normalize(),THREE.MathUtils.degToRad(values.angle-numericBaseline.instance.angle)).applyAxisAngle(axis,THREE.MathUtils.degToRad(values.azimuth-numericBaseline.instance.azimuth));values.frame.direction=normal.normalize().toArray();}const changed=Object.entries(values).some(([key,value])=>JSON.stringify(value)!==JSON.stringify(numericBaseline.instance[key]));
         const next = { ...numericBaseline.instance, ...values, ...(changed?{assembly_refined:true}:{}) }, shape = resolveInstanceShape(i, library);
         a.overrides = copy(numericBaseline.authoring.overrides); a.sculpt_layers = copy(numericBaseline.authoring.sculpt_layers);
         reframeInstanceEdits(a, numericBaseline.instance, next, shape, numericBaseline.branches, api.getSettings(), numericBaseline.baseBranches); Object.assign(i, next);
@@ -1059,7 +1063,7 @@ export function createBranchWorkbench(api) {
   organizeShapingTools({ preview: () => [stroke, influence, forms, arrays, deformation].find((tool) => tool.active && tool.dirty), flush: () => api.flush() });
   ready = Promise.all([store.list(),organizer.ready.catch(error=>api.toast(`收藏与标签记录暂不可用：${error.message}`,true))]).then(([items]) => { library = normalizeBranchLibrary(items); publishLibraries(); refresh(); }).catch((error) => { api.toast(`本地素材库不可用：${error.message}`, true); });
   window.lucide?.createIcons({ nodes: [bar, section] });
-  return { ready, unitEditor, unitRules, tools, views, installation, context, deformation, forms, arrays, stroke, influence, instances, symmetry, versions, refresh, newDraft, get mode() { return mode; }, get busy() { return busy; }, get library() { return library; },
+  return { ready, unitEditor, unitRules, tools, views, installation, unitBrushes, context, deformation, forms, arrays, stroke, influence, instances, symmetry, versions, refresh, newDraft, get mode() { return mode; }, get busy() { return busy; }, get library() { return library; },
     async inspectBranch(id,sourceItem=null){
       const item=sourceItem||await managedAsset(id);if(!item)throw Error('这款单元枝暂时无法读取，请刷新后重试');
       // A catalog source can share an atlas with another catalog source that is
@@ -1080,6 +1084,7 @@ export function createBranchWorkbench(api) {
     async newVineDraft() { await api.flush(); await switchMode('VINE', await vineDraft(api.capture())); },
     serialize({ omitActive = false } = {}) { const docs = { ...parked, [mode]: omitActive ? null : api.capture({includeHistory:false}) }; return { version: 2, active: mode, tree: docs.TREE ? cloneDocument(docs.TREE) : null, branch: docs.BRANCH ? cloneDocument(docs.BRANCH) : null, vine: docs.VINE ? cloneDocument(docs.VINE) : null }; },
     async load(project, {progress=async()=>{},origin={}}={}) {
+      unitBrushes.reset();
       groupControls.cancel();
       if (busy||prefabs.busy) throw new Error('工作区或预制操作进行中，请完成后再载入');
       trunkOwnsSkeletonMode = false;

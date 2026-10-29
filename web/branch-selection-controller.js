@@ -8,7 +8,7 @@ import { captureBranchDuplicate } from './branch-duplicate.js';
 import { captureLinkedBranchDuplicate } from './linked-branch-duplicate.js';
 import { createSelectionCopyPreview } from './selection-copy-preview.js';
 import { combineScopedSelection } from './scoped-selection.js';
-import { evaluateBranchMount, makeMountOperation, makeMountRotationOperation, mountPreviewBase } from './branch-mount.js';
+import { evaluateBranchMount, branchMountTransform, makeMountOperation, makeMountRotationOperation, mountPreviewBase } from './branch-mount.js';
 import { selectionRoots } from './branch-selection.js';
 import { projectedMountParameter, mountDistanceAt, slideMountParameter } from './branch-mount-drag.js';
 import { sampleLine, lineTangent } from './tree-sculpt.js';
@@ -88,6 +88,7 @@ export function createBranchSelectionController({ canvas, camera, controls, mode
     const transforms=new Map();for(const id of ids)transforms.set(id,{matrix});
     drawOutline([...snapshot.values()],null,transforms);
   }
+  function drawPreviewOutline(branches,preview){drawOutline(preview.outlineBranches?.(branches)||branches);}
   function center() {
     const group=pointGroupContext();if(group)return group.pivot.clone();
     const branches = getAsset()?.masterBranches || [];
@@ -164,7 +165,7 @@ export function createBranchSelectionController({ canvas, camera, controls, mode
     const root=d.snapshot.get(d.pointGroup.root.id),indices=new Set(d.pointGroup.indices),knots=root.controlPoints.map((p,i)=>indices.has(i)?p.clone().sub(d.pivot).multiply(scale).applyQuaternion(rotation).add(d.pivot).add(translation):p.clone());
     d.changed=knots.some((p,i)=>p.distanceToSquared(root.controlPoints[i])>1e-16);d.operation=controlCurveOperation(root,knots);
     d.updated=new Map(evaluateControlCurve([...d.snapshot.values()],d.operation,1,getAuthoring().overrides).map(b=>[b.id,b]));
-    d.preview.update(d.updated,controlCurveTransforms(d.snapshot,d.updated,root.id));d.preview.updateCarrier(d.updated.get(root.id));drawOutline([...d.updated.values()]);renderMountPreview(knots,d.updated.get(root.id).points);
+    d.preview.update(d.updated,controlCurveTransforms(d.snapshot,d.updated,root.id));d.preview.updateCarrier(d.updated.get(root.id));drawPreviewOutline([...d.updated.values()],d.preview);renderMountPreview(knots,d.updated.get(root.id).points);
   }
   function commitPointGroup(d){
     if(d.changed)return commitPreview(d.preview,()=>transact(`已调整 ${d.pointGroup.indices.length} 个控制点`,next=>writeControlCurve(next,d.operation)));
@@ -205,7 +206,7 @@ export function createBranchSelectionController({ canvas, camera, controls, mode
     d.operation=controlCurveOperation(root,root.controlPoints.map((p,i)=>i<=d.c.index?p.clone():p.clone().sub(pivot).applyQuaternion(q).add(pivot)));
     d.updated = new Map(evaluateControlCurve([...d.snapshot.values()],d.operation,1,getAuthoring().overrides).map(b=>[b.id,b]));
     const transforms=controlCurveTransforms(d.snapshot,d.updated,d.c.root.id);
-    d.preview.update(d.updated,transforms);d.preview.updateCarrier(d.updated.get(d.c.root.id));drawOutline([...d.updated.values()]);
+    d.preview.update(d.updated,transforms);d.preview.updateCarrier(d.updated.get(d.c.root.id));drawPreviewOutline([...d.updated.values()],d.preview);
     renderMountPreview(d.updated.get(d.c.root.id).controlPoints,d.updated.get(d.c.root.id).points);
   }
   function commitPointRotation(d) {
@@ -255,7 +256,7 @@ export function createBranchSelectionController({ canvas, camera, controls, mode
     const previous = {attach:c.root.parentT, azimuth:c.last?.operation.azimuth || 0, elevation:c.last?.operation.elevation || 0};
     if (Object.keys(values).every(key => Math.abs(values[key]-previous[key]) < 1e-7)) return;
     cancel();
-    const merge = c.last && c.last === c.layers.at(-1) ? c.last : null;
+    const merge = !c.root.trunkCarrierAnchor && c.last && c.last === c.layers.at(-1) ? c.last : null;
     const operation = makeMountOperation(c.branches,c.root,values,previous,merge?.operation);
     const snapshot = createSculptSnapshot(c.branches,getAuthoring().overrides,{bindings:false});
     const preview = createMeshPreview(getAsset(),snapshot,{targets:new Set([c.root.stableId]),rigid:true});
@@ -283,7 +284,7 @@ export function createBranchSelectionController({ canvas, camera, controls, mode
     const anchor = project(sampleLine(c.parent.points,c.root.parentT));
     const previous = {attach:c.root.parentT,azimuth:c.last?.operation.azimuth||0,elevation:c.last?.operation.elevation||0};
     mountDrag = {c,merge,previous,values:{...previous},path:cloneAxis(c.parent.points,project),anchor,start:[event.clientX,event.clientY],snapshot:null,preview:null,operation:null};
-    mountDrag.slide=createBranchCarrierSlide(c.branches,c.root,{camera,modelRoot:getAsset().group,bounds});
+    mountDrag.slide=createBranchCarrierSlide(c.branches,c.root,{camera,modelRoot:getAsset().group,bounds,asset:getAsset(),authoring:getAuthoring()});
     gizmo.detach(); gizmo.enabled=false;
     controls.enabled = false; lastPointer = event.pointerId; canvas.setPointerCapture(event.pointerId);
     canvas.dataset.mountDragging = 'true'; status('拖动枝根 · 沿母干移动整束，Esc 取消','busy');
@@ -294,12 +295,12 @@ export function createBranchSelectionController({ canvas, camera, controls, mode
     const dx = event.clientX-d.start[0], dy = event.clientY-d.start[1];
     if (!d.preview && Math.hypot(dx,dy)<3) return true;
     const carrier=d.slide({start:{x:d.start[0],y:d.start[1]},pointer:{x:event.clientX,y:event.clientY}});
+    if(carrier.blocked)return true;
     const attach=carrier.attach;
-    d.values = {...d.previous,attach,target_parent:carrier.parent.stableId};
+    d.values = {...d.previous,attach,target_parent:carrier.parent.stableId,...(carrier.trunk_anchor?{trunk_anchor:carrier.trunk_anchor}:{})};
     d.operation = makeMountOperation(d.c.branches,d.c.root,d.values,d.previous,d.merge?.operation);
     if (!d.snapshot) { d.snapshot=createSculptSnapshot(d.c.branches,getAuthoring().overrides,{bindings:false}); d.preview=createMeshPreview(getAsset(),d.snapshot,{targets:new Set([d.c.root.stableId]),rigid:true});const family=descendants(d.c.branches,new Set([d.c.root.stableId]));d.rigidIds=new Set(d.c.branches.filter(b=>family.has(b.stableId)).map(b=>b.id)); }
-    const from=sampleLine(d.c.parent.points,d.previous.attach),to=sampleLine(carrier.parent.points,attach);
-    d.matrix=new THREE.Matrix4().makeTranslation(...to.toArray()).multiply(new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion(...d.operation.rotation))).multiply(new THREE.Matrix4().makeTranslation(...from.clone().negate().toArray()));
+    d.matrix=branchMountTransform(d.c.branches,d.operation).matrix;
     d.previewKnots=d.c.root.controlPoints.map(p=>p.clone().applyMatrix4(d.matrix));
     $('mountAttach').value = Number((attach*100).toFixed(4));
     if (!frame) frame = requestAnimationFrame(() => {
@@ -313,7 +314,7 @@ export function createBranchSelectionController({ canvas, camera, controls, mode
     moveMount(event); const d=mountDrag; mountDrag=null;
     cancelAnimationFrame(frame); frame=0;
     controls.enabled=true; delete canvas.dataset.mountDragging; releasePointer();
-    if (d.preview && (d.values.target_parent!==d.c.parent.stableId || Math.abs(d.values.attach-d.previous.attach)>1e-7)) {
+    if (d.preview && (d.values.target_parent!==d.c.parent.stableId || Math.abs(d.values.attach-d.previous.attach)>1e-7 || d.operation.trunk_anchor&&JSON.stringify(d.operation.trunk_anchor)!==JSON.stringify(d.c.root.trunkCarrierAnchor))) {
       d.preview.updateRigid(d.matrix,d.rigidIds);
       renderMountPreview(d.previewKnots);
       commitMount(d.c,d.merge,d.operation,d.preview);
@@ -357,7 +358,7 @@ export function createBranchSelectionController({ canvas, camera, controls, mode
   function scalePreview(state, scale) {
     state.scale = scale.clone().clampScalar(.05,20);
     const point=state.pointScale;
-    state.operation=point ? controlCurveOperation(point.root,point.root.controlPoints.map((p,i)=>i<=point.index?p.clone():p.clone().sub(state.pivot).multiply(state.scale).add(state.pivot))) : {type:'ROOT_SCALE',targets:[...state.selection],scale:state.scale.toArray()};
+    state.operation=point ? controlCurveOperation(point.root,point.root.controlPoints.map((p,i)=>i<=point.index?p.clone():p.clone().sub(state.pivot).multiply(state.scale).add(state.pivot))) : {type:'ROOT_SCALE',targets:[...state.selection],scale:state.scale.toArray(),...([...state.snapshot.values()].some(b=>b.importedTrunkHost&&state.selection.has(b.stableId))?{scale_trunk_volume:true}:{})};
     state.updated = new Map((point ? evaluateControlCurve : evaluateRootScale)([...state.snapshot.values()],state.operation,1,getAuthoring().overrides).map(b=>[b.id,b]));
     if(point){const root=state.updated.get(point.root.id);renderMountPreview(root.controlPoints,root.points);state.unitTransforms=controlCurveTransforms(state.snapshot,state.updated,point.root.id);return;}
     state.unitTransforms = new Map();
@@ -395,7 +396,7 @@ export function createBranchSelectionController({ canvas, camera, controls, mode
       if (!drag) return;
       drag.preview.update(symmetryPreview(drag.updated, getAuthoring().symmetry_groups), drag.unitTransforms);
       if(drag.pointScale)drag.preview.updateCarrier(drag.updated.get(drag.pointScale.root.id));
-      drawOutline([...drag.updated.values()]);
+      drawPreviewOutline([...drag.updated.values()],drag.preview);
     });
   }
   function releasePointer() {
@@ -562,7 +563,7 @@ export function createBranchSelectionController({ canvas, camera, controls, mode
         if(changed){
           preview||=createPointCornerPreview(asset,snapshot,root);
           const updated=new Map(evaluateControlCurve([...snapshot.values()],operation,1,getAuthoring().overrides).map(b=>[b.id,b])),after=updated.get(root.id);
-          preview.update(updated,controlCurveTransforms(snapshot,updated,root.id));preview.updateCarrier(after);drawOutline([...updated.values()]);renderMountPreview(after.controlPoints,after.points);
+          preview.update(updated,controlCurveTransforms(snapshot,updated,root.id));preview.updateCarrier(after);drawPreviewOutline([...updated.values()],preview);renderMountPreview(after.controlPoints,after.points);
         }else{preview?.restore();preview=null;renderMountPreview(null);}
         return {amount:mountDistanceAt(root.points,attach)-mountDistanceAt(root.points,range.start)};
       },
@@ -603,16 +604,16 @@ export function createBranchSelectionController({ canvas, camera, controls, mode
         for(const record of operation.records)record.order=Math.min(3,record.order+1);
         root={...root,parentId:root.id,parentT:0};
       }
-      return {root,preview,slide:createBranchCarrierSlide(branches,root,{camera,modelRoot:asset.group,bounds:canvas.getBoundingClientRect(),excludeSubtree:false}),matrix:new THREE.Matrix4(),mount:null,copyId:operation.targets[i]};
+      return {root,preview,slide:createBranchCarrierSlide(branches,root,{camera,modelRoot:asset.group,bounds:canvas.getBoundingClientRect(),excludeSubtree:false,asset,authoring:getAuthoring()}),matrix:new THREE.Matrix4(),mount:null,copyId:operation.targets[i]};
     });
     gizmo.detach();gizmo.enabled=false;
     const restore=()=>entries.forEach(e=>e.preview.restore());
     return {center:roots[0].points[0].clone(),alongBranch:entries.every(e=>e.slide),label:`复制 ${roots.length} 束枝条 · 原枝保留`,valid:()=>getAsset()===asset&&!busy(),
       update({translation},gesture){let carrier='';for(const e of entries){
-        if(e.slide){const target=e.slide(gesture),values={attach:target.attach,azimuth:0,elevation:0,target_parent:target.parent.stableId};
+        if(e.slide){const target=e.slide(gesture);if(target.blocked)continue;const values={attach:target.attach,azimuth:0,elevation:0,target_parent:target.parent.stableId,...(target.trunk_anchor?{trunk_anchor:target.trunk_anchor}:{})};
           const op=makeMountOperation(branches,e.root,values,{azimuth:0,elevation:0});
-          const source=branches.find(b=>b.id===e.root.parentId);
-          e.matrix.makeTranslation(...sampleLine(target.parent.points,target.attach).toArray()).multiply(new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion(...op.rotation))).multiply(new THREE.Matrix4().makeTranslation(...sampleLine(source.points,e.root.parentT).negate().toArray()));
+          if(target.parent.importedTrunkHost&&(e.root.trunkCarrierAnchor||target.trunk_anchor))e.matrix.copy(branchMountTransform(branches,op).matrix);
+          else{const source=branches.find(b=>b.id===e.root.parentId),from=e.root.trunkCarrierAnchor?e.root.points[0]:sampleLine(source.points,e.root.parentT);e.matrix.makeTranslation(...sampleLine(target.parent.points,target.attach).toArray()).multiply(new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion(...op.rotation))).multiply(new THREE.Matrix4().makeTranslation(...from.clone().negate().toArray()));}
           e.mount={...op,root:e.copyId,targets:[e.copyId]};carrier=target.parent.stableId;
         }else e.matrix.makeTranslation(...translation.toArray());
         e.preview.update(e.matrix);
@@ -652,7 +653,7 @@ export function createBranchSelectionController({ canvas, camera, controls, mode
       return { x: bounds.left + (v.x / v.w + 1) * bounds.width / 2, y: bounds.top + (1 - v.y / v.w) * bounds.height / 2, z: v.z / v.w, w: v.w };
     };
     const path = cloneAxis(c.parent.points,project), anchor = project(sampleLine(c.parent.points, previous.attach));
-    const slide=createBranchCarrierSlide(c.branches,c.root,{camera,modelRoot:asset.group,bounds});
+    const slide=createBranchCarrierSlide(c.branches,c.root,{camera,modelRoot:asset.group,bounds,asset,authoring:getAuthoring()});
     let carrier=c.parent;
     let attach = previous.attach, operation = null, changed = false;
     gizmo.detach(); gizmo.enabled = false;
@@ -668,20 +669,16 @@ export function createBranchSelectionController({ canvas, camera, controls, mode
           local = makeMountRotationOperation(c.branches, c.root, rotation, previous);
           operation = makeMountRotationOperation(c.branches, c.root, rotation, previous, merge?.operation);
         } else {
-          const result=slide(gesture);carrier=result.parent;attach=result.attach;
-          const values = { ...previous, attach, target_parent:carrier.stableId };
-          changed = carrier!==c.parent || Math.abs(attach - previous.attach) > 1e-10;
+          const result=slide(gesture);if(result.blocked)return {blocked:true};carrier=result.parent;attach=result.attach;
+          const values = { ...previous, attach, target_parent:carrier.stableId,...(result.trunk_anchor?{trunk_anchor:result.trunk_anchor}:{}) };
+          changed = carrier!==c.parent || Math.abs(attach - previous.attach) > 1e-10 || !!result.trunk_anchor&&JSON.stringify(result.trunk_anchor)!==JSON.stringify(c.root.trunkCarrierAnchor);
           local = makeMountOperation(c.branches, c.root, values, previous);
           operation = makeMountOperation(c.branches, c.root, values, previous, merge?.operation);
           $('mountAttach').value = Number((attach * 100).toFixed(4));
         }
         // The fresh operation is in the current parent frame; apply one rigid
         // matrix to all bound vertices, including installed leaves and organs.
-        const source = rotating ? c.root.points[0] : sampleLine(c.parent.points, previous.attach);
-        const target = rotating ? source : sampleLine(carrier.points, attach);
-        const matrix = new THREE.Matrix4().makeTranslation(...target.toArray())
-          .multiply(new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion(...local.rotation)))
-          .multiply(new THREE.Matrix4().makeTranslation(...source.clone().negate().toArray()));
+        const matrix = branchMountTransform(c.branches,local).matrix;
         preview.updateRigid(matrix, rigidIds); drawRigidOutline(snapshot,rigidIds,matrix);
         renderMountPreview(c.root.controlPoints.map(p=>p.clone().applyMatrix4(matrix)));
         return rotating ? undefined : { carrier:carrier.stableId, amount: mountDistanceAt(carrier.points, attach) - (carrier===c.parent?mountDistanceAt(c.parent.points, previous.attach):0) };
@@ -750,7 +747,7 @@ export function createBranchSelectionController({ canvas, camera, controls, mode
         changed=translation.lengthSq()>1e-14||1-Math.abs(rotation.w)>1e-12||scale.distanceToSquared(new THREE.Vector3(1,1,1))>1e-14;
         if(rootScaling)scalePreview(completed,scale);
         else completed.updated=transformBundles(completed.snapshot,completed.selection,{pivot:completed.pivot,individual:completed.individual,keepRoots:completed.keepRoots,translation,rotation,scale:scale.clone().clampScalar(.05,20)});
-        completed.preview.update(symmetryPreview(completed.updated,getAuthoring().symmetry_groups),completed.unitTransforms);drawOutline([...completed.updated.values()]);
+        completed.preview.update(symmetryPreview(completed.updated,getAuthoring().symmetry_groups),completed.unitTransforms);drawPreviewOutline([...completed.updated.values()],completed.preview);
         if(completed.pointScale)completed.preview.updateCarrier(completed.updated.get(completed.pointScale.root.id));
       },
       commit(){if(changed)commit(completed);else completed.preview.restore();refresh();},

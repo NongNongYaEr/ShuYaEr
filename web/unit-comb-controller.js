@@ -21,14 +21,15 @@ export function createUnitCombController(api) {
   const overlay = svgElement('svg'); overlay.id = 'unitCombOverlay';
   overlay.classList.add('sculpt-overlay'); overlay.setAttribute('aria-hidden', 'true'); overlay.setAttribute('hidden', '');
   Object.assign(overlay.style, { position:'absolute', pointerEvents:'none', overflow:'visible' });
-  const outer = svgElement('circle'), inner = svgElement('circle'), lines = svgElement('g');
+  const outer = svgElement('circle'), inner = svgElement('circle'), lines = svgElement('g'), sizeMark=svgElement('text');
   outer.setAttribute('fill', 'none'); outer.setAttribute('stroke', '#f0cb58'); outer.setAttribute('stroke-width', '1.5');
   inner.setAttribute('fill', 'none'); inner.setAttribute('stroke', '#f0cb58'); inner.setAttribute('stroke-opacity', '.4');
-  overlay.append(lines, outer, inner); canvas.parentElement.append(overlay);
+  sizeMark.setAttribute('text-anchor','middle');sizeMark.setAttribute('dominant-baseline','central');sizeMark.setAttribute('font-size','20');sizeMark.setAttribute('font-family','system-ui');sizeMark.setAttribute('stroke','#17231d');sizeMark.setAttribute('stroke-width','3');sizeMark.style.paintOrder='stroke';
+  overlay.append(lines, outer, inner, sizeMark); canvas.parentElement.append(overlay);
   const feedback = document.createElement('div'); feedback.id = 'unitCombFeedback'; feedback.className = 'sculpt-feedback'; feedback.hidden = true;
   feedback.innerHTML = '<strong></strong><span></span><small>围绕各自枝根转向 · 挂点、尺寸和内部样式保持</small>';
   canvas.parentElement.append(feedback);
-  let stroke = null, prepared = new WeakMap(), lastHover = null, previewFrame = 0, picking = '', toolActive = true;
+  let stroke = null, prepared = new WeakMap(), lastHover = null, previewFrame = 0, picking = '', toolActive = true, altShrink = false;
   let sampleDirectionWorld = null, sampleOriginWorld = null, centerPointWorld = null;
   const referenceMarkers = new THREE.Group(); referenceMarkers.name = 'unitBrushReferences'; referenceMarkers.visible = false;
   const centerMarker = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([
@@ -87,7 +88,7 @@ export function createUnitCombController(api) {
       sampleDirection:sampleDirectionWorld?.clone().transformDirection(inverse),
       centerPoint:centerPointWorld?.clone().applyMatrix4(inverse),
       spreadMode:(values.spreadMode||read('unitBrushSpreadMode','OUT'))==='IN'?'IN':'OUT',
-      sizeMode:(values.sizeMode||read('unitBrushSizeMode','GROW'))==='SHRINK'?'SHRINK':'GROW',
+      sizeMode:altShrink||(values.sizeMode||read('unitBrushSizeMode','GROW'))==='SHRINK'?'SHRINK':'GROW',
       angleLimitDegrees:clamp(finite(values.angleLimitDegrees??read('unitBrushAngleLimit',25),25),1,90),
       sizeLimitPercent:clamp(finite(values.sizeLimitPercent??read('unitBrushSizeLimit',20),20),1,80),
       seed:Math.trunc(finite(values.seed??read('unitBrushSeed',1),1)),
@@ -227,6 +228,8 @@ export function createUnitCombController(api) {
     overlay.removeAttribute('hidden');
     Object.assign(overlay.style,{left:`${canvas.offsetLeft}px`,top:`${canvas.offsetTop}px`,width:`${proj.bounds.width}px`,height:`${proj.bounds.height}px`});
     overlay.setAttribute('viewBox',`0 0 ${proj.bounds.width} ${proj.bounds.height}`);
+    const shrinking=settings.effect==='SCALE'&&settings.sizeMode==='SHRINK',tint=shrinking?'#89d5dc':'#f0cb58';outer.setAttribute('stroke',tint);inner.setAttribute('stroke',tint);
+    sizeMark.style.display=settings.effect==='SCALE'?'':'none';sizeMark.textContent=shrinking?'−':'+';sizeMark.setAttribute('x',point[0]);sizeMark.setAttribute('y',point[1]);sizeMark.setAttribute('fill',tint);
     for (const [circle,radius] of [[outer,settings.radius],[inner,settings.radius*settings.hardness]]) {
       circle.setAttribute('cx',point[0]);circle.setAttribute('cy',point[1]);circle.setAttribute('r',radius);
     }
@@ -262,7 +265,8 @@ export function createUnitCombController(api) {
     const scope=settings.depthMode==='THROUGH'?'穿透':settings.depthMode==='SPHERE'?'空间球':`表层 · 深度 ${settings.depthRadius*2} m`;
     const selectionSummary=api.getSelectionSummary?.();
     feedback.querySelector('span').textContent=`${selectionSummary?`已选 ${selectionSummary.selected} · 可刷 ${items.length} · `:''}${scope} · 半径 ${settings.radius} px`;
-    feedback.querySelector('small').textContent=skippedMessage(skipped)||(!items.length?selectionSummary?.reason||'缺少可用的完整单元枝模型，请检查源素材':'' )||(!count&&items.length?'移近所选整支；表层或空间球模式还会按深度筛选':null)||(settings.effect==='SCALE'?'木枝与叶花果同比例缩放 · 枝根与源模型保持'
+    const sizes=stroke?.options.effect==='SCALE'?[...stroke.updated].map(([id,after])=>Math.abs(after.scale/stroke.initialScales.get(id)-1)*100):[];
+    feedback.querySelector('small').textContent=skippedMessage(skipped)||(!items.length?selectionSummary?.reason||'缺少可用的完整单元枝模型，请检查源素材':'' )||(!count&&items.length?'移近所选整支；表层或空间球模式还会按深度筛选':null)||(settings.effect==='SCALE'?'木枝与叶花果同比例缩放 · '+(sizes.length?'本笔最多已变 '+Math.max(...sizes).toFixed(1)+'% / 上限 '+settings.sizeLimitPercent+'%':'枝根与源模型保持')
       :settings.effect==='ALIGN'?'朝取样主轴逐步对齐 · 挂点与尺寸保持'
       :settings.effect==='JITTER'?`固定随机种子 ${settings.seed} · 每笔最多 ${settings.angleLimitDegrees}° · 挂点与尺寸保持`
       :settings.effect==='TURN'?'围绕各自枝根转向 · 挂点、尺寸和内部样式保持':`围绕各自枝根转向 · 每笔最多 ${settings.angleLimitDegrees}° · 挂点与尺寸保持`);
@@ -277,7 +281,7 @@ export function createUnitCombController(api) {
     api.showActiveUnits?.(items,undefined,prepared.get(api.getAsset())?.outlineTargets);
   }
   const optionKey = settings => JSON.stringify([settings.effect,settings.orientation,settings.radius,settings.strength,settings.hardness,settings.depthMode,settings.depthRadius,
-    settings.direction,settings.spreadMode,settings.sizeMode,settings.angleLimitDegrees,settings.sizeLimitPercent,settings.seed,
+    settings.direction,settings.spreadMode,settings.effect==='SCALE'?'ALT_SIZE':settings.sizeMode,settings.angleLimitDegrees,settings.sizeLimitPercent,settings.seed,
     settings.sampleDirection?.toArray(),settings.centerPoint?.toArray(),settings.downDirection.toArray()]);
   function valid(s) {return enabled() && !blocked() && api.getAsset()===s.asset && api.getAuthoring()===s.source && optionKey(options())===s.optionKey;}
   function flush(s) {
@@ -293,6 +297,7 @@ export function createUnitCombController(api) {
   function compute(point,final=false) {
     const s=stroke;if (!s) return;
     if (!valid(s)) {cancel();return;}
+    if(s.options.effect==='SCALE')s.options.sizeMode=options().sizeMode;
     const sample = next => {
       const center=centerAt(s.working,s.proj,next,s.options.radius);
       if (!center) {s.lastSample=next.slice();s.weights=new Map();s.skipped=new Map();return;}
@@ -368,7 +373,7 @@ export function createUnitCombController(api) {
     catch (error) {message('单元枝梳理预览失败：'+error.message,'error');return true;}
     if (!preview) {message('当前模型暂不能建立实时梳理预览，请使用整支旋转调整','error');return true;}
     preview.dispose ||= preview.restore;
-    stroke={asset,source,settings:api.getSettings?.()||{},entries:items,working:items,snapshot,preview,branchIds,updated:new Map(),cumulative:new Map(),transforms:new Map(),
+    stroke={asset,source,settings:api.getSettings?.()||{},entries:items,working:items,snapshot,preview,branchIds,updated:new Map(),initialScales:new Map(items.map(i=>[i.id,i.instance.scale])),cumulative:new Map(),transforms:new Map(),
       pointerId:event.pointerId,controls:controls.enabled,proj,options:settings,optionKey:optionKey(settings),last:point.slice(),lastSample:point.slice(),weights:initial.weights,
       skipped:initial.skipped,skippedDuringStroke:new Map(initial.skipped),previewDirty:false,outlineTargets:prepared.get(asset)?.outlineTargets,workspace:new WeakSet()};
     controls.enabled=false;canvas.setPointerCapture?.(event.pointerId);
@@ -433,6 +438,17 @@ export function createUnitCombController(api) {
   }},true);
   canvas.addEventListener('contextmenu',event=>{if(rightCancelled||stroke||picking){cancel();rightCancelled=false;event.preventDefault?.();event.stopImmediatePropagation?.();}},true);
   controls.addEventListener?.('change',updateReferences);
+  function sizeDirectionChanged(){
+    if(stroke?.options.effect==='SCALE'){stroke.options.sizeMode=options().sizeMode;show(stroke.working,stroke.weights,stroke.last,stroke.options,stroke.proj,stroke.skipped);}
+    else if(lastHover&&enabled()&&toolActive&&!blocked())hoverAt(lastHover);
+    document.dispatchEvent?.(new CustomEvent('unit-brush-direction',{detail:{temporary:altShrink,sizeMode:options().sizeMode}}));
+  }
+  globalThis.window?.addEventListener('keydown',event=>{
+    if(event.key!=='Alt'||!enabled()||!toolActive||options().effect!=='SCALE'||event.target?.isContentEditable||event.target?.matches?.('input,textarea,select')||document.querySelector?.('dialog[open]'))return;
+    event.preventDefault();if(!altShrink){altShrink=true;sizeDirectionChanged();}
+  },true);
+  globalThis.window?.addEventListener('keyup',event=>{if(event.key==='Alt'&&altShrink){altShrink=false;sizeDirectionChanged();}},true);
+  globalThis.window?.addEventListener('blur',()=>{altShrink=false;cancel();});
   updateReferences();
   return {begin,move,end,cancel,hoverAt,hide,toolChanged,refreshTargets,requestSample,requestCenter,resetReferences,referenceMarkers,
     key(event){return event.key==='Escape'&&cancel();},get active(){return Boolean(stroke||picking);},

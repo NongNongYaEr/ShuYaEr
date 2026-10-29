@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const prefixes = new Set(['pve-final-graph-', 'trunk-form-pve-', 'pve-bark-', 'pve-bark-variant-', 'pve-six-unit-classes-']);
+const prefixes = new Set(['pve-final-graph-', 'trunk-form-pve-', 'pve-bark-', 'pve-bark-variant-', 'pve-six-unit-classes-', 'imported-trunk-pve-']);
 
 // Large export fixtures are disposable. Keep only small reports from three runs.
 export function createRuntimeTestDirectory(context, prefix) {

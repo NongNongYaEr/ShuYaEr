@@ -187,9 +187,9 @@ const {chromium}=require('C:/Users/Administrator/.cache/codex-runtimes/codex-pri
   report.spread={center:centered.references.centerPointWorld,before:beforeCenter.units,out:spread.units,in:gathered.units};
   report.checks.push('actual fixed-center pick remains transient; OUT spreads away and IN gathers toward that fixed point, each with a 25° cap per stroke and one undo');
 
-  await effect('SCALE');await page.locator('#unitBrushSizeMode').selectOption('GROW');const beforeGrow=await snapshot();await stroke();
+  await effect('SCALE');await page.locator('[data-unit-size-mode="GROW"]').click();const beforeGrow=await snapshot();await stroke();
   const grown=await snapshot();uniformSize(beforeGrow,grown,true);assert.equal(grown.history.undo,beforeGrow.history.undo+1);await undo();sameGeometry(initial,await snapshot());
-  await page.locator('#unitBrushSizeMode').selectOption('SHRINK');const beforeShrink=await snapshot();await stroke();const shrunk=await snapshot();uniformSize(beforeShrink,shrunk,false);await undo();sameGeometry(initial,await snapshot());
+  await page.locator('[data-unit-size-mode="SHRINK"]').click();const beforeShrink=await snapshot();await stroke();const shrunk=await snapshot();uniformSize(beforeShrink,shrunk,false);await undo();sameGeometry(initial,await snapshot());
   report.scale={before:beforeGrow.instances,grown:grown.instances,shrunk:shrunk.instances};
   report.checks.push('GROW and SHRINK scale every real wood point/radius/length and leaf/flower position/size uniformly around its own root, preserve axes and source IDs, respect 20% per-stroke limit and locked instance');
 
@@ -210,7 +210,7 @@ const {chromium}=require('C:/Users/Administrator/.cache/codex-runtimes/codex-pri
 
   // Keep a real size edit and then a real rotation edit in the delivered save.
   // Earlier grow/shrink and seed checks deliberately returned to the baseline.
-  await effect('SCALE');await page.locator('#unitBrushSizeMode').selectOption('GROW');const beforeFinalSize=await snapshot();await stroke();
+  await effect('SCALE');await page.locator('[data-unit-size-mode="GROW"]').click();const beforeFinalSize=await snapshot();await stroke();
   const finalSize=await snapshot();uniformSize(beforeFinalSize,finalSize,true);
   await effect('JITTER');await field('unitBrushSeed',1);await stroke();const finalState=await snapshot();
   unchangedContents(finalSize,finalState);angleLimited(finalSize,finalState);assert.notDeepEqual(finalState.instances,finalSize.instances);

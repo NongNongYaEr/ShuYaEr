@@ -10,7 +10,7 @@ import { createGpuMeshPreview } from './gpu-edit-preview.js';
 import { createSelectionCopyPreview } from './selection-copy-preview.js';
 import { createBranchCarrierSlide } from './branch-carrier-slide.js';
 import { branchInstanceOwner, selectedInstanceRoots, instanceFamily, cloneBranchInstances, deleteBranchInstances,
-  moveInstanceToCarrier, rotateInstance, instanceTransformMatrix, createInstancePlacementContext, applyInstanceFamilyPlacement, evaluatedInstanceFrame } from './branch-instance-operations.js';
+  moveInstanceToCarrier, moveInstanceToSurface, instanceFromMatrix, rotateInstance, instanceTransformMatrix, createInstancePlacementContext, applyInstanceFamilyPlacement, evaluatedInstanceFrame } from './branch-instance-operations.js';
 
 const $ = id => document.getElementById(id);
 const btn = (id, icon, label) => `<button id="${id}" title="${label}" aria-label="${label}"><i data-lucide="${icon}"></i></button>`;
@@ -47,7 +47,8 @@ export function createBranchInstanceEditor(api, context) {
       selection:selection(),scope:'SELECTED',arrays:authoring.branch_arrays,isVisible:api.isVisible});
     return {state,items:[...state.eligibleIds].map(id=>state.index.byInstance.get(id)).filter(instance=>!instance.legacyPlacement)};
   }
-  function boundary(){const asset=api.getAsset(),authoring=api.getAuthoring();if(asset!==boundaryAsset||authoring!==boundaryAuthoring){index=unitBranchIndex(unitBranches(),unitInstances());boundaryAsset=asset;boundaryAuthoring=authoring;}return index;}
+  let boundaryBranches=null,boundaryInstances=null;
+  function boundary(){const asset=api.getAsset(),authoring=api.getAuthoring(),branches=unitBranches(),instances=unitInstances();if(asset!==boundaryAsset||authoring!==boundaryAuthoring||branches!==boundaryBranches||instances!==boundaryInstances){index=unitBranchIndex(branches,instances);boundaryAsset=asset;boundaryAuthoring=authoring;boundaryBranches=branches;boundaryInstances=instances;}return index;}
   const busy=()=>api.isBusy?.() || api.getAsset()?.group.userData.pending_rebuild || Boolean($('busyOverlay')&&!$('busyOverlay').hidden);
   const pointer=(e,button=e.button)=>{const r=canvas.getBoundingClientRect();return{x:(e.clientX-r.left)/r.width*2-1,y:1-(e.clientY-r.top)/r.height*2,button};};
   const rootsFor=items=>items.map(i=>boundary().roots.get(i.id)||`${i.id}.${shapeOf(i)?.branches[0]?.id}`).filter(id=>branches().some(b=>b.stableId===id));
@@ -129,22 +130,22 @@ export function createBranchInstanceEditor(api, context) {
       const copyAsset={...asset,editPreviewBindings(mesh){const bindings=asset.editPreviewBindings?.(mesh);return bindings?.instances?{...bindings,instances:bindings.instances.filter(d=>familyIds.has(d.id))}:bindings;}};
       const acceptsElement=e=>e&&(elementIds.has(e.id)||[...familyIds].some(id=>e.id.startsWith(id+'.')&&elementIds.has(e.id.slice(id.length+1))));
       const slideBranches=mode==='translate'&&parent?.instanceId?sourceBranches.map(b=>b===parent?{...b,unitOwner:'',instanceId:''}:b):sourceBranches;
-      const slide=mode==='translate'&&rootBranch&&parent?createBranchCarrierSlide(slideBranches,rootBranch,{camera,modelRoot:asset.group,bounds:canvas.getBoundingClientRect(),excludeSubtree:!duplicate}):null;
-      return {instance,working:workingRoots[n],shape,familyIds,familyBranches,parent,center:evaluatedInstanceFrame(instance,shape,parent?[parent]:[],settings).position,slide,preview:duplicate?createSelectionCopyPreview(copyAsset,acceptsElement):null,matrix:new THREE.Matrix4(),next:copy(workingRoots[n])};
+      const slide=mode==='translate'&&rootBranch&&parent?createBranchCarrierSlide(slideBranches,rootBranch,{camera,modelRoot:asset.group,bounds:canvas.getBoundingClientRect(),excludeSubtree:!duplicate,asset,authoring:source}):null;
+      return {instance,working:workingRoots[n],shape,familyIds,familyBranches,parent,center:evaluatedInstanceFrame(instance,shape,parent?[parent]:[],settings).position,baseMatrix:evaluatedInstanceFrame(instance,shape,parent?[parent]:[],settings).matrix,slide,preview:duplicate?createSelectionCopyPreview(copyAsset,acceptsElement):null,matrix:new THREE.Matrix4(),next:copy(workingRoots[n])};
     });
     if(!keepGizmo){gizmo.detach();gizmo.enabled=false;}clearScope();let changed=false;
     const restore=()=>{gpu?.restore();entries.forEach(e=>e.preview?.restore());},preview={restore,dispose:restore};
     const valid=()=>api.getAsset()===asset&&!busy();
     return {center:entries[0].center.clone(),uniform:true,scaleRange:[.05,20],alongBranch:mode==='translate'&&entries.every(e=>e.slide),label:`${duplicate?'复制':'调整'} ${entries.length} 支单元枝`,hint:mode==='translate'?'拖到另一根承重枝换挂接 / 数值沿原母枝移动':'各自枝根为中心 · 完整叶花果一起调整',valid,
       update(delta,gesture){let carrier='',amount=delta.amount;const matrices=new Map();changed=false;
-        for(const e of entries){let next=copy(e.working);
+        for(const e of entries){let next=copy(e.working),nextParent=e.parent;
           if(mode==='translate'&&e.slide){const result=e.slide(gesture),moved=gesture.numeric?.trim()||Math.hypot(gesture.pointer.x-gesture.start.x,gesture.pointer.y-gesture.start.y)>=2;
-            if(moved)next=moveInstanceToCarrier(next,result.parent,e.parent,settings,result.attach,e.shape);carrier=result.parent.stableId;amount=result.distance??0;}
-          else if(mode==='translate'){const f=branchInstanceFrame(next,e.parent,settings);next.frame={position:f.position.clone().add(delta.translation).toArray(),direction:f.direction.toArray(),parent_position:e.parent?sampleLine(e.parent.points,next.attach).toArray():null,parent_tangent:e.parent?lineTangent(e.parent.points,next.attach).toArray():[0,0,1]};}
+            if(moved&&!result.blocked){if(result.trunk_anchor){const moved=moveInstanceToSurface(next,result,e.parent,settings,e.shape);next=moved.instance;nextParent=moved.parent;}else{next=moveInstanceToCarrier(next,result.parent,e.parent,settings,result.attach,e.shape);nextParent=result.parent;}}carrier=result.blocked?'未命中原树干表面 · 当前挂接保留':result.parent.stableId;amount=result.distance??0;}
+          else if(mode==='translate'){const desired=new THREE.Matrix4().makeTranslation(...delta.translation.toArray()).multiply(e.baseMatrix);next=instanceFromMatrix(next,e.shape,e.parent,desired);}
           else if(mode==='rotate')next=rotateInstance(next,e.parent,settings,delta.rotation,e.shape);
           else next.scale=THREE.MathUtils.clamp(e.working.scale*delta.amount,INSTANCE_SCALE_MIN,INSTANCE_SCALE_MAX);
           next.assembly_manual=true;next.assembly_refined=true;e.next=next;
-          e.matrix.copy(instanceTransformMatrix(e.instance,{...next,id:e.instance.id},e.shape,[e.parent,sourceContext.byStable.get(next.parent)].filter(Boolean),settings));
+          e.matrix.copy(evaluatedInstanceFrame(next,e.shape,nextParent?[nextParent]:[],settings).matrix).multiply(e.baseMatrix.clone().invert());
           if(e.matrix.elements.some((v,i)=>Math.abs(v-(i%5===0?1:0))>1e-9))changed=true;
           if(e.preview)e.preview.update(e.matrix);else for(const b of e.familyBranches)matrices.set(b.id,{matrix:e.matrix});
         }

@@ -1,10 +1,11 @@
 // Shared presentation vocabulary for the resource browser and its dialogs.
-export const resourceTypes={plant:'整株样板',prefab:'预制枝干',branch:'单元枝',units:'叶花果',material:'材质与形体配方'};
-export const resourceIcons={plant:'resource-plant',prefab:'resource-prefab',branch:'resource-branch',units:'resource-units',material:'resource-material'};
+export const resourceTypes={plant:'整株样板',trunk:'树干素材',prefab:'预制枝干',branch:'单元枝',units:'叶花果',material:'材质与形体配方'};
+export const resourceIcons={plant:'resource-plant',trunk:'resource-trunk',prefab:'resource-prefab',branch:'resource-branch',units:'resource-units',material:'resource-material'};
 export const resourceEscape=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 // Botanical silhouettes share Lucide's 24-unit grid and inherit theme colors.
 // The complete model remains one unit branch; its icon includes both wood and leaves.
 const drawings={
+  'resource-trunk':'<path d="M7 21h11l-3-5-1-7 4-5-2-1-4 4-2-5H7l2 8-1 6-3 4Z"/><path d="m11 12 1 6m0-10 1 2"/>',
   'resource-plant':'<path d="M9 21h6M12 21v-8m0 4-3-3m3 1 3-3"/><path d="M7 16a4 4 0 0 1-2-7 4 4 0 0 1 5-5 3 3 0 0 1 5 0 4 4 0 0 1 4 5 4 4 0 0 1-2 7"/>',
   'resource-prefab':'<path d="M7 3H3v4m14-4h4v4M3 17v4h4m10 0h4v-4M7 18l3-6 4-3 3-3M10 12l-3-3m7 0 3 3"/><circle cx="7" cy="9" r="1.5"/><circle cx="17" cy="6" r="1.5"/><circle cx="17" cy="12" r="1.5"/>',
   'resource-branch':'<path d="M5 21c2-7 8-10 13-17M9 13l-3-3M13 9c-3 0-6-2-6-6 4 0 6 2 6 6Zm1 3c4 1 7-1 7-5-4-1-7 1-7 5Z"/>',
@@ -21,5 +22,5 @@ export function resourceTags(value){return [...new Set([value||[]].flat(Infinity
 export function resourceFormHeader(id,title,description,icon='folder'){
   return `<header class="resource-form-heading"><div class="resource-form-mark">${resourceIcon(icon)}</div><div><small>资源中心</small><h2 id="${resourceEscape(id)}">${resourceEscape(title)}</h2></div><button type="button" data-form-close aria-label="关闭${resourceEscape(title)}">${resourceIcon('x')}</button></header><p class="resource-form-description">${resourceEscape(description)}</p>`;
 }
-export function syncResourceOverlay(){document.body.classList.toggle('resource-center-active',Boolean(document.querySelector('#resourceCenterDialog[open],#plantPackWizard[open],#plantPackManager[open],#plantUnitInspector[open],#plantUnitDialog[open],#branchAssetInspector[open],#unitPreparationDialog[open]')));}
+export function syncResourceOverlay(){document.body.classList.toggle('trunk-preparation-active',Boolean(document.querySelector('#trunkPreparationDialog[open]')));document.body.classList.toggle('resource-center-active',Boolean(document.querySelector('#resourceCenterDialog[open],#plantPackWizard[open],#plantPackManager[open],#plantUnitInspector[open],#plantUnitDialog[open],#branchAssetInspector[open],#unitPreparationDialog[open],#trunkPreparationDialog[open]')));}
 export function trapResourceDialogFocus(dialog){dialog.addEventListener('keydown',event=>{if(event.key!=='Tab'||event.target.closest('dialog')!==dialog)return;const items=[...dialog.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex]:not([tabindex="-1"])')].filter(node=>node.getClientRects().length&&!node.closest('[hidden]'));if(document.activeElement===items[event.shiftKey?0:items.length-1]){event.preventDefault();items[event.shiftKey?items.length-1:0]?.focus();}},true);}

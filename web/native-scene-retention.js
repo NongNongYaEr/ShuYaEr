@@ -1,5 +1,5 @@
 // Presentation snapshots only. Never retain mutable Matrix4 arrays by reference.
-const fields=['root','geometry','instances','instanceCount','start','count','line','castShadow','receiveShadow','radial','material','editLookup','editFrames'];
+const fields=['root','geometry','instances','instanceCount','start','count','line','castShadow','receiveShadow','radial','material','editLookup','editFrames','editInfluences'];
 export function retainNativeDraw(cache,next){
  const old=cache.get(next.id);let same=!!old;if(same)for(const key of fields)if(old[key]!==next[key]){same=false;break;}if(same)for(let i=0;i<16;i++)if(old.matrix[i]!==next.matrix[i]){same=false;break;}if(same)return old;
  const record={...next,matrix:next.matrix.slice()};cache.set(next.id,record);return record;

@@ -1,5 +1,6 @@
 import { normalizeBranchDuplicate } from './branch-duplicate.js';
 import { normalizeLegacyUnitPlacement } from './legacy-unit-placement.js';
+import {normalizeTrunkAttachment} from './imported-trunk-data.js';
 const number = (v, lo, hi, fallback) => Math.max(lo, Math.min(hi, Number.isFinite(+v) ? +v : fallback));
 const vector = (v, fallback = [0, 0, 0]) => fallback.map((f, i) => number(v?.[i], -1000, 1000, f));
 export function normalizeShapeOperation(raw) {
@@ -33,6 +34,7 @@ export function normalizeShapeOperation(raw) {
   } else if (raw.type === 'ROOT_SCALE') {
     result.scale = [0,1,2].map(i => number(raw.scale?.[i], .05, 20, 1));
     result.keepRoots = true;
+    if(raw.scale_trunk_volume===true)result.scale_trunk_volume=true;
   } else if (raw.type === 'MOUNT') {
     if (!raw.root || !raw.parent || !Array.isArray(raw.rotation) || raw.rotation.length !== 4) return null;
     Object.assign(result, {root: String(raw.root), parent: String(raw.parent), attach: number(raw.attach,0,1,.5),
@@ -42,6 +44,7 @@ export function normalizeShapeOperation(raw) {
       rotation: raw.rotation.map(v => number(v,-1,1,0)), parent_tangent: vector(raw.parent_tangent,[0,0,1]),
       source_attach:number(raw.source_attach,0,1,.5), reference_direction:vector(raw.reference_direction,[1,0,0]),
       base_azimuth:number(raw.base_azimuth,-180,180,0), base_elevation:number(raw.base_elevation,-170,170,0)});
+    if(raw.trunk_anchor)result.trunk_anchor=normalizeTrunkAttachment(raw.trunk_anchor);
   } else if (raw.type === 'QUICK') {
     // These multipliers are specific to QUICK; SPACE.radius remains a world
     // distance and the normalization of existing tools stays unchanged.

@@ -3,11 +3,17 @@ import { buildBranchAsset, disposeBranchAsset } from './branch-kernel.js';
 import { planBranchStroke } from './branch-stroke-data.js';
 import { planLocalBranches } from './local-branch-data.js';
 import { sampleLine, lineTangent, nearestParameter } from './tree-sculpt.js';
+import {pickImportedTrunkAttachment} from './imported-trunk-picker.js';
+import {captureBranchDuplicate} from './branch-duplicate.js';
+import {normalizeAuthoring} from './authoring-state.js';
+import {carrierTrunkAnchor} from './imported-trunk-data.js';
+import {evaluateTrunkAttachment} from './imported-trunk-attachments.js';
 
 export function planClickedBranch(authoring, settings, branches, hit, options, id, groupId) {
   const branch = branches.find(b => b.stableId === hit.branch);
   if (!branch || branch.unitOwner || branch.instanceId || branch.symmetryGroup) throw new Error('请点承重枝干，单元枝保持独立');
-  const attach = THREE.MathUtils.clamp(hit.attach, .02, .98), origin = sampleLine(branch.points, attach), tangent = lineTangent(branch.points, attach);
+  if(branch.importedTrunkHost&&!hit.trunk_anchor)throw new Error('请在导入树干的真实表面点选挂点');
+  const attach = THREE.MathUtils.clamp(hit.trunk_anchor?nearestParameter(branch.points,new THREE.Vector3(...hit.point)):hit.attach, .02, .98), origin = sampleLine(branch.points, attach), tangent = lineTangent(branch.points, attach);
   let radial = new THREE.Vector3(...hit.point).sub(origin); radial.addScaledVector(tangent, -radial.dot(tangent));
   if (radial.lengthSq() < 1e-12) { radial = Math.abs(tangent.z) < .9 ? new THREE.Vector3(0,0,1) : new THREE.Vector3(1,0,0); radial.addScaledVector(tangent,-radial.dot(tangent)); }
   radial.normalize().applyAxisAngle(tangent, THREE.MathUtils.degToRad(options.azimuth));
@@ -22,7 +28,27 @@ export function planClickedBranch(authoring, settings, branches, hit, options, i
     finally { disposeBranchAsset(base); }
   }
   const preview=buildBranchAsset({...settings,leaf_density:0},null,[],0,planned.authoring,{skeletonOnly:true});
-  try { if (![id,...(planned.created||[])].every(key=>preview.masterBranches.some(b=>b.stableId===key))) throw new Error('枝段预算不足或母枝不可用，本次未添加'); }
+  try {
+    if (![id,...(planned.created||[])].every(key=>preview.masterBranches.some(b=>b.stableId===key))) throw new Error('枝段预算不足或母枝不可用，本次未添加');
+    if(hit.trunk_anchor){
+      // Use the same persistent triangle frame as installed carrier prefabs.
+      // Only the new root is captured; generated children keep their ordinary
+      // manual records and editable local recipe instead of becoming assets.
+      const root=preview.masterBranches.find(b=>b.stableId===id),source={...preview,masterBranches:preview.masterBranches.filter(b=>b===root||b.stableId===branch.stableId).map(b=>b===root?{...b,children:[]}:b)};
+      const anchor=carrierTrunkAnchor({...hit.trunk_anchor,axis_t:attach},attach),context=branch.importedTrunkSource,target=evaluateTrunkAttachment(context.asset,context.mount,branches,anchor);
+      const operation=captureBranchDuplicate(source,new Set([id]),id),targetId=operation.targets[0],record=operation.records[0],offset=target.position.clone().sub(root.points[0]);
+      for(const key of ['points','controlPoints'])record[key]=record[key].map(p=>new THREE.Vector3(...p).add(offset).toArray());
+      record.mountMatrix=new THREE.Matrix4().makeTranslation(...offset.toArray()).multiply(record.mountMatrix?new THREE.Matrix4().fromArray(record.mountMatrix):new THREE.Matrix4()).toArray();record.properties.prefabCarrier=true;
+      record.frame={position:origin.toArray(),tangent:tangent.toArray(),trunk_anchor:anchor,trunk_surface_matrix:new THREE.Matrix4().makeRotationFromQuaternion(target.rotation).setPosition(target.position).toArray()};
+      const layer={id:'CLICK_'+id,name:'点击加枝 · 控制线生长',enabled:true,strength:1,operation,branches:{}};
+      planned={...planned,targetId,authoring:normalizeAuthoring({...planned.authoring,
+        manual_branches:planned.authoring.manual_branches.filter(b=>b.id!==id).map(b=>b.parent===id?{...b,parent:targetId}:b),
+        local_branch_groups:planned.authoring.local_branch_groups.map(g=>g.root===id?{...g,root:targetId}:g),
+        sculpt_layers:[...authoring.sculpt_layers,layer],active_sculpt_layer:layer.id,
+        topology:{...planned.authoring.topology,operations:planned.authoring.topology.operations.map(op=>op.created===id?{...op,created:targetId}:op)}
+      })};
+    }
+  }
   finally { disposeBranchAsset(preview); }
   return planned;
 }
@@ -40,7 +66,9 @@ export function createBranchClickTool(api, ui) {
     ray.setFromCamera(new THREE.Vector2((e.clientX-r.left)/r.width*2-1,1-(e.clientY-r.top)/r.height*2),api.camera);
     const meshes=[];asset.group.updateWorldMatrix(true,true);
     asset.group.traverseVisible(o=>{if(o.isMesh)meshes.push(o);});
-    const hit=ray.intersectObjects(meshes,false)[0],branch=asset.masterBranches.find(b=>b.stableId===hit?.object.userData.stable_id);
+    const hit=ray.intersectObjects(meshes,false)[0];
+    if(hit?.object.userData.imported_trunk){const target=pickImportedTrunkAttachment(asset,api.getAuthoring(),hit),branch=asset.masterBranches.find(b=>b.stableId===target?.parent);if(!branch||branch.instanceId||branch.unitOwner||branch.symmetryGroup)return null;return {...target,branch:branch.stableId,point:target.surface_frame.position.toArray(),asset,authoring:api.getAuthoring()};}
+    const branch=asset.masterBranches.find(b=>b.stableId===hit?.object.userData.stable_id);
     if(!hit||hit.object.userData.category!=='branch'||!branch||branch.instanceId||branch.unitOwner||branch.symmetryGroup)return null;
     const p=asset.group.worldToLocal(hit.point.clone()),attach=THREE.MathUtils.clamp(nearestParameter(branch.points,p),.02,.98);
     return {branch:branch.stableId,attach,point:p.toArray(),asset,authoring:api.getAuthoring()};
@@ -52,7 +80,7 @@ export function createBranchClickTool(api, ui) {
     if(!active)return false;
     if(press){if(Math.hypot(e.clientX-press.x,e.clientY-press.y)>5)press.moved=true;return true;}
     const hit=pick(e);marker.visible=!!hit;
-    if(hit){const b=hit.asset.masterBranches.find(b=>b.stableId===hit.branch);marker.position.copy(sampleLine(b.points,hit.attach));const world=api.modelRoot.localToWorld(marker.position.clone());marker.scale.setScalar(api.camera.position.distanceTo(world)*.007);}
+    if(hit){const b=hit.asset.masterBranches.find(b=>b.stableId===hit.branch);marker.position.copy(hit.surface_frame?.position||sampleLine(b.points,hit.attach));const world=api.modelRoot.localToWorld(marker.position.clone());marker.scale.setScalar(api.camera.position.distanceTo(world)*.007);}
     return true;
   }
   function begin(e) {

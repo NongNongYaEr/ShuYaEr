@@ -26,6 +26,7 @@ export async function branchDependencyIdentity(item,library=[],fallback=null){
   const bytes=new TextEncoder().encode(JSON.stringify(canonical({...model(portable),versions:(portable.versions||[]).map(model)})));
   return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),n=>n.toString(16).padStart(2,'0')).join('');
 }
+export async function trunkDependencyIdentity(item){const bytes=new TextEncoder().encode(JSON.stringify(canonical({id:item.id,revision:item.revision,source:item.source?.sha256,calibration:item.calibration,guides:item.guides,binding:item.binding||{}})));return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),n=>n.toString(16).padStart(2,'0')).join('');}
 
 // Separate explicit choices from required members. Removing one root cannot
 // remove a shared dependency or a resource the user selected independently.
@@ -59,6 +60,7 @@ export function createResourceDependencyResolver(api){
     const identity=(item,library,fallback)=>{if(!modelKeys.has(item))modelKeys.set(item,branchDependencyIdentity(item,library,fallback));return modelKeys.get(item);};
     async function source(row){
       if(row.key.startsWith('project-branch:'))return byProject.get(row.id);
+      if(row.key.startsWith('project-trunk:'))return api.trunks?.().find(a=>a.id===row.id);
       return once(row.key,()=>api.read(row));
     }
     async function snapshotMembers(owner,library,fallback){
@@ -83,16 +85,19 @@ export function createResourceDependencyResolver(api){
       const packaged=byPackage.get(row.key);
       if(packaged)return (packaged.dependencies||[]).map(key=>{const target=packageRows.get(key);if(!target)throw Error('资源包的固定依赖缺失');return target;});
       if(row.type!=='prefab'&&row.type!=='plant')return [];
-      let library,fallback;
+      let library,fallback,trunks=[];
       if(row.key.startsWith('project-prefab:')){
         const context=api.prefabs(),item=context.assets.items.find(p=>p.id===row.id);if(!item)throw Error('项目预制已不存在');
         const root=prefabRevision(item).root;library=await once('pinned-library:'+root,()=>prefabDependencyLibrary({kind:'branchforge-prefab-archive',root,resources:context.assets.resources}));
       }else{
         const value=await source(row);
         if(row.type==='prefab')library=prefabDependencyLibrary(value);
-        else {const published=publishPlant(value);library=published.authoring?.branch_library||[];fallback=published.authoring?.leaf_material;}
+        else {const published=publishPlant(value);library=published.authoring?.branch_library||[];fallback=published.authoring?.leaf_material;trunks=published.authoring?.imported_trunks?.assets||[];}
       }
-      return snapshotMembers(row,library,fallback);
+      const members=await snapshotMembers(row,library,fallback);
+      for(const trunk of trunks){const signature=await trunkDependencyIdentity(trunk);let found=null;for(const candidate of rows.filter(r=>r.type==='trunk'&&(r.revision||1)===trunk.revision&&(r.id===trunk.id||r.originalId===trunk.id))){try{const value=await source(candidate);if(value&&await trunkDependencyIdentity(value)===signature){found=candidate;break;}}catch{}}
+        members.push(found||{key:'dependency:trunk:'+trunk.id+':'+trunk.revision+':'+signature,id:trunk.id,type:'trunk',revision:trunk.revision,name:trunk.name,thumbnail:trunk.thumbnail||'',scope:row.scope||'project',snapshot:true,inspection:trunk});
+      }return members;
     }
     return resolveDependencySelection(keys,rows,dependencies);
   }

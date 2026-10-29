@@ -5,7 +5,10 @@ import {controlCurveOperation,evaluateControlCurve} from './branch-control-curve
 // Never reinterpret the old history in a new coordinate frame or edit a source
 // unit. Each descendant family follows its carrier by a rigid mount transform.
 export function smoothStructuralCurves(branches,authoring){
-  const structural=b=>!b.unitOwner&&!b.instanceId&&!b.sourceAssetId&&!b.copySnapshot&&!b.localBundle&&!b.symmetryGroup&&b.controlPoints?.length>2&&b.controlPoints.length<=64;
+  const importedHosts=new Set((authoring.imported_trunks?.mounts||[]).flatMap(m=>Object.values(m.guide_map)));
+  // Imported guide polylines are the immutable skin's rest stations. Running
+  // the old procedural smoothing migration on them changes the bound mesh.
+  const structural=b=>!b.importedTrunkHost&&!importedHosts.has(b.stableId)&&!b.unitOwner&&!b.instanceId&&!b.sourceAssetId&&!b.copySnapshot&&!b.localBundle&&!b.symmetryGroup&&b.controlPoints?.length>2&&b.controlPoints.length<=64;
   const candidates=branches.filter(b=>structural(b)&&!axisTimes(b.points));
   if(!candidates.length)return {layers:[],upgraded:[],skipped:[]};
   const byId=new Map(branches.map(b=>[b.id,b])),candidateIds=new Set(candidates.map(b=>b.id));

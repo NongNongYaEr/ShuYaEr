@@ -1,6 +1,11 @@
 {
-  "version": "0.2.51",
-  "file": "树鸭儿.exe",
-  "exeSha256": "eb3f12a81065215d5abeafb4c071c6a6447796d33a1e73ba1b1cbc42ffeb1a6a",
-  "exeBytes": 178539625
+  "version": "0.3.0",
+  "flavor": "v030-lite",
+  "exeSha256": "40a997aeae45966374700ca287dc4e8d721e8eb62103b512263ecd998231812d",
+  "exeBytes": 178488114,
+  "payloadHash": "a1c2c2a1845e430e9e7fca8842a80e70d08751c6bf7f0e0349703cef382247db",
+  "payloadBytes": 178093338,
+  "filename": "树鸭儿.exe",
+  "cacheSubdirectory": "0.3.0-v030-lite-a1c2c2a1845e430e",
+  "files": 926
 }

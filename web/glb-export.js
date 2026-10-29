@@ -3,6 +3,7 @@ import { GLTFExporter } from './vendor/GLTFExporter.js';
 import { normalizeLeafMaterial } from './leaf-material-data.js';
 import { pveGlbMatrix } from './pve-export.js';
 import { mergeGeometries } from './vendor/surface/utils/BufferGeometryUtils.js';
+import {createSkinnedGlbScene} from './glb-skinned-scene.js';
 
 // Export textures own their images; never reuse an incompletely loaded preview map.
 export async function bindGlbTextures(material, raw, cache = null) {
@@ -10,7 +11,12 @@ export async function bindGlbTextures(material, raw, cache = null) {
   for (const [key, slot] of [['color', 'map'], ['normal', 'normalMap']]) {
     if (!data[key]) continue;
     const cacheKey = key + ':' + data[key];
-    const texture = cache?.get(cacheKey) || await new THREE.TextureLoader().loadAsync(data[key]);
+    // Concurrent material variants often share an atlas. Cache the in-flight
+    // load too, so it remains one texture/image in the final GLB.
+    let pending=cache?.get(cacheKey);
+    if(!pending){pending=new THREE.TextureLoader().loadAsync(data[key]);cache?.set(cacheKey,pending);}
+    let texture;
+    try{texture=await pending;}catch(error){if(cache?.get(cacheKey)===pending)cache.delete(cacheKey);throw error;}
     cache?.set(cacheKey, texture);
     texture.name = data[`${key}_name`] || `${material.name}_${key}`;
     texture.colorSpace = key === 'color' ? THREE.SRGBColorSpace : THREE.NoColorSpace;
@@ -48,10 +54,7 @@ export function prepareGlbBarkTexture(texture, { canvasFactory = () => document.
   return copy;
 }
 
-export function createGlbExportScene(root, { connector = null, singleMesh = false, rasterizeBarkTextures = false } = {}) {
-  const scene = new THREE.Scene();
-  scene.name = root.name;
-  const geometries = [];
+function prepareSceneMaterials(scene,rasterizeBarkTextures) {
   const exportMaterials = new Map();
   const exportTextures = new Map();
   function exportMaterial(material) {
@@ -69,6 +72,18 @@ export function createGlbExportScene(root, { connector = null, singleMesh = fals
     }
     return exportMaterials.get(material);
   }
+  scene.traverse((object) => {
+    if (!object.isMesh) return;
+    object.material = Array.isArray(object.material) ? object.material.map(exportMaterial) : exportMaterial(object.material);
+    const geometry=object.geometry;
+    if(geometry.hasAttribute('color')&&!object.userData.branchforge_color_is_display){geometry.setAttribute('_BRANCH_WIND',geometry.getAttribute('color'));geometry.deleteAttribute('color');}
+  });
+  return ()=>{exportMaterials.forEach(material=>material.dispose());exportTextures.forEach(texture=>texture.dispose());};
+}
+export function createGlbExportScene(root, { connector = null, singleMesh = false, rasterizeBarkTextures = false } = {}) {
+  const scene = new THREE.Scene();
+  scene.name = root.name;
+  const geometries = [];
   if (connector || singleMesh) {
     const frame = connector ? pveGlbMatrix(connector) : new THREE.Matrix4().makeRotationX(-Math.PI / 2);
     const materials = [], groups = [];
@@ -117,31 +132,25 @@ export function createGlbExportScene(root, { connector = null, singleMesh = fals
       object.geometry = geometry;
     });
   }
-  scene.traverse((object) => {
-    if (!object.isMesh) return;
-    object.material = Array.isArray(object.material) ? object.material.map(exportMaterial) : exportMaterial(object.material);
-    const geometry = object.geometry;
-    // COLOR_0 always tints a glTF material. Our vertex RGBA contains wind data,
-    // not visible colour; preserve it as a custom attribute instead.
-    if (geometry.hasAttribute('color')) {
-      geometry.setAttribute('_BRANCH_WIND', geometry.getAttribute('color'));
-      geometry.deleteAttribute('color');
-    }
-  });
+  const disposeMaterials=prepareSceneMaterials(scene,rasterizeBarkTextures);
   scene.updateMatrixWorld(true);
-  return { scene, dispose: () => { geometries.forEach(geometry => geometry.dispose()); exportMaterials.forEach(material => material.dispose()); exportTextures.forEach(texture => texture.dispose()); } };
+  return { scene, dispose: () => { geometries.forEach(geometry => geometry.dispose());disposeMaterials(); } };
 }
 
 export async function exportGlb(root, options = {}) {
-  const { scene, dispose } = createGlbExportScene(root, { ...options, rasterizeBarkTextures: true });
+  const result=options.rigAsset?createSkinnedGlbScene(options.rigAsset,options):createGlbExportScene(root,{...options,rasterizeBarkTextures:true});
+  const {scene,dispose}=result;let disposeMaterials=()=>{};
   try {
-    return await new GLTFExporter().parseAsync(scene, { binary: true, onlyVisible: true });
+    if(options.rigAsset)disposeMaterials=prepareSceneMaterials(scene,true);
+    if(result.report)options.onRigReport?.(result.report);
+    return await new GLTFExporter().parseAsync(scene, { binary: true, onlyVisible: true,...(options.rigAsset?{trs:true}:{}) });
   } finally {
+    disposeMaterials();
     dispose();
   }
 }
 
 export function modelOutputPath(path, format) {
-  const extension = format === 'GLB' ? '.glb' : '.fbx';
+  const extension = format === 'GLB'||format==='GLB_SKINNED' ? '.glb' : '.fbx';
   return /\.(fbx|glb)$/i.test(path) ? path.replace(/\.(fbx|glb)$/i, extension) : path + extension;
 }

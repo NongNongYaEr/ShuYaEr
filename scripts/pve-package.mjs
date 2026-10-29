@@ -31,7 +31,7 @@ export function validatePackage(directory, sourceBytes) {
   const r = json('whole.resolved.json'), b = file('whole.resolved.bin');
   const sourceHash = hash(sourceBytes);
   assert(m.format === 'BranchForgeCompleteUnitSet' && m.version === 1, '完整枝清单格式错误');
-  assert(s.format === 'BranchForgePVESkeleton' && [1, 2].includes(s.version), 'PVE 入口格式错误');
+  assert(s.format === 'BranchForgePVESkeleton' && [1, 2, 3].includes(s.version), 'PVE 入口格式错误');
   const skeletonValidation = validatePVESkeleton(s);
   assert(skeletonValidation.valid, '重新读取的 PVE 入口无效：' + skeletonValidation.errors.join('；'));
   assert(r.format === 'BranchForgeResolvedAssembly' && r.version === 1 && r.vertex_stride === 48, '实际装配格式错误');
@@ -43,6 +43,10 @@ export function validatePackage(directory, sourceBytes) {
   assert(hash(b) === r.binary_sha256 && hash(b, 'sha1') === r.binary_sha1, '实际装配二进制哈希错误');
   assert(JSON.stringify(r.instances) === JSON.stringify(s.foliage) && JSON.stringify(r.sources) === JSON.stringify(s.foliage_sources) && JSON.stringify(r.branches) === JSON.stringify(s.branches), '骨架、实例或枝类索引不一致');
   const ids = new Set(s.branches.map(v => v.id)), counts = m.units.map(() => 0);
+  const imported=r.imported_trunk_materials;
+  if(s.version===3){assert(imported?.version===1&&Array.isArray(imported.materials)&&imported.materials.length>0,'外部树干缺少实际材质表');const ids=new Set(imported.materials.map(m=>m.id));assert(ids.size===imported.materials.length,'外部树干材质身份重复');for(const material of imported.materials)for(const map of Object.values(material.maps||{})){const bytes=file(map.file);assert(bytes.length===map.bytes&&hash(bytes).toLowerCase()===map.sha256,'外部树干贴图校验失败');}for(const chunk of r.chunks){if(chunk.imported_trunk_material)assert(ids.has(chunk.imported_trunk_material.material_id)&&chunk.imported_trunk_material.uv_policy==='source_gltf_uv0_no_extra_flip','外部树干材质绑定缺失');if(chunk.vertex_colors){const c=chunk.vertex_colors,bytes=file(c.file);assert(c.count===chunk.vertex_count&&c.stride===16&&bytes.length===c.count*16&&hash(bytes).toLowerCase()===c.sha256,'外部树干顶点颜色校验失败');}}assert(imported.setup==='setup_imported_trunk_materials.py'&&file(imported.setup).length>0,'外部树干材质设置脚本缺失');}
+  else assert(!imported,'外部树干不能使用旧版 PVE 入口');
+  const skin=r.imported_trunk_skin;if(s.version===3){assert(skin?.version===1&&skin.stride===12&&skin.coordinate_system==='UE_centimeter_X_negativeY_Z','外部树干缺少显式骨骼权重');const bytes=file(skin.file);assert(bytes.length===skin.bytes&&bytes.subarray(0,8).toString()==='BFTS0001'&&hash(bytes).toLowerCase()===skin.sha256&&hash(bytes,'sha1').toLowerCase()===skin.sha1,'树干权重文件校验失败');assert(Array.isArray(skin.nodes)&&skin.nodes.length>1&&skin.nodes.every(n=>ids.has(n.branch_id)&&n.position_cm?.length===3&&n.position_cm.every(Number.isFinite)),'树干骨骼节点无效');let end=8;for(const [i,p]of skin.pieces.entries()){assert(p.offset===end&&p.count===r.chunks[p.chunk]?.vertex_count&&r.chunks[p.chunk]?.imported_trunk_skin?.piece===i,'树干权重块引用不一致');end+=p.count*12;for(let v=0;v<p.count;v++){const at=p.offset+v*12,a=bytes.readUInt32LE(at),b=bytes.readUInt32LE(at+4),w=bytes.readFloatLE(at+8);assert(a<skin.nodes.length&&b<skin.nodes.length&&Number.isFinite(w)&&w>=0&&w<=1,'树干权重无效');}}assert(end===bytes.length&&file(skin.setup).length>0,'树干权重文件长度或完成脚本缺失');if(skin.instructions)assert(skin.instructions==='树干UE导出说明.txt'&&file(skin.instructions).length>0,'树干UE导出说明缺失');if(skin.ue_export)assert(skin.ue_export==='export_imported_trunk_assets.ps1'&&file(skin.ue_export).length>0,'树干后台导出脚本缺失');}
   const barkMaterials = new Map(), barkFiles = new Set();
   if (r.bark_materials !== undefined) {
     assert(Array.isArray(r.bark_materials) && r.bark_materials.length > 0 && r.bark_materials.length <= 4096, '树皮材质表无效');
@@ -159,8 +163,9 @@ export function validatePackage(directory, sourceBytes) {
     }
     if (unit.triangles !== undefined) assert(unit.triangles === glbTriangles, '完整单元 GLB 三角面数量不一致');
   }
-  const png = file('leaf_atlas_color.png');
-  assert(png.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])), '共享图集不是 PNG');
+  const bareImported=s.version===3&&s.foliage.length===0&&s.foliage_sources.length===0;
+  const png = bareImported&&!fs.existsSync(path.join(directory,'leaf_atlas_color.png'))?null:file('leaf_atlas_color.png');
+  assert(png?png.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])):bareImported&&!m.merged_atlas, '共享图集不是 PNG');
   if (m.merged_atlas) {
     const a=m.merged_atlas;
     assert(a.width===png.readUInt32BE(16) && a.height===png.readUInt32BE(20) && a.regions.length>1, '混合图集尺寸或来源错误');
@@ -199,8 +204,9 @@ export function validatePackage(directory, sourceBytes) {
   assert(JSON.stringify(bounds) === JSON.stringify(r.summary.bounds_cm), '实际装配包围盒不一致');
   assert(owners.size === s.foliage.length && r.summary.unit_instances === s.foliage.length && r.summary.source_meshes === m.units.length, '实际装配实例丢失');
   const filenames = fs.readdirSync(directory).sort();
+  const importedFiles=imported?[imported.setup,...imported.materials.flatMap(m=>Object.values(m.maps||{}).map(x=>x.file)),...r.chunks.filter(c=>c.vertex_colors).map(c=>c.vertex_colors.file)]:[];
   const supportedFiles = new Set(['whole.pve-skeleton.json', 'complete_units.manifest.json', 'whole.resolved.json',
-    'whole.resolved.bin', 'leaf_atlas_color.png', 'leaf_atlas_normal.png', 'validation.json', ...m.units.map(unit => unit.glb), ...barkFiles]);
+    'whole.resolved.bin', 'leaf_atlas_color.png', 'leaf_atlas_normal.png', 'validation.json', ...m.units.map(unit => unit.glb), ...barkFiles,...importedFiles,...(skin?[skin.file,skin.setup,...(skin.ue_export?[skin.ue_export]:[]),...(skin.instructions?[skin.instructions]:[])]:[])]);
   for (const name of filenames) assert(supportedFiles.has(name), '验证报告包含现有 UE 完整包约定之外的文件：' + name);
   if (m.package_kind === 'vine') {
     const ref = m.vine_detail;
@@ -220,7 +226,7 @@ export function validatePackage(directory, sourceBytes) {
   const originalValidation = json('validation.json');
   assert(originalValidation.valid && originalValidation.errors?.length === 0, '骨架校验未通过');
   return { ...originalValidation, valid: true, errors: [], branch_count: s.branches.length, foliage_count: s.foliage.length, sources: m.units.length,
-    source_sha256: sourceHash, resolved_assembly: { ...s.resolved_assembly, ...r.summary }, atlas: { width: png.readUInt32BE(16), height: png.readUInt32BE(20) }, files };
+    source_sha256: sourceHash, resolved_assembly: { ...s.resolved_assembly, ...r.summary }, atlas: png?{ width: png.readUInt32BE(16), height: png.readUInt32BE(20) }:null, files };
 }
 
 export async function packageTransaction({ input, destination, statusPath, generate, keepHistory = false,

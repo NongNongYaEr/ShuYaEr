@@ -3,6 +3,8 @@ import { descendants, selectionRoots } from './branch-selection.js';
 import { captureUnit, resolveUnit } from './unit-authoring.js';
 import { sampleLine, lineTangent } from './tree-sculpt.js';
 import {axisTimes,normalizeAxisTimes,withAxisTimes} from './branch-axis.js';
+import {normalizeTrunkAttachment,carrierTrunkAnchor} from './imported-trunk-data.js';
+import {evaluateTrunkAttachment} from './imported-trunk-attachments.js';
 
 const keys=['length','startRadius','endRadius','radiusProfile','profileSet','phase','windPhase','windStiffness','sections','skeletonRadius','radiusEdits','shootRole','vineRole','prefabCarrier'];
 const vectors=ps=>ps.map(p=>new THREE.Vector3(...p));
@@ -29,7 +31,7 @@ export function captureBranchDuplicate(asset, selected, token, leafSources=[]) {
       owner:!root&&(b.unitOwner||b.instanceId)?`${token}_${b.unitOwner||b.instanceId}`:'',
       mountMatrix:b.mountMatrix?.toArray(),surfaceNormals:b.surfaceNormals?.map(p=>p.toArray()),
       leaves:units(leaves,'LEAF'),organs:units(organs,'ORGAN'),
-      frame:root&&parent?{position:sampleLine(parent.points,b.parentT).toArray(),tangent:lineTangent(parent.points,b.parentT).toArray()}:null};
+      frame:root&&parent?{position:sampleLine(parent.points,b.parentT).toArray(),tangent:lineTangent(parent.points,b.parentT).toArray(),...(b.trunkCarrierAnchor?{trunk_anchor:b.trunkCarrierAnchor,trunk_surface_matrix:b.trunkCarrierApplied.toArray()}:{})}:null};
   });
   return {type:'DUPLICATE',targets:roots.map(b=>ids.get(b.stableId)),records};
 }
@@ -40,6 +42,7 @@ export function normalizeBranchDuplicate(raw) {
   const identifier=v=>typeof v==='string'&&/^[a-zA-Z0-9_.-]{1,128}$/.test(v);
   const records=raw.records.filter(r=>identifier(r.id)&&(!r.parent||identifier(r.parent))&&valid(r.points)&&valid(r.controlPoints)).map(r=>{
     const record=structuredClone(r);record.properties=Object.fromEntries(keys.filter(k=>r.properties?.[k]!=null).map(k=>[k,structuredClone(r.properties[k])]));
+    if(record.frame?.trunk_anchor){record.frame.trunk_anchor=carrierTrunkAnchor(record.frame.trunk_anchor,THREE.MathUtils.clamp(Number(r.parentT)||0,0,1));if(!Array.isArray(record.frame.trunk_surface_matrix)||record.frame.trunk_surface_matrix.length!==16||!record.frame.trunk_surface_matrix.every(Number.isFinite))throw Error('预制枝干的树干表面基准无效');}
     record.parentT=THREE.MathUtils.clamp(Number(r.parentT)||0,0,1);record.order=THREE.MathUtils.clamp(Math.round(Number(r.order)||0),0,3);
     const times=normalizeAxisTimes(r.sample_times,r.points.length);if(times)record.sample_times=times;else delete record.sample_times;
     return record;
@@ -66,6 +69,7 @@ export function appendBranchDuplicate(branches, operation, overrides={}, suppres
       copySnapshot:true,sourceAssetId:r.sourceAssetId||'',sourceInstanceId:r.sourceInstanceId||'',sourceBranchId:r.sourceBranchId||'',copiedLeaves:r.leaves||[],copiedOrgans:r.organs||[],
       mountMatrix:matrix.clone().multiply(r.mountMatrix?new THREE.Matrix4().fromArray(r.mountMatrix):new THREE.Matrix4()),
       surfaceNormals:r.surfaceNormals?vectors(r.surfaceNormals).map(n=>n.applyQuaternion(q)):null};
+    if(r.root&&r.frame?.trunk_anchor){branch.trunkCarrierAnchor=r.frame.trunk_anchor;branch.trunkCarrierApplied=matrix.clone().multiply(new THREE.Matrix4().fromArray(r.frame.trunk_surface_matrix));if(branch.trunkCarrierAnchor.origin==='AXIS'){const context=parent?.importedTrunkSource;if(!context)throw Error('枝干的控制线来源缺失');const axis=evaluateTrunkAttachment(context.asset,context.mount,branches,branch.trunkCarrierAnchor);branch.trunkCarrierAxisOffset=axis.rotation.clone().invert().multiply(new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().extractRotation(branch.trunkCarrierApplied))).normalize();}}
     const times=normalizeAxisTimes(r.sample_times,branch.points.length);if(times)withAxisTimes(branch.points,times,times);
     branches.push(branch);byStable.set(r.id,branch);parent?.children.push(branch.id);
   }

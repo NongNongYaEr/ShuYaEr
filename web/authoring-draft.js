@@ -1,3 +1,4 @@
+import {isImmutableJson} from './immutable-json.js';
 // Synchronous edits of normalized JSON data. Getters preserve normal Array and
 // structuredClone behavior while copying only paths the mutation changes.
 // A separate, independent history snapshot is still taken before installation.
@@ -9,7 +10,7 @@ export function readAuthoringDraft(value){return readers.has(value)?readers.get(
 
 export function createAuthoringDraft(source) {
   const states = new WeakMap(), accessors = new Map();
-  const plain = value => value && typeof value === 'object'
+  const plain = value => value && typeof value === 'object' && !isImmutableJson(value)
     && (Array.isArray(value) || Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
   function wrap(original) {
     const value = Array.isArray(original) ? new Array(original.length) : {};

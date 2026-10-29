@@ -56,10 +56,11 @@ if (authoring.vine || authoring.surface_growth?.enabled) {
 const library = authoring.branch_library || [];
 const instances = authoring.branch_instances || [];
 if (geometry && !radiusVariants && !args.includes('--metadata-only')) {
-  // Trees assembled in the current editor need not carry a historical recipe
-  // tag. The final graph validates the actual complete-unit/host boundaries.
-  if (!library.length || !authoring.branch_shape?.branches?.length)
-    throw Error('工程不是已装配完整样本枝的整树');
+  // A sculpted/AI trunk can be a complete plant before any crown units are
+  // mounted. Validate its actual geometry and sources in the final graph;
+  // an empty unit library is not evidence that this is an incomplete project.
+  if (!authoring.branch_shape?.branches?.length)
+    throw Error('工程缺少可导出的承重骨架，请先完成树干整理或装配整树');
   return generateFinalCompletePackage({ tool, input, document: doc, sourceBytes, output: out, progress });
 }
 if (!authoring.recipe.tags.includes('WHOLE_PLANT') || !library.length || !instances.length ||

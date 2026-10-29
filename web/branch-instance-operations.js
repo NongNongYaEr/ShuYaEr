@@ -4,6 +4,7 @@ import { instanceMatrix, reframeInstanceEdits, instanceEditBase } from './branch
 import { branchInstanceFrame } from './branch-kernel.js';
 import { sampleLine, lineTangent } from './tree-sculpt.js';
 import { branchMountAt } from './branch-mount-frame.js';
+import {trunkInstanceWorldMatrix} from './imported-trunk-attachments.js';
 import {createInstanceReferenceBatch} from './instance-reference-curves.js';
 
 const owns = (id, owner) => typeof id === 'string' && (id === owner || id.startsWith(owner + '.'));
@@ -168,7 +169,7 @@ export function evaluatedInstanceFrame(instance,shape,branches,settings){
 // Convert a desired world transform back to the saved carrier-local frame. This
 // handles sculpted carriers whose mount frame includes rotation and scale.
 export function instanceFromMatrix(instance,shape,parent,matrix,scale=null){
-  const mount=branchMountAt(parent,instance.attach),inverse=mount?.clone().invert(),local=matrix.clone();if(inverse)local.premultiply(inverse);
+  const mount=trunkInstanceWorldMatrix(instance,parent)||branchMountAt(parent,instance.attach),inverse=mount?.clone().invert(),local=matrix.clone();if(inverse)local.premultiply(inverse);
   const position=new THREE.Vector3(...shape.connector.position).applyMatrix4(local),direction=new THREE.Vector3(...shape.connector.direction).transformDirection(local),rotation=new THREE.Quaternion(),dimensions=new THREE.Vector3();local.decompose(new THREE.Vector3(),rotation,dimensions);
   if(scale===null)scale=dimensions.x/(branchInstanceFrame(instance,null,{}).scale/instance.scale);
   const aligned=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(...shape.connector.direction),direction),twist=rotation.clone().multiply(aligned.invert());
@@ -181,7 +182,14 @@ export function moveInstanceToCarrier(instance, parent, beforeParent, settings, 
   shape ||= {connector:{position:[0,0,0],direction:[1,0,0]}};
   const frame=evaluatedInstanceFrame(instance,shape,beforeParent?[beforeParent]:[],settings), previous=beforeParent?lineTangent(beforeParent.points,instance.attach):new THREE.Vector3(0,0,1),tangent=lineTangent(parent.points,attach),rotation=new THREE.Quaternion().setFromUnitVectors(previous,tangent),position=sampleLine(parent.points,attach);
   const transform=new THREE.Matrix4().makeTranslation(...position.toArray()).multiply(new THREE.Matrix4().makeRotationFromQuaternion(rotation)).multiply(new THREE.Matrix4().makeTranslation(...frame.position.clone().negate().toArray()));
-  return instanceFromMatrix({...instance,parent:parent.stableId,attach},shape,parent,transform.multiply(frame.matrix));
+  const moved={...instance,parent:parent.stableId,attach};delete moved.trunk_anchor;
+  return instanceFromMatrix(moved,shape,parent,transform.multiply(frame.matrix));
+}
+export function moveInstanceToSurface(instance,target,beforeParent,settings,shape){
+  const original=evaluatedInstanceFrame(instance,shape,beforeParent?[beforeParent]:[],settings),surface=target.surface_binding,previous=trunkInstanceWorldMatrix(instance,beforeParent),normal=instance.trunk_anchor&&beforeParent?.trunkAttachments?.get(instance.id)?.normal||original.direction,rotation=new THREE.Quaternion().setFromUnitVectors(normal.clone().normalize(),target.surface_frame.direction.clone().normalize());
+  const parent={...target.parent,trunkAttachments:new Map(target.parent.trunkAttachments||[])};parent.trunkAttachments.set(instance.id,surface);
+  const seed={...instance,parent:parent.stableId,attach:target.attach,trunk_anchor:target.trunk_anchor,frame:target.frame},desired=new THREE.Matrix4().makeTranslation(...target.surface_frame.position.toArray()).multiply(new THREE.Matrix4().makeRotationFromQuaternion(rotation)).multiply(new THREE.Matrix4().makeTranslation(...original.position.clone().negate().toArray())).multiply(original.matrix);
+  return {instance:instanceFromMatrix(seed,shape,parent,desired),parent};
 }
 
 export function rotateInstance(instance, parent, settings, rotation, shape=null) {
@@ -237,7 +245,8 @@ export function applyInstancePlacement(authoring, before, after, shape, branches
   }
   const ratio=after.scale/before.scale;
   if (Math.abs(ratio-1)>1e-10) for (const item of ctx.unitItemsByOwner.get(before.id)||[]) { item.offset=item.offset.map(x=>x*ratio);item.scale*=ratio;item.base_scale*=ratio; }
-  Object.assign(ctx.instanceById.get(before.id),after,{assembly_refined:true,assembly_manual:true});
+  const stored=ctx.instanceById.get(before.id);if(!after.trunk_anchor)delete stored.trunk_anchor;
+  Object.assign(stored,after,{assembly_refined:true,assembly_manual:true});
 }
 
 export function applyInstanceFamilyPlacement(authoring,before,after,shape,branches,settings,context=null){

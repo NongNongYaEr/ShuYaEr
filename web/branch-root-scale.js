@@ -10,7 +10,10 @@ export function evaluateRootScale(branches, operation, strength = 1, overrides =
     if (root.unitOwner || root.instanceId || root.symmetryGroup) continue;
     const family = descendants(branches, new Set([root.stableId]));
     if (branches.some(b => family.has(b.stableId) && overrides[b.stableId]?.pinned_points?.length)) continue;
-    for (const b of branches) if (family.has(b.stableId)) owners.set(b.id, root.points[0]);
+    // Surface-mounted families follow their actual GLB triangle after the host
+    // changes. Scaling their points here would apply the attachment motion twice.
+    const passengers=new Set();if(root.importedTrunkHost&&operation.scale_trunk_volume===true)for(const b of branches)if(b.trunkCarrierAnchor&&family.has(b.stableId))for(const id of descendants(branches,new Set([b.stableId])))passengers.add(id);
+    for (const b of branches) if (family.has(b.stableId)&&!passengers.has(b.stableId)) owners.set(b.id, root.points[0]);
   }
   const scale = new THREE.Vector3(...operation.scale).lerp(new THREE.Vector3(1, 1, 1), 1 - strength);
   const result = new Map(), visiting = new Set(), unitMatrices = new Map();
@@ -38,6 +41,10 @@ export function evaluateRootScale(branches, operation, strength = 1, overrides =
       const origin = owners.get(b.id), transform = p => p.clone().sub(origin).multiply(scale).add(origin);
       updated = { ...b, points: b.points.map(transform), controlPoints: b.controlPoints.map(transform) };
       updated.length = updated.points.slice(1).reduce((sum,p,i) => sum+p.distanceTo(updated.points[i]),0);
+      if(b.importedTrunkHost&&operation.scale_trunk_volume===true){
+        const before=b.points.slice(1).reduce((sum,p,i)=>sum+p.distanceTo(b.points[i]),0),along=updated.length/Math.max(1e-12,before),radial=Math.abs(scale.x-1)<1e-12&&Math.abs(scale.y-1)<1e-12?1:Math.sqrt(scale.x*scale.y*scale.z/Math.max(1e-12,along));
+        updated.startRadius=b.startRadius*radial;updated.endRadius=b.endRadius*radial;
+      }
     }
     result.set(b.id, updated); visiting.delete(b.id); return updated;
   }

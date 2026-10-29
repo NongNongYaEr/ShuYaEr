@@ -7,6 +7,7 @@ import { checkPveGeometry } from './pve-geometry-quality.mjs';
 import { exportResolvedAssembly } from './export_branchforge_resolved_assembly.mjs';
 import { extractPveUnitGeometry, hashPveUnitGeometry, equalPveUnitGeometry, disposePveUnitGeometry, rebuildPveUnitTangents } from './pve-final-geometry.mjs';
 import { createPveBarkExporter } from './pve-bark-materials.mjs';
+import {ensureImportedTrunkSkinPoints} from './imported-trunk-skin.mjs';
 import { fitPveUnitPair, matchesTransformedPveGeometry } from './pve-unit-reuse.mjs';
 
 export async function generateFinalCompletePackage({ tool, input, document, sourceBytes, output, progress }) {
@@ -32,9 +33,10 @@ export async function generateFinalCompletePackage({ tool, input, document, sour
     asset = k.buildBranchAsset(settings, null, sources, 0, authoring);
     warnings.push(...checkPveGeometry(asset.report, '整树实际装配'));
     const plan = resolvePveExportPlan(asset, authoring);
-    if (!plan.units.length) throw Error('工程没有可交付的完整成品枝实例');
+    if (!plan.units.length&&!authoring.imported_trunks?.mounts.length) throw Error('工程没有可交付的完整成品枝实例');
     const skeleton = createPVESkeleton({ ...asset, masterBranches: plan.structuralBranches,
       masterPlacements: [], placements: [] }, []);
+    ensureImportedTrunkSkinPoints(asset,skeleton);
     skeleton.kind = 'whole_plant'; skeleton.connector = null;
     skeleton.name = document.settings.object_name;
     const textures = [], textureObjects = new Set(), untexturedMaterials = [];
@@ -51,7 +53,7 @@ export async function generateFinalCompletePackage({ tool, input, document, sour
       }
     });
     progress('准备交付图集', '按实际完整枝材质合并图集，保留原图像素');
-    const atlas = createPveAtlas(textures, output, {untexturedMaterials});
+    const atlas = plan.units.length||untexturedMaterials.length||textures.some(t=>t?.color)?createPveAtlas(textures, output, {untexturedMaterials}):null;
     unitGroups.push(...extractPveUnitGeometry(asset, plan, atlas));
     const extractionTransforms=plan.units.map(unit=>unit.transform.clone());
     // UNIT_PLACEMENT is a whole-model transform. Its pre-placement meshes are
@@ -113,7 +115,10 @@ export async function generateFinalCompletePackage({ tool, input, document, sour
       const face = new T.Vector3(0, 0, 1).applyMatrix4(unit.transform).sub(position);
       const scale = up.length(); up.normalize(); face.normalize();
       const parent = unit.parent || unit.host;
-      const hostPosition = sampleLine(parent.points,unit.root.parentT);
+      const hostPosition = unit.sourceInstance?.trunk_anchor
+        ? parent.trunkAttachments?.get(unit.sourceInstance.id)?.position
+        : sampleLine(parent.points,unit.root.parentT);
+      if(!hostPosition)throw Error('完整单元枝的表面挂点未正确求值：'+unit.id);
       maxRootError = Math.max(maxRootError, position.distanceTo(hostPosition));
       return { id: `UNIT_${unit.id}`, branch_id: unit.host.stableId, branch_t: unit.hostT,
         source_index: unit.source_index, position_m: position.toArray(), up: up.toArray(), face: face.toArray(),
@@ -125,6 +130,7 @@ export async function generateFinalCompletePackage({ tool, input, document, sour
       complete_unit_assembly: { unit_count: foliage.length, source_mesh_count: ordered.length,
         leaf_instances: 0, organ_instances: 0, baked_unit_leaves: 0, baked_unit_organs: 0,
         max_unit_root_error_m: maxRootError } });
+    if(authoring.imported_trunks?.mounts.length){skeleton.version=3;skeleton.required_capabilities=['imported_trunk_materials_v1','imported_trunk_skin_v1'];skeleton.imported_trunks={version:1,sources:authoring.imported_trunks.assets.map(a=>({id:a.id,revision:a.revision,source_sha256:a.source.sha256})),mounts:authoring.imported_trunks.mounts};}
     const validation = validatePVESkeleton(skeleton);
     if (!validation.valid) throw Error('完整枝骨架无效：' + validation.errors.slice(0, 8).join('；'));
     const manifest = { format: 'BranchForgeCompleteUnitSet', version: 1,
@@ -136,8 +142,8 @@ export async function generateFinalCompletePackage({ tool, input, document, sour
       local_variant_mesh_policy: 'baked_final_geometry_deduplicated_by_content',
       fidelity_warning: 'Local variants retain final unit geometry. Shared unedited classes remain reusable; the resolved assembly is the exact software result, including per-instance radius and foliage.',
       leaf_atlas_uv_transform: 'flip_v_in_ue_material', radius_levels_per_base: 1,
-      max_unit_root_error_m: maxRootError, max_relative_radius_error: Math.max(...plan.units.map(unit => Math.abs((unit.sourceInstance?.radius_scale || 1) - 1) / (unit.sourceInstance?.radius_scale || 1))),
-      p95_relative_radius_error: [...plan.units.map(unit => Math.abs((unit.sourceInstance?.radius_scale || 1) - 1) / (unit.sourceInstance?.radius_scale || 1))].sort((a,b) => a-b)[Math.floor(plan.units.length * .95)],
+      max_unit_root_error_m: maxRootError, max_relative_radius_error: Math.max(0,...plan.units.map(unit => Math.abs((unit.sourceInstance?.radius_scale || 1) - 1) / (unit.sourceInstance?.radius_scale || 1))),
+      p95_relative_radius_error: [...plan.units.map(unit => Math.abs((unit.sourceInstance?.radius_scale || 1) - 1) / (unit.sourceInstance?.radius_scale || 1))].sort((a,b) => a-b)[Math.floor(plan.units.length * .95)]??0,
       units: [] };
     manifest.model_reuse = { policy:'complete_geometry_verified_rigid_reuse',
       source_models:ordered.filter(source=>!source.group).length,

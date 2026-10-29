@@ -83,7 +83,7 @@ function pointCornerFrames(branch,settings){
     const source=pointCornerFrames({...branch,points:deformation.source},settings);
     return t=>{const frame=source(t),q=deformation.turnAt(t);return{tangent:frame.tangent.clone().applyQuaternion(q),x:frame.x.clone().applyQuaternion(q),y:frame.y.clone().applyQuaternion(q)};};
   }
-  if(branch.legacyRigidGeometry&&!axisTimes(branch.points)){
+  if(branch.legacyRigidGeometry&&(branch.trunkCarrierRigid||!axisTimes(branch.points))){
     const {baseline,matrix}=branch.legacyRigidGeometry,source=pointCornerFrames({...baseline,axisLod:branch.axisLod},settings),q=new THREE.Quaternion().setFromRotationMatrix(matrix);
     return t=>{const frame=source(t);return{tangent:frame.tangent.clone().applyQuaternion(q),x:frame.x.clone().applyQuaternion(q),y:frame.y.clone().applyQuaternion(q)};};
   }
@@ -95,7 +95,7 @@ function pointCornerFrames(branch,settings){
 }
 
 export function createSweptBranchGeometry(branch, radialSegments, settings, options = {}) {
-  if (branch.legacyRigidGeometry&&!axisTimes(branch.points)) {
+  if (branch.legacyRigidGeometry&&(branch.trunkCarrierRigid||!axisTimes(branch.points))) {
     const { baseline,matrix } = branch.legacyRigidGeometry;
     const geometry = createSweptBranchGeometry(baseline, radialSegments, settings, options);
     ensureGeometryTangents(geometry);

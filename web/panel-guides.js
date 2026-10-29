@@ -27,7 +27,7 @@ export function createPanelGuides() {
   exporter.firstElementChild.append(caption);
   steps(exporter.firstElementChild, ['选用途', '确认格式', '导出资产'], '导出步骤');
   const purposes = [
-    ['通用模型', '用于其他建模软件或常规网格导入。'],
+    ['通用模型', '静态 GLB 用于模型交付；骨骼 GLB 用于继续制作骨骼动画。'],
     ['UE · PVE 流程', '首选 UE/PVE 完整单元枝包；旧版骨架数据不含完整单元枝模型。'],
     ['常春藤 / 贴面植物', '用于 UE 静态植被工作台，共享叶片与材质。'],
   ];

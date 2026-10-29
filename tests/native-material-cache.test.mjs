@@ -3,6 +3,15 @@ import assert from 'node:assert/strict';
 import * as THREE from '../web/vendor/three.module.min.js';
 import {createNativeMaterialEncoder} from '../web/native-material-cache.js';
 import {createRetainedNativeMaterialTable} from '../web/native-scene-retention.js';
+import {nativeMaterialUnsupported} from '../web/native-viewport.js';
+
+test('foreign PBR maps retain channel transforms, sampler modes and mutable strengths without changing legacy palettes',()=>{
+ const m=new THREE.MeshStandardMaterial(),color=new THREE.Texture(),mr=new THREE.Texture(),ao=new THREE.Texture(),emission=new THREE.Texture();
+ color.userData.importedTrunk=true;color.wrapS=THREE.ClampToEdgeWrapping;color.wrapT=THREE.MirroredRepeatWrapping;color.magFilter=THREE.NearestFilter;color.minFilter=THREE.NearestMipmapNearestFilter;color.flipY=false;color.offset.set(.1,.2);color.colorSpace=THREE.SRGBColorSpace;
+ m.map=color;m.roughnessMap=mr;m.metalnessMap=mr;m.aoMap=ao;m.emissiveMap=emission;emission.colorSpace=THREE.SRGBColorSpace;m.aoMapIntensity=.7;
+ const encoder=createNativeMaterialEncoder({textureKey:t=>t.uuid});encoder.beginFrame();const first=encoder.encode(m);assert.equal(first.uv0[3],4);assert.equal(first.uv1[3],5);assert.equal(first.uv0[2],.1);assert.equal(first.roughnessMap,first.metalnessMap);assert.equal(first.aoStrength,.7);assert.equal(first.emissiveSrgb,true);assert(nativeMaterialUnsupported(m));assert.equal(nativeMaterialUnsupported(m,{gltf_pbr_protocol:1}),null);
+ m.aoMapIntensity=.2;encoder.beginFrame();const changed=encoder.encode(m);assert.notEqual(changed,first);assert.equal(changed.aoStrength,.2);assert.equal(first.aoStrength,.7);m.metalnessMap=m.aoMap=m.emissiveMap=null;encoder.beginFrame();assert(!Object.hasOwn(encoder.encode(m),'aoMap'),'removed PBR slots survived a cache hit');m.dispose();
+});
 
 test('native uniform edits without a material version change produce new independent presentation records',()=>{
  const material=new THREE.MeshStandardMaterial({color:0x336699,roughness:.7}),encoder=createNativeMaterialEncoder({textureKey:t=>t.uuid});

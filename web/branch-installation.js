@@ -8,6 +8,7 @@ import { sampleLeafMaterial, sampleLeafMaterialName, syncLeafMaterialVariants } 
 import { applyLeafMaterial, waitForLeafTextures } from './leaf-resources.js';
 import { resolveSampleMaterial } from './sample-materials.js';
 import { assemblyBranchLimit } from './local-assembly-data.js';
+import {pickImportedTrunkAttachment} from './imported-trunk-picker.js';
 
 export function createBranchInstallation(api) {
   const { canvas, camera, modelRoot } = api; const ray = new THREE.Raycaster(); const ghostRoot = new THREE.Group(); ghostRoot.name = 'BranchPlacementPreview'; modelRoot.add(ghostRoot);
@@ -20,18 +21,20 @@ export function createBranchInstallation(api) {
   function hit(event) {
     const rect = canvas.getBoundingClientRect(); ray.setFromCamera(new THREE.Vector2((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1), camera);
     const asset=api.getAsset(),meshes=[],batches=new Map();asset?.group.updateWorldMatrix(true,true);asset?.group.traverse((o) => { if (o.isMesh && o.visible && o.userData.category === 'branch') {meshes.push(o);const binding=asset.editPreviewBindings?.(o);if(binding?.instances)batches.set(o,binding.instances);} });
-    let result,branch;for(const hit of ray.intersectObjects(meshes,false)){const descriptor=batches.get(hit.object)?.[hit.instanceId],id=descriptor?.object().userData.stable_id||hit.object.userData.stable_id;const candidate=asset.masterBranches.find(b=>b.stableId===id);if(candidate){result=hit;branch=candidate;break;}}if(!branch)return null;
+    let result,branch;for(const hit of ray.intersectObjects(meshes,false)){if(hit.object.userData.imported_trunk)return pickImportedTrunkAttachment(asset,api.getAuthoring(),hit);const descriptor=batches.get(hit.object)?.[hit.instanceId],id=descriptor?.object().userData.stable_id||hit.object.userData.stable_id;const candidate=asset.masterBranches.find(b=>b.stableId===id);if(candidate){result=hit;branch=candidate;break;}}if(!branch)return null;
     const point = asset.group.worldToLocal(result.point.clone()); let closest = 0, distance = Infinity;
     for (let i = 0; i < branch.points.length - 1; i++) { const a = branch.points[i], b = branch.points[i + 1]; const d = b.clone().sub(a); const t = Math.max(0, Math.min(1, point.clone().sub(a).dot(d) / Math.max(1e-12, d.lengthSq()))); const error = a.clone().addScaledVector(d, t).distanceToSquared(point); if (error < distance) { distance = error; closest = (i + t) / (branch.points.length - 1); } }
-    return { parent: branch.stableId, attach: Math.max(0.02, Math.min(0.98, closest)) };
+    return { parent: branch.stableId, attach: Math.max(0.02, Math.min(0.98, closest)),trunk_anchor:null,frame:null,surface_frame:null };
   }
   function values() {
     const result = { ...api.values(), attach: pending.attach };
+    if(pending.trunk_anchor){result.trunk_anchor=pending.trunk_anchor;result.frame=pending.frame;}
     if (api.matchRadius()) { const parent = api.getAsset().masterBranches.find((b) => b.stableId === pending.parent); const root = pending.asset.shape.branches[0]; if (parent) result.scale = Math.max(0.05, Math.min(5, branchRadiusAt(parent, api.getSettings(), pending.attach) * 0.65 / root.start_radius)); }
     return result;
   }
   function rebuild() {
     timer = null; if (!pending?.parent) return;
+    if(api.getAsset().masterBranches.find(b=>b.stableId===pending.parent)?.importedTrunkHost&&!pending.trunk_anchor){clearGhost();bar.querySelector('#placementTarget').textContent='请在导入树干表面选取挂点';return;}
     const authoring = api.getAuthoring(); const item = { id: 'PLACEMENT_PREVIEW', asset_id: pending.asset.id, shape: pending.asset.shape, parent: pending.parent, ...values() };
     item.linked = api.linked();
     if (authoring.workbench?.assembly_scale) {const state=assemblyScaleState(authoring.workbench);item.scale*=state.overall*(item.linked?assemblyCardScale(authoring.workbench,item.shootRole || 'ANY',item.asset_id):1);}
@@ -48,13 +51,15 @@ export function createBranchInstallation(api) {
       waitForLeafTextures(built.group).then(()=>{if(ghost===built)built.group.visible=true;});
       ghost.group.matrixAutoUpdate=false;ghostRoot.add(ghost.group);
     }
-    ghost.group.matrix.copy(completeInstanceMatrix(item,pending.asset.shape,api.getAsset().masterBranches.find(b=>b.stableId===pending.parent),api.getSettings(),branchInstanceFrame));ghost.group.matrixWorldNeedsUpdate=true;
+    let parent=api.getAsset().masterBranches.find(b=>b.stableId===pending.parent);
+    if(pending.surface_binding)parent={...parent,trunkAttachments:new Map([[item.id,pending.surface_binding]])};
+    ghost.group.matrix.copy(completeInstanceMatrix(item,pending.asset.shape,parent,api.getSettings(),branchInstanceFrame));ghost.group.matrixWorldNeedsUpdate=true;
     bar.querySelector('#placementTarget').textContent = `${pending.asset.name} → ${pending.parent} · ${Math.round(pending.attach * 100)}%`;
   }
   function update() { if (!pending) return; clearTimeout(timer); timer = setTimeout(() => { try { rebuild(); } catch (error) { api.toast(error.message, true); cancel(); } }, 70); }
   function begin(asset, target = null) {
     if (!asset || !api.isTree()) return false;
-    cancel(); api.setTool('SELECT'); api.clearInstanceSelection(); pending = { asset: copy(asset), parent: target?.parent || api.getSelection(), attach: target?.attach ?? api.values().attach }; bar.hidden = false; document.body.classList.add('branch-placement-active');
+    cancel(); api.setTool('SELECT'); api.clearInstanceSelection(); pending = { asset: copy(asset), parent: target?.parent || api.getSelection(), attach: target?.attach ?? api.values().attach,...(target||{}) }; bar.hidden = false; document.body.classList.add('branch-placement-active');
     if (!pending.parent) bar.querySelector('#placementTarget').textContent = '未选择挂接枝'; else update(); return true;
   }
   async function confirm() {
@@ -63,6 +68,7 @@ export function createBranchInstallation(api) {
     try {
       await api.flush(); if (!pending || revision !== generation) return;
       if (!api.getAsset().masterBranches.some((b) => b.stableId === current.parent)) throw new Error('挂接枝已被移除');
+      if(api.getAsset().masterBranches.find(b=>b.stableId===current.parent)?.importedTrunkHost&&!current.trunk_anchor)throw Error('请先在导入树干的真实表面点选挂点');
       const limit=assemblyBranchLimit(api.getAuthoring());
       if (api.getAuthoring().branch_instances.length>=1600 || api.getAsset().masterBranches.length + current.asset.shape.branches.length > limit) throw new Error(`安装后超过当前${limit}枝段或1600支成品预算`);
       await api.ensureAssets?.([current.asset.id]);if(!pending||revision!==generation)return;
@@ -76,7 +82,7 @@ export function createBranchInstallation(api) {
   canvas.addEventListener('drop', (event) => { if (!api.isTree()) return; const item = api.assetById(event.dataTransfer.getData('application/x-branchforge-asset')); if (!item) return; event.preventDefault(); const target = hit(event); begin(item, target); });
   bar.querySelector('#placementConfirm').onclick = confirm; bar.querySelector('#placementCancel').onclick = cancel;
   return { begin, cancel, update, confirm, root: ghostRoot, get active() { return Boolean(pending); }, get pending() { return pending; },
-    move(event) { if (!pending || committing) return false; if (event.buttons === 4) return true; const target = hit(event); if (target && (target.parent !== pending.parent || Math.abs(target.attach - pending.attach) > 0.002)) { Object.assign(pending, target); api.setAttach(target.attach); update(); } return true; },
+    move(event) { if (!pending || committing) return false; if (event.buttons === 4) return true; const target = hit(event); if (target && (target.parent !== pending.parent || Math.abs(target.attach - pending.attach) > 0.002 || target.trunk_anchor&&(!pending.surface_frame||target.surface_frame.position.distanceTo(pending.surface_frame.position)>.002))) { Object.assign(pending, target); api.setAttach(target.attach); update(); } return true; },
     pointerDown(event) { if (!pending || event.button !== 0) return false; const target = hit(event); if (target) { Object.assign(pending, target); confirm(); } return true; },
     key(event) { if (!pending) return false; if (event.key === 'Escape') { cancel(); return true; } if (event.key === 'Enter' && !event.target.matches?.('input,select,textarea')) { confirm(); return true; } return false; },
   };

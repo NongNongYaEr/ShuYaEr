@@ -10,6 +10,9 @@ import {computeTrunkGeometry} from './trunk-geometry-compute.js';
 export function createPointCornerPreview(asset,snapshot,root){
   let source;asset.group.traverse(o=>{if(o.isMesh&&!o.isInstancedMesh&&o.userData.category==='branch'&&o.userData.stable_id===root.stableId)source=o;});
   const material=source?.material,visible=source?.visible,base=createMeshPreview(asset,snapshot,{targets:new Set([root.stableId]),rigidUnits:true});
+  // Imported trunks already deform their original vertices through the skin
+  // palette. A procedural tube would hide the sculpted detail and root mesh.
+  if(root.importedTrunkHost||source?.userData.imported_trunk){base.updateCarrier=()=>{};return base;}
   let overlay=null,restored=false;
   const queue=createCoalescedGeometryPreview(createGeometryJobClient(),{valid:()=>!restored,
     fallback:computeTrunkGeometry,onError:error=>console.warn('Point preview fallback',error),

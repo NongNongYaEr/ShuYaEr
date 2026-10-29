@@ -62,6 +62,7 @@ export function* applySculptLayerSteps(branches, layers, overrides = {}, suppres
       branches.forEach((b,i)=>{const points=updated[i].points;if(axisTimes(b.points)&&!axisTimes(points)&&points.length===b.points.length)withAxisTimes(points,axisTimes(b.points),b.points.axisCuts);});
       branches.forEach((b, i) => { b.points = updated[i].points; b.controlPoints = updated[i].controlPoints; b.sections = updated[i].sections; if (layer.operation.type === 'QUICK') b.length = updated[i].length; });
       branches.forEach((b,i) => { b.mountFrames = updated[i].mountFrames; b.radiusEdits = updated[i].radiusEdits; });
+      if(layer.operation.type==='ROOT_SCALE'&&layer.operation.scale_trunk_volume===true)branches.forEach((b,i)=>{if(b.importedTrunkHost){b.startRadius=updated[i].startRadius;b.endRadius=updated[i].endRadius;}});
       if(layer.operation.type==='UNIT_PLACEMENT')branches.forEach((b,i)=>{
         if(updated[i]===b)return;
         for(const key of ['length','startRadius','endRadius','parentRadius','skeletonRadius','junction','mountMatrix','surfaceNormals','copiedLeaves','copiedOrgans','collarQuaternion','legacyRigidGeometry'])b[key]=updated[i][key];
@@ -75,6 +76,8 @@ export function* applySculptLayerSteps(branches, layers, overrides = {}, suppres
         if(layer.operation.type==='CONTROL_CURVE'){b.controlDriven=updated[i].controlDriven;b.legacyRigidGeometry=updated[i].legacyRigidGeometry;}
       });
       if (layer.operation.type === 'MOUNT') branches.forEach((b,i) => {
+        b.trunkCarrierAnchor=updated[i].trunkCarrierAnchor;b.trunkCarrierApplied=updated[i].trunkCarrierApplied;
+        b.collarQuaternion=updated[i].collarQuaternion;
         b.parentT = updated[i].parentT; b.mountMatrix = updated[i].mountMatrix; b.surfaceNormals = updated[i].surfaceNormals;
         b.parentId = updated[i].parentId; b.children = updated[i].children; b.order = updated[i].order;
         b.legacyRigidGeometry=updated[i].legacyRigidGeometry;b.mountFrameBinding=updated[i].mountFrameBinding;

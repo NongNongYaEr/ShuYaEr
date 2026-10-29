@@ -1,0 +1,33 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import * as T from '../web/vendor/three.module.min.js';
+import {identifyTrunkSkeleton,isSimpleSkeletonPoint,createTrunkAnalysisInput} from '../web/trunk-auto-skeleton.js';
+import {validateTrunkGuides,pointOnTrunkGuide} from '../web/imported-trunk-data.js';
+function hollowGroovedTrunk(){
+ const position=[],index=[],sides=48,rings=42,height=1.4;
+ for(let inside=0;inside<2;inside++)for(let z=0;z<=rings;z++)for(let n=0;n<sides;n++){
+  const h=z/rings*height,a=n/sides*Math.PI*2,r=(inside?.071:.105)*(1+.13*Math.sin(a*7+h*5)),x=.035*Math.sin(h*3);
+  position.push(x+r*Math.cos(a),r*Math.sin(a),h);
+ }
+ for(let inside=0;inside<2;inside++)for(let z=0;z<rings;z++)for(let n=0;n<sides;n++){
+  const base=inside*(rings+1)*sides+z*sides,a=base+n,b=base+(n+1)%sides,c=b+sides,d=a+sides;
+  index.push(...(inside?[a,c,b,a,d,c]:[a,b,c,a,c,d]));
+ }
+ const start=new T.Vector3(.035*Math.sin(.9*3),0,.9),end=new T.Vector3(.5,0,1.03),g=new T.CylinderGeometry(.018,.042,start.distanceTo(end),16,1);
+ g.applyMatrix4(new T.Matrix4().compose(start.clone().add(end).multiplyScalar(.5),new T.Quaternion().setFromUnitVectors(new T.Vector3(0,1,0),end.clone().sub(start).normalize()),new T.Vector3(1,1,1)));
+ return {primitives:[{position,index},{position:Array.from(g.attributes.position.array),index:Array.from(g.index.array)}]};
+}
+function fork(){const primitives=[];for(const [a,b,r]of [[[0,0,0],[0,0,.8],.09],[[0,0,.55],[.4,0,1.15],.045],[[0,0,.6],[-.35,0,1.05],.04]]){const start=new T.Vector3(...a),end=new T.Vector3(...b),g=new T.CylinderGeometry(r*.6,r,start.distanceTo(end),12,1),matrix=new T.Matrix4().compose(start.clone().add(end).multiplyScalar(.5),new T.Quaternion().setFromUnitVectors(new T.Vector3(0,1,0),end.clone().sub(start).normalize()),new T.Vector3(1,1,1));g.applyMatrix4(matrix);primitives.push({position:Array.from(g.attributes.position.array),index:Array.from(g.index.array)});}return {primitives};}
+test('topology predicate preserves endpoints and rejects a bridge joining disconnected neighbours',()=>{assert.equal(isSimpleSkeletonPoint(0),false);assert.equal(isSimpleSkeletonPoint(1),false);const n=[];for(let z=-1;z<=1;z++)for(let y=-1;y<=1;y++)for(let x=-1;x<=1;x++)if(x||y||z)n.push([x,y,z]);const bit=p=>1<<n.findIndex(v=>v.every((x,k)=>x===p[k]));assert.equal(isSimpleSkeletonPoint(bit([-1,0,0])|bit([1,0,0])),false);assert.equal(isSimpleSkeletonPoint(bit([-1,0,0])|bit([-1,1,0])),true);});
+test('a closed fork becomes one rooted, continuous editable hierarchy without modifying source arrays',()=>{const input=fork(),before=JSON.stringify(input),phases=[],result=identifyTrunkSkeleton(input,{quality:'fast'},p=>phases.push(p));validateTrunkGuides(result.guides);assert(result.guides.length>=3);assert(result.guides.some(g=>g.points.some(p=>p[0]>.28)));assert(result.guides.some(g=>g.points.some(p=>p[0]<-.25)));for(const guide of result.guides.filter(g=>g.parent)){const parent=result.guides.find(g=>g.id===guide.parent);assert(pointOnTrunkGuide(parent.points,guide.attach).position.distanceTo(new T.Vector3(...guide.points[0]))<1e-8);}assert.equal(JSON.stringify(input),before);assert.equal(phases.at(-1).progress,1);assert(phases.every((p,i)=>!i||p.progress>=phases[i-1].progress));const again=identifyTrunkSkeleton(input,{quality:'fast'});assert.deepEqual(again.guides,result.guides);});
+test('analysis input contains only mesh positions, indices and a copied calibration matrix',()=>{const model={primitives:fork().primitives.map(geometry=>({geometry})),images:['private image'],source:{glb_base64:'not needed'}},m=new T.Matrix4().makeTranslation(2,3,4),input=createTrunkAnalysisInput(model,m);assert.deepEqual(Object.keys(input).sort(),['matrix','primitives']);assert.deepEqual(input.matrix,m.elements);assert.notEqual(input.matrix,m.elements);assert(!JSON.stringify(input).includes('private'));});
+test('calibrated physical scaling and translation carry the same extracted hierarchy into metre space',()=>{const input=fork(),a=identifyTrunkSkeleton(input,{quality:'fast'}),matrix=new T.Matrix4().makeScale(3,3,3).setPosition(2,-4,1),b=identifyTrunkSkeleton({...input,matrix:matrix.elements},{quality:'fast'});assert.equal(a.guides.length,b.guides.length);for(let i=0;i<a.guides.length;i++){assert.equal(a.guides[i].parent,b.guides[i].parent);assert.equal(a.guides[i].points.length,b.guides[i].points.length);for(let j=0;j<a.guides[i].points.length;j++)assert(new T.Vector3(...a.guides[i].points[j]).applyMatrix4(matrix).distanceTo(new T.Vector3(...b.guides[i].points[j]))<1e-7);}assert(Math.abs(b.summary.pitch_m/a.summary.pitch_m-3)<1e-8);});
+test('short-branch filtering reduces candidates and disconnected floating pieces are explicitly reported',()=>{const input=fork(),detail=identifyTrunkSkeleton(input,{quality:'fast',detail:'fine'}),major=identifyTrunkSkeleton(input,{quality:'fast',detail:'major'});assert(major.guides.length<=detail.guides.length);const far={...input,primitives:[...input.primitives,{position:[3,0,.3,3.1,0,.3,3,.1,.3,3,0,.4],index:[0,2,1,0,1,3,1,2,3,2,0,3]}]},result=identifyTrunkSkeleton(far,{quality:'standard'});assert(result.summary.ignored_components>0);assert(result.warnings.some(w=>w.includes('独立部分')));});
+test('invalid settings, coordinates, indices and flat geometry fail with actionable messages',()=>{assert.throws(()=>identifyTrunkSkeleton(fork(),{quality:'unsupported'}),/精度/);assert.throws(()=>identifyTrunkSkeleton(fork(),{detail:'unknown'}),/设置/);assert.throws(()=>identifyTrunkSkeleton({primitives:[]}),/有效/);const input=fork();input.primitives[0].position[0]=NaN;assert.throws(()=>identifyTrunkSkeleton(input),/坐标/);const indices=fork();indices.primitives[0].index[0]=-1;assert.throws(()=>identifyTrunkSkeleton(indices),/索引/);assert.throws(()=>identifyTrunkSkeleton({primitives:[{position:[0,0,0,1,0,0,1,1,0],index:[0,1,2]}]}),/校准/);});
+test('an open hollow grooved trunk has one central carrier and retains its genuine side branch',()=>{
+ const input=hollowGroovedTrunk(),before=JSON.stringify(input),result=identifyTrunkSkeleton(input,{quality:'standard'});
+ validateTrunkGuides(result.guides);assert(result.summary.filled_section_voxels>100);assert(result.guides.length>=2&&result.guides.length<=5,JSON.stringify(result.summary));
+ const main=result.guides[0];assert(Math.max(...main.points.map(p=>p[2]))>1.3);
+ for(const p of main.points.filter(p=>p[2]>.2&&p[2]<1.25))assert(Math.hypot(p[0]-.035*Math.sin(p[2]*3),p[1])<.035,'main axis follows bark instead of the internal centre');
+ assert(result.guides.some(g=>g.points.some(p=>p[0]>.44)),'real side branch lost');
+ assert.equal(JSON.stringify(input),before);assert.equal(result.summary.algorithm,'volume-medial-paths-v2');
+});

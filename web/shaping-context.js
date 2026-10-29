@@ -30,7 +30,7 @@ export function createShapingContext(api, tools, sectionControls) {
   const unitBrush = document.createElement('section'); unitBrush.id = 'unitBrushSettings';
   unitBrush.innerHTML = `<div data-unit-brush="ALIGN" class="unit-brush-reference"><button id="unitBrushSample" type="button">点取一支 · 取样方向</button><span id="unitBrushSampleStatus" role="status">尚未取样</span></div>
     <div data-unit-brush="SPREAD" class="unit-brush-reference"><label>作用方式<select id="unitBrushSpreadMode" aria-label="散开或收拢"><option value="OUT">向外散开</option><option value="IN">向内收拢</option></select></label><button id="unitBrushCenter" type="button">在画面中点取中心</button><span id="unitBrushCenterStatus" role="status">尚未设置中心</span></div>
-    <div data-unit-brush="SCALE"><div class="field-grid"><label>作用方式<select id="unitBrushSizeMode" aria-label="放大或缩小完整单元枝"><option value="GROW">放大整支</option><option value="SHRINK">缩小整支</option></select></label><label>每笔最多（%）<input id="unitBrushSizeLimit" aria-label="每笔尺寸变化上限" type="number" min="1" max="80" step="1" value="20"></label></div></div>
+    <div data-unit-brush="SCALE"><div class="unit-size-directions" role="group" aria-label="整支放大或缩小"><button type="button" data-unit-size-mode="GROW" aria-pressed="true">＋ 放大</button><button type="button" data-unit-size-mode="SHRINK" aria-pressed="false">− 缩小 <kbd>Alt</kbd></button></div><select id="unitBrushSizeMode" aria-label="放大或缩小完整单元枝" hidden><option value="GROW">放大整支</option><option value="SHRINK">缩小整支</option></select><span id="unitBrushSizeState" class="unit-size-state">左键放大 · 按住 Alt 临时缩小</span><label>每笔最大变化（%）<input id="unitBrushSizeLimit" aria-label="每笔尺寸变化上限" type="number" min="1" max="80" step="1" value="20"></label></div>
     <div data-unit-brush="SPREAD JITTER"><label>每笔最多转动（°）<input id="unitBrushAngleLimit" aria-label="每笔旋转角度上限" type="number" min="1" max="90" step="1" value="25"></label></div>
     <div data-unit-brush="JITTER"><div class="unit-brush-seed"><label>变化组<input id="unitBrushSeed" aria-label="自然扰动变化组" type="number" min="1" max="2147483647" step="1" value="1"></label><button id="unitBrushShuffle" type="button">换一组</button></div></div>`;
   $('quick_unitCombOrientation').closest('label').after(unitBrush);
@@ -70,12 +70,12 @@ export function createShapingContext(api, tools, sectionControls) {
     retractHint.hidden = mode !== 'RETRACT';
     combHint.hidden = mode !== 'COMB';
     const orientation=$('unitCombOrientation').value,effect=$('unitBrushEffect').value;
-    const effectHints={ALIGN:'点取一支作为方向样本，刷过目标整支以对齐；各自枝根与尺寸保持。',SPREAD:'先点取固定中心，再刷过整支散开或收拢；各自枝根保持，每笔转动限幅。',SCALE:'木枝与叶花果围绕各自枝根等比缩放；每笔变化限幅，松手后可继续下一笔。',JITTER:'整支轻微转向，各自枝根与尺寸保持；同一笔目标固定，换一组只改变下一笔。'};
+    const effectHints={ALIGN:'点取一支作为方向样本，刷过目标整支以对齐；各自枝根与尺寸保持。',SPREAD:'先点取固定中心，再刷过整支散开或收拢；各自枝根保持，每笔转动限幅。',SCALE:'左键刷过放大，按住 Alt 刷过缩小；枝根固定，木枝与叶花果一起等比变化。F 调范围，Shift+F 调强度。',JITTER:'整支轻微转向，各自枝根与尺寸保持；同一笔目标固定，换一组只改变下一笔。'};
     combHint.textContent=unit?(effectHints[effect]||(orientation==='DOWN'?'刷过的整支枝梢朝世界下方转向，与拖动方向和视角无关；各自枝根固定。':orientation==='ROLL'?'保持整支长轴，绕轴翻转让源模型标定的一侧朝下；未标定的单元枝跳过，请在枝条工作台设置悬垂参考。':'沿拖动方向批量转动整支；各自枝根固定，长度、粗细与内部样式保持。')):'沿拖动方向梳理，保长保粗；固定点之前不变，子枝和叶片跟随。枝干上 Shift 临时平滑。';
     combHint.title=combHint.textContent;
     brushHint.textContent=unit?'F 半径 · Shift+F 强度 · Esc 取消本笔 · Ctrl 空白框清空':'F 调半径 · Shift+F 调强度 · 左键确认 / Esc 取消。枝干上 Shift 拖动临时平滑；Shift 框选加选，Ctrl 框选减选，Ctrl 空白框清空。每种笔刷独立记忆参数。';
     for(const id of ['sculptFlexibility','sculptLength','sculptProtectTrunk'])$('quick_'+id).closest('label').hidden=Boolean(unit);
-    $('quick_unitBrushEffect').closest('label').hidden=!unit||mode!=='COMB';
+    $('quick_unitBrushEffect').closest('label').hidden=!unit||mode!=='COMB'||effect==='SCALE';
     $('quick_unitBrushEffect').closest('label').classList.toggle('unit-brush-wide',effect!=='TURN');
     $('quick_unitCombOrientation').closest('label').hidden=!unit||mode!=='COMB'||effect!=='TURN';
     unitBrush.hidden=!unit||mode!=='COMB'||effect==='TURN';
@@ -126,6 +126,10 @@ export function createShapingContext(api, tools, sectionControls) {
   $('unitCombOrientation').addEventListener('change',refresh);
   $('unitBrushEffect').addEventListener('change',refresh);
   $('unitBrushHitMode').addEventListener('change',refresh);
+  const sizeState=(value,temporary=false)=>{unitBrush.querySelectorAll('[data-unit-size-mode]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.unitSizeMode===value)));$('unitBrushSizeState').textContent=temporary?'Alt 按住 · 临时缩小 · 松开恢复':value==='SHRINK'?'当前：缩小整支 · F 调整笔刷半径':'左键放大 · 按住 Alt 临时缩小';};
+  unitBrush.querySelectorAll('[data-unit-size-mode]').forEach(button=>button.onclick=()=>{$('unitBrushSizeMode').value=button.dataset.unitSizeMode;$('unitBrushSizeMode').dispatchEvent(new Event('input',{bubbles:true}));$('unitBrushSizeMode').dispatchEvent(new Event('change',{bubbles:true}));});
+  $('unitBrushSizeMode').addEventListener('change',()=>sizeState($('unitBrushSizeMode').value));
+  document.addEventListener('unit-brush-direction',event=>sizeState(event.detail.sizeMode,event.detail.temporary));
   document.addEventListener('tree-assembly-refreshed',()=>{if(mode==='COMB')refresh();});
   function setMode(next) { if (['SECTION','JUNCTION'].includes(next) && !tools.getBranch()) { api.toast('单元枝样式请在枝条工作台编辑；整树中可用 G/R/S 调整整支'); return; } if (graphDrag) cancelGraph(); const changed = mode !== next; if (changed) body.scrollTop = 0; mode = next; refresh(); if (changed && next) $('contextTab')?.click(); }
   find('closeShapingContext').onclick = () => { api.setTool('SELECT'); tools.activate(''); setMode(''); };

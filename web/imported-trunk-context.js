@@ -1,0 +1,14 @@
+import * as T from './vendor/three.module.min.js';
+import {formatDistance} from './size-reference-data.js';
+export function createImportedTrunkContext(api){
+ const card=document.createElement('section');card.id='importedTrunkEditPanel';card.className='parameter-section imported-trunk-edit';card.hidden=true;
+ card.innerHTML='<header><strong>导入树干 · 主体</strong><span data-mode></span></header><div data-size></div><div class="trunk-edit-actions"><button data-action="scale">整体缩放 <kbd>S</kbd></button><button data-action="height">高度缩放 <kbd>S Z</kbd></button><button data-action="bend">弯曲树干</button><button data-action="enable" hidden>启用柔性编辑</button></div><p>整体缩放同步树干长度与粗细；高度缩放保留粗细。承重枝根从主干控制线生长，埋入主干内部；完整单元枝保持自身造型。</p>';
+ (document.getElementById('currentBranchPanel')||document.getElementById('selectedBranchLabel').closest('section')).prepend(card);
+ const style=document.createElement('style');style.textContent='.imported-trunk-edit{padding:12px!important;margin:0 0 14px;background:#80b9af0b;border-radius:6px}.imported-trunk-edit>header{display:flex;justify-content:space-between;gap:8px;color:#e4d58f}.imported-trunk-edit [data-mode]{color:#a0cabc;font-size:10px}.imported-trunk-edit [data-size]{padding:10px 0;color:#d9e5df;font-size:12px}.trunk-edit-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px}.trunk-edit-actions button{padding:8px 6px;font-size:12px}.trunk-edit-actions kbd{opacity:.65;font-size:10px}.imported-trunk-edit p{font-size:11px;line-height:1.6;color:#a7b6ac;margin:10px 0 0}.imported-trunk-edit [data-action=enable]{background:#80b9af;color:#152922}.imported-trunk-edit [hidden]{display:none!important}';document.head.append(style);
+ let state=null;
+ function refresh(){const asset=api.asset(),a=api.authoring(),ids=api.selection(),mount=a?.imported_trunks?.mounts.find(m=>Object.values(m.guide_map).some(id=>ids.has(id)));state=mount?{mount,root:mount.guide_map[a.imported_trunks.assets.find(s=>s.id===mount.asset_id).guides[0].id]}:null;card.hidden=!state;if(!state)return;
+  const box=new T.Box3();asset.group.traverse(m=>{if(m.isMesh&&m.userData.trunk_mount_id===mount.id){m.geometry.computeBoundingBox();box.union(m.geometry.boundingBox);}});const size=box.getSize(new T.Vector3());card.querySelector('[data-size]').textContent='高 '+formatDistance(size.z)+' · 宽 '+formatDistance(size.x)+' · 厚 '+formatDistance(size.y);card.querySelector('[data-mode]').textContent=mount.binding==='FLEX'?'可缩放与弯曲':'原模模式';card.querySelector('[data-action=enable]').hidden=mount.binding==='FLEX';for(const b of card.querySelectorAll('[data-action=height],[data-action=bend]'))b.disabled=mount.binding!=='FLEX';
+ }
+ card.addEventListener('click',event=>{const action=event.target.closest('[data-action]')?.dataset.action;if(!state||!action)return;if(action==='enable'){api.enable(state.mount.id);return;}api.select(state.root);if(action==='bend')api.bend();else api.scale(action==='height'?'Z':'');});
+ return {refresh};
+}

@@ -3,6 +3,8 @@ import * as THREE from './vendor/three.module.min.js';
 import { normalizeProfile } from './generator-data.js';
 import { normalizeSections, normalizeJunction, captureSkeletonRadius } from './branch-shaping.js';
 import { INSTANCE_SCALE_MIN, INSTANCE_SCALE_MAX } from './assembly-scale.js';
+import {isImmutableJson} from './immutable-json.js';
+import {normalizeTrunkAttachment} from './imported-trunk-data.js';
 
 const finite = (v, fallback = 0) => Number.isFinite(Number(v)) ? Number(v) : fallback;
 const clamp = (v, min, max, fallback = min) => Math.max(min, Math.min(max, finite(v, fallback)));
@@ -11,6 +13,7 @@ const id = (v) => String(v || '').replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 128)
 // Copy editable containers without serializing multi-megabyte atlas strings.
 // Strings are immutable and may safely be shared between independent snapshots.
 export function copy(v) {
+  if (isImmutableJson(v)) return v;
   if (v == null || typeof v === 'string' || typeof v === 'boolean') return v;
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
   if (typeof v !== 'object') return undefined;
@@ -118,6 +121,7 @@ export function normalizeBranchInstances(raw, previous = null) {
       ...(item.assembly_manual === true ? {assembly_manual:true} : {}),
       ...(item.assembly_locked === true ? {assembly_locked:true} : {}),
       ...(item.assembly_refined === true ? {assembly_refined:true} : {}),
+      ...(item.trunk_anchor ? {trunk_anchor:normalizeTrunkAttachment(item.trunk_anchor)} : {}),
       ...(id(item.prefab_root)?{prefab_root:id(item.prefab_root)}:{}),
       ...(typeof item.unit_seed_owner==='string'&&id(item.unit_seed_owner)?{unit_seed_owner:id(item.unit_seed_owner)}:{}),
       shootRole: ['MATURE', 'MIXED', 'YOUNG'].includes(item.shootRole) ? item.shootRole : 'ANY',

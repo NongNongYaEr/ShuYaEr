@@ -1,6 +1,8 @@
+import {transportMountFrames} from './branch-mount-frame.js';
+import {createImportedTrunkPreview} from './imported-trunk-preview.js';
 import {markNativeModelChanged} from './native-model-changes.js';
 import {cloneNativePreviewGeometry} from './native-preview-geometry.js';
-import {axisTimes,axisTime,axisSegment,nearestAxis} from './branch-axis.js';
+import {axisTimes,axisTime,axisSegment,nearestAxis,cloneAxis} from './branch-axis.js';
 import * as THREE from './vendor/three.module.min.js';
 
 // Interactive render state only. The authored curves remain on the CPU and the
@@ -45,6 +47,7 @@ uniform sampler2D duckEditFrames;
 uniform vec2 duckEditLookupSize;
 uniform vec2 duckEditFrameSize;
 uniform float duckEditOffset;
+uniform float duckEditInfluences;
 attribute float duckEditVertex;
 ${instanced?'attribute float duckEditInstance;':''}
 vec4 duckEditTexel(sampler2D image, vec2 size, float index) {
@@ -54,12 +57,20 @@ float duckEditFrame() {
   return duckEditTexel(duckEditLookup,duckEditLookupSize,duckEditVertex+${instanced?'duckEditInstance':'duckEditOffset'}).r*7.0;
 }
 mat4 duckEditMatrix() {
-  float i=duckEditFrame();
-  return mat4(duckEditTexel(duckEditFrames,duckEditFrameSize,i),duckEditTexel(duckEditFrames,duckEditFrameSize,i+1.0),duckEditTexel(duckEditFrames,duckEditFrameSize,i+2.0),duckEditTexel(duckEditFrames,duckEditFrameSize,i+3.0));
+  float base=duckEditVertex*3.0+duckEditOffset;
+  float i=duckEditInfluences>1.5?duckEditTexel(duckEditLookup,duckEditLookupSize,base).r*7.0:duckEditFrame();
+  mat4 first=mat4(duckEditTexel(duckEditFrames,duckEditFrameSize,i),duckEditTexel(duckEditFrames,duckEditFrameSize,i+1.0),duckEditTexel(duckEditFrames,duckEditFrameSize,i+2.0),duckEditTexel(duckEditFrames,duckEditFrameSize,i+3.0));
+  if(duckEditInfluences<1.5)return first;
+  float j=duckEditTexel(duckEditLookup,duckEditLookupSize,base+1.0).r*7.0,w=duckEditTexel(duckEditLookup,duckEditLookupSize,base+2.0).r;
+  return first*(1.0-w)+mat4(duckEditTexel(duckEditFrames,duckEditFrameSize,j),duckEditTexel(duckEditFrames,duckEditFrameSize,j+1.0),duckEditTexel(duckEditFrames,duckEditFrameSize,j+2.0),duckEditTexel(duckEditFrames,duckEditFrameSize,j+3.0))*w;
 }
 mat3 duckEditNormal() {
-  float i=duckEditFrame()+4.0;
-  return mat3(duckEditTexel(duckEditFrames,duckEditFrameSize,i).xyz,duckEditTexel(duckEditFrames,duckEditFrameSize,i+1.0).xyz,duckEditTexel(duckEditFrames,duckEditFrameSize,i+2.0).xyz);
+  float base=duckEditVertex*3.0+duckEditOffset;
+  float i=duckEditInfluences>1.5?duckEditTexel(duckEditLookup,duckEditLookupSize,base).r*7.0+4.0:duckEditFrame()+4.0;
+  mat3 first=mat3(duckEditTexel(duckEditFrames,duckEditFrameSize,i).xyz,duckEditTexel(duckEditFrames,duckEditFrameSize,i+1.0).xyz,duckEditTexel(duckEditFrames,duckEditFrameSize,i+2.0).xyz);
+  if(duckEditInfluences<1.5)return first;
+  float j=duckEditTexel(duckEditLookup,duckEditLookupSize,base+1.0).r*7.0+4.0,w=duckEditTexel(duckEditLookup,duckEditLookupSize,base+2.0).r;
+  return first*(1.0-w)+mat3(duckEditTexel(duckEditFrames,duckEditFrameSize,j).xyz,duckEditTexel(duckEditFrames,duckEditFrameSize,j+1.0).xyz,duckEditTexel(duckEditFrames,duckEditFrameSize,j+2.0).xyz)*w;
 }
 `+shader.vertexShader;
     const normal=THREE.ShaderChunk.defaultnormal_vertex
@@ -84,7 +95,7 @@ vec4 worldPosition=modelMatrix*duckEditPosition;
 
 export function createGpuMeshPreview(asset,snapshot,{sampleLine,lineTangent,targets=null,rigid=false,rigidFollowers=false,rigidUnits=false}){
   asset.activeEditPreview?.restore();
-  const meshes=[];asset.group.traverse(o=>{if(o.isMesh)meshes.push(o);});
+  const meshes=[];asset.group.traverse(o=>{if(o.isMesh&&!o.userData.imported_trunk)meshes.push(o);});
   if(meshes.some(m=>m.isSkinnedMesh||m.isBatchedMesh||m.geometry.morphAttributes.position?.length||
     (Array.isArray(m.material)?m.material:[m.material]).some(v=>v.isShaderMaterial||v.isRawShaderMaterial)))return null;
   const limit=asset.editPreviewTextureLimit||4096;
@@ -210,7 +221,7 @@ export function createGpuMeshPreview(asset,snapshot,{sampleLine,lineTangent,targ
   }
   function packedMatrix(matrix){const values=new Float32Array(TEXELS*4);values.set(matrix.elements);normal.getNormalMatrix(matrix);for(let col=0;col<3;col++)for(let row=0;row<3;row++)values[16+col*4+row]=normal.elements[col*3+row];return values;}
   for(let i=0;i<frames.length;i++){const at=i*TEXELS*4;data.set(IDENTITY.elements,at);data[at+16]=data[at+21]=data[at+26]=1;}
-  let restored=false,active=new Set(),uploaded=false;
+  let restored=false,active=new Set(),uploaded=false,imported=null,outlineTransforms=null;
   const lastPlacementMatrices=new Map();
   const dirtyRows=new Set();frameTexture.onUpdate=()=>{uploaded=true;};
   const stats={mode:'GPU',vertices,lookupVertices:lookup.length,skippedVertices,bindingVertices:vertices-skippedVertices,frames:frames.length,cachedBindings:Boolean(reusable),updatedFrames:0,updatedBranches:0,uploadBytes:0};
@@ -281,7 +292,7 @@ export function createGpuMeshPreview(asset,snapshot,{sampleLine,lineTangent,targ
     return target.set(data[at]*x+data[at+4]*y+data[at+8]*z,data[at+1]*x+data[at+5]*y+data[at+9]*z,data[at+2]*x+data[at+6]*y+data[at+10]*z).normalize();
   }
   function restore(){
-    if(restored)return;restored=true;
+    if(restored)return;restored=true;imported?.restore();
     markNativeModelChanged(asset);
     for(const r of records){if(!r.installed)continue;const mesh=r.mesh;delete mesh.__branchForgeNativeEdit;mesh.geometry.dispose();mesh.geometry=r.geometry;mesh.material=r.material;mesh.customDepthMaterial=r.depth;mesh.customDistanceMaterial=r.distance;mesh.raycast=r.raycast;mesh.frustumCulled=r.frustumCulled;}
     materials.forEach(m=>m.dispose());lookupTexture.dispose();frameTexture.dispose();
@@ -296,8 +307,8 @@ export function createGpuMeshPreview(asset,snapshot,{sampleLine,lineTangent,targ
     // comparing every curve and packing the same family matrix once per twig.
     // Matrices can be updated in place, so remember their values, not references.
     updateTransforms(transforms){
-      if(restored)return;stats.updatedFrames=0;
-      const next=new Set([...transforms.keys()].filter(id=>byBranch.has(id))),matrixCaches=new Map();
+      if(restored)return;if(imported){const changed=new Map();for(const [id,b]of snapshot){const m=transforms.get(id)?.matrix;if(m){const q=new THREE.Quaternion().setFromRotationMatrix(m),scale=new THREE.Vector3().setFromMatrixScale(m).x;const points=cloneAxis(b.points,p=>p.clone().applyMatrix4(m)),mount=transportMountFrames(b,points,m)||{mountMatrix:m.clone().multiply(b.mountMatrix||new THREE.Matrix4())};changed.set(id,{...b,...mount,points,startRadius:b.startRadius*scale,endRadius:b.endRadius*scale,trunkQuaternion:undefined});}}transforms=imported.update(changed,transforms)||transforms;}stats.updatedFrames=0;
+      outlineTransforms=transforms;const next=new Set([...transforms.keys()].filter(id=>byBranch.has(id))),matrixCaches=new Map();
       for(const id of active)if(!next.has(id))lastPlacementMatrices.delete(id);
       resetInactive(next);
       for(const id of next){
@@ -310,11 +321,11 @@ export function createGpuMeshPreview(asset,snapshot,{sampleLine,lineTangent,targ
       finish();
     },
     updateRigid(matrix,branchIds){
-      if(restored)return;lastPlacementMatrices.clear();stats.updatedFrames=0;const next=new Set([...branchIds].filter(id=>byBranch.has(id)));resetInactive(next);
+      if(restored)return;if(imported){const transforms=new Map([...branchIds].map(id=>[id,{matrix}]));preview.updateTransforms(transforms);return;}lastPlacementMatrices.clear();stats.updatedFrames=0;const next=new Set([...branchIds].filter(id=>byBranch.has(id)));resetInactive(next);
       const cache=new Map();for(const id of next)setRigidFrames(id,matrix,cache);finish();
     },
     update(updated,rigidTransforms=null){
-      if(restored)return;lastPlacementMatrices.clear();stats.updatedFrames=0;const next=new Set();
+      if(restored)return;rigidTransforms=imported?.update(updated,rigidTransforms)||rigidTransforms;outlineTransforms=rigidTransforms;lastPlacementMatrices.clear();stats.updatedFrames=0;const next=new Set();
       for(const id of byBranch.keys())if(rigidTransforms?.has(id)||!sameCurve(snapshot.get(id),updated.get(id)||snapshot.get(id)))next.add(id);
       resetInactive(next);
       for(const id of next){
@@ -330,8 +341,9 @@ export function createGpuMeshPreview(asset,snapshot,{sampleLine,lineTangent,targ
       }
       finish();
     },
-    vertex(mesh,index,instance=0){const record=records.find(r=>r.mesh===mesh);return record?deformedVertex(record,instance,index):null;},
-    normal(mesh,index,instance=0){const record=records.find(r=>r.mesh===mesh);return record&&record.geometry.hasAttribute('normal')?deformedNormal(record,instance,index):null;},
+    outlineBranches(branches){if(restored||!imported||!outlineTransforms?.size)return branches;return branches.map(b=>{const motion=outlineTransforms.get(b.id),before=snapshot.get(b.id);return motion?.matrix&&!motion.at&&before?{...b,points:cloneAxis(before.points,p=>p.clone().applyMatrix4(motion.matrix))}:b;});},
+    vertex(mesh,index,instance=0){if(mesh.userData.imported_trunk)return imported?.vertex(mesh,index)||null;const record=records.find(r=>r.mesh===mesh);return record?deformedVertex(record,instance,index):null;},
+    normal(mesh,index,instance=0){if(mesh.userData.imported_trunk)return imported?.normal(mesh,index)||null;const record=records.find(r=>r.mesh===mesh);return record&&record.geometry.hasAttribute('normal')?deformedNormal(record,instance,index):null;},
     get textures(){return [lookupTexture,frameTexture];},
   };
   try{
@@ -340,7 +352,7 @@ export function createGpuMeshPreview(asset,snapshot,{sampleLine,lineTangent,targ
       const mesh=r.mesh,g=cloneNativePreviewGeometry(r.geometry),vertex=new Float32Array(r.vertexCount);for(let i=0;i<vertex.length;i++)vertex[i]=i;
       g.setAttribute('duckEditVertex',new THREE.BufferAttribute(vertex,1));
       if(mesh.isInstancedMesh)g.setAttribute('duckEditInstance',new THREE.InstancedBufferAttribute(new Float32Array(r.instances.map(i=>i.offset)),1));
-      const uniforms={duckEditLookup:{value:lookupTexture},duckEditFrames:{value:frameTexture},duckEditLookupSize:{value:new THREE.Vector2(lookupTexture.image.width,lookupTexture.image.height)},duckEditFrameSize:{value:new THREE.Vector2(frameTexture.image.width,frameTexture.image.height)},duckEditOffset:{value:r.offset}};
+      const uniforms={duckEditLookup:{value:lookupTexture},duckEditFrames:{value:frameTexture},duckEditLookupSize:{value:new THREE.Vector2(lookupTexture.image.width,lookupTexture.image.height)},duckEditFrameSize:{value:new THREE.Vector2(frameTexture.image.width,frameTexture.image.height)},duckEditOffset:{value:r.offset},duckEditInfluences:{value:1}};
       const wrap=source=>{const m=shaderMaterial(source,uniforms,mesh.isInstancedMesh);materials.push(m);return m;};
       mesh.geometry=g;r.installed=true;mesh.__branchForgeNativeEdit={lookupTexture,frameTexture,offsets:r.instances.map(i=>i.offset)};mesh.material=Array.isArray(r.material)?r.material.map(wrap):wrap(r.material);
       const depth=r.depth||new THREE.MeshDepthMaterial({depthPacking:THREE.RGBADepthPacking}),distance=r.distance||new THREE.MeshDistanceMaterial();
@@ -358,7 +370,7 @@ export function createGpuMeshPreview(asset,snapshot,{sampleLine,lineTangent,targ
         }
       };
     }
-    nativeTextures=Object.freeze(records.some(r=>r.installed)?[lookupTexture,frameTexture]:[]);
+    imported=createImportedTrunkPreview(asset,snapshot,{affected,texture,shaderMaterial,limit});stats.importedFrames=imported?.frames||0;nativeTextures=Object.freeze([...(records.some(r=>r.installed)?[lookupTexture,frameTexture]:[]),...(imported?.textures||[])]);
     markNativeModelChanged(asset);asset.activeEditPreview=preview;return preview;
   }catch(error){restore();throw error;}
 }

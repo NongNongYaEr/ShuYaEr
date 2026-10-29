@@ -68,6 +68,8 @@ def setup(package_directory, content_folder='/Game/BranchForgeBark'):
         if value is None:
             raise RuntimeError('Bark material creation failed: ' + name)
         editing.delete_all_material_expressions(value)
+        value.set_editor_property('used_with_nanite', True)
+        value.set_editor_property('used_with_skeletal_mesh', True)
         value.set_editor_property('two_sided', False)
         value.set_editor_property('tangent_space_normal', True)
 
@@ -87,28 +89,28 @@ def setup(package_directory, content_folder='/Game/BranchForgeBark'):
                 'float2 p=UV; ' + ('p.y=1-p.y; ' if resolved_uv else '') +
                 'return float2(%.12g*p.x+%.12g*p.y+%.12g, %.12g*p.x+%.12g*p.y+%.12g);' %
                 (matrix[0], matrix[3], matrix[6], matrix[1], matrix[4], matrix[7]))
-            editing.connect_material_expressions(coordinate, '', transform, 'UV')
+            assert editing.connect_material_expressions(coordinate, '', transform, 'UV'), 'Bark expression connection failed'
             sampled = node(unreal.MaterialExpressionTextureSample, -650, y)
             sampled.set_editor_property('texture', texture(record, slot))
             sampler = (unreal.MaterialSamplerType.SAMPLERTYPE_COLOR if slot == 'color' else
                        unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL if slot == 'normal' else
                        unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_COLOR)
             sampled.set_editor_property('sampler_type', sampler)
-            editing.connect_material_expressions(transform, '', sampled, 'UVs')
+            assert editing.connect_material_expressions(transform, '', sampled, ''), 'Bark expression connection failed'
             return sampled
 
         color = sample('color', -220)
         tint = node(unreal.MaterialExpressionConstant3Vector, -650, -410)
         tint.set_editor_property('constant', unreal.LinearColor(*record['base_color_linear'], 1))
         multiply = node(unreal.MaterialExpressionMultiply, -320, -220)
-        editing.connect_material_expressions(color, 'RGB', multiply, 'A')
-        editing.connect_material_expressions(tint, '', multiply, 'B')
-        editing.connect_material_property(multiply, '', unreal.MaterialProperty.MP_BASE_COLOR)
+        assert editing.connect_material_expressions(color, '', multiply, 'A'), 'Bark expression connection failed'
+        assert editing.connect_material_expressions(tint, '', multiply, 'B'), 'Bark expression connection failed'
+        assert editing.connect_material_property(multiply, '', unreal.MaterialProperty.MP_BASE_COLOR), 'Bark property connection failed'
         roughness = sample('roughness', 50)
         rough_factor = node(unreal.MaterialExpressionMultiply, -320, 50)
         rough_factor.set_editor_property('const_b', record['roughness'])
-        editing.connect_material_expressions(roughness, 'G', rough_factor, 'A')
-        editing.connect_material_property(rough_factor, '', unreal.MaterialProperty.MP_ROUGHNESS)
+        assert editing.connect_material_expressions(roughness, 'G', rough_factor, 'A'), 'Bark expression connection failed'
+        assert editing.connect_material_property(rough_factor, '', unreal.MaterialProperty.MP_ROUGHNESS), 'Bark property connection failed'
         normal = sample('normal', 330)
         strength = node(unreal.MaterialExpressionCustom, -320, 330)
         inp = unreal.CustomInput()
@@ -117,8 +119,8 @@ def setup(package_directory, content_folder='/Game/BranchForgeBark'):
         strength.set_editor_property('output_type', unreal.CustomMaterialOutputType.CMOT_FLOAT3)
         sx, sy = record['normal_scale']
         strength.set_editor_property('code', 'return normalize(float3(N.x*%.12g,N.y*%.12g,N.z));' % (sx, sy))
-        editing.connect_material_expressions(normal, 'RGB', strength, 'N')
-        editing.connect_material_property(strength, '', unreal.MaterialProperty.MP_NORMAL)
+        assert editing.connect_material_expressions(normal, '', strength, 'N'), 'Bark expression connection failed'
+        assert editing.connect_material_property(strength, '', unreal.MaterialProperty.MP_NORMAL), 'Bark property connection failed'
         editing.recompile_material(value)
         unreal.EditorAssetLibrary.save_loaded_asset(value)
         materials[key] = value

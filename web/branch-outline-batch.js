@@ -1,9 +1,11 @@
 import * as THREE from './vendor/three.module.min.js';
+import {createSectionSegmentOverlay} from './trunk-section-overlay.js';
 
 // Preserve every selected polyline segment in one draw. No joins are introduced
 // between branches; source geometry, unit identity and picking stay independent.
 export function createBranchOutlineBatch(material){
   const object=new THREE.LineSegments(new THREE.BufferGeometry(),material);object.renderOrder=95;object.frustumCulled=false;object.raycast=()=>{};
+  const strip=createSectionSegmentOverlay(material,{renderOrder:94,width:1,haloWidth:2.5});object.add(strip.object);
   object.userData.category='branch_selection_outline';let records=[],capacity=0;
   const sameMatrix=(a,b)=>a?Boolean(b&&a.equals(b)):!b;
   return {object,
@@ -22,8 +24,9 @@ export function createBranchOutlineBatch(material){
         next.push({id:e.id,points:e.points,offset,count,matrix:e.matrix?.clone()||null});offset+=count;
       }
       records=next;object.userData.branch_ranges=records.map(({id,offset,count})=>({id,offset,count}));if(changed)position.needsUpdate=true;
+      strip.update(position,total);
       return changed;
     },
-    dispose(){object.geometry.dispose();records=[];capacity=0;},
+    dispose(){strip.dispose();object.geometry.dispose();records=[];capacity=0;},
   };
 }

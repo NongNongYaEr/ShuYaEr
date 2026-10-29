@@ -75,6 +75,54 @@ function overlayMaterial(color, width) {
   });
 }
 
+function updateLineViewport(mesh, renderer) {
+  const ratio = renderer.getRenderTarget?.() ? 1 : Math.max(1e-6, renderer.getPixelRatio?.() || 1);
+  const uniforms = mesh.material.uniforms;
+  if (typeof renderer.getCurrentViewport === 'function') {
+    const viewport = new THREE.Vector4(); renderer.getCurrentViewport(viewport);
+    uniforms.viewportSize.value.set(Math.max(1, viewport.z / ratio), Math.max(1, viewport.w / ratio));
+    uniforms.viewportOrigin.value.set(viewport.x / ratio, viewport.y / ratio);
+  } else {
+    const size = new THREE.Vector2(); renderer.getSize(size);
+    uniforms.viewportSize.value.set(Math.max(1, size.x), Math.max(1, size.y)); uniforms.viewportOrigin.value.set(0, 0);
+  }
+  uniforms.pixelRatio.value = ratio;
+}
+
+// One pair of instanced draws for an arbitrary set of independent segments.
+// Endpoints share the caller's retained CPU array; idle frames do not copy or
+// rebuild a selected subtree. This stream is an editor overlay, never a model.
+export function createSectionSegmentOverlay(sourceMaterial, {width=1.5, haloWidth=4, renderOrder=95} = {}) {
+  const object = new THREE.Group(), geometry = new THREE.InstancedBufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(18), 3));
+  geometry.setAttribute('corner', new THREE.Float32BufferAttribute([0,-1,1,-1,1,1,0,-1,1,1,0,1], 2));
+  geometry.instanceCount = 0;
+  let stream = null, source = null, version = -1;
+  for (const [color, lineWidth, layer] of [[0x11171b,haloWidth,0],[sourceMaterial.color,width,1]]) {
+    const mesh = new THREE.Mesh(geometry, overlayMaterial(color, lineWidth));
+    mesh.frustumCulled = false; mesh.renderOrder = renderOrder + layer; mesh.raycast = () => {};
+    mesh.onBeforeRender = renderer => {
+      if (layer) mesh.material.uniforms.lineColor.value.copy(sourceMaterial.color);
+      updateLineViewport(mesh, renderer);
+    };
+    object.add(mesh);
+  }
+  return {object, update(position, count) {
+    geometry.instanceCount = Math.floor(count / 2); object.visible = count > 0;
+    if (!position) return;
+    if (source !== position.array) {
+      source = position.array; stream = new THREE.InstancedInterleavedBuffer(source, 6, 1).setUsage(THREE.DynamicDrawUsage);
+      geometry.setAttribute('segmentStart', new THREE.InterleavedBufferAttribute(stream, 3, 0));
+      geometry.setAttribute('segmentEnd', new THREE.InterleavedBufferAttribute(stream, 3, 3)); version = -1;
+    }
+    if (version !== position.version) {
+      stream.clearUpdateRanges();
+      for (const range of position.updateRanges) stream.addUpdateRange(range.start, range.count);
+      stream.needsUpdate = true; version = position.version;
+    }
+  }, dispose() { geometry.dispose(); object.children.forEach(mesh => mesh.material.dispose()); }};
+}
+
 /** Pixel widths are CSS pixels, including on a Retina/HiDPI canvas. The
  * returned Group keeps a cloned local polyline for matching screen picking. */
 export function createSectionOverlayLine(points, color, { loop = false, width = 3, haloWidth = 5, renderOrder = 120 } = {}) {

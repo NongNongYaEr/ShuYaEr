@@ -64,11 +64,11 @@ export function bindKeyboardTransform({ canvas, camera, modelRoot, controls, sta
     if (commit && a.adapter.valid()) a.adapter.commit(); else a.adapter.cancel();
     return true;
   }
-  function begin(mode) {
+  function begin(mode,{axis=''}={}) {
     if(active||document.querySelector('dialog[open]'))return false;
     const adapter=start(mode);if(!adapter)return false;
     const r=canvas.getBoundingClientRect(),initial=last||{x:r.left+r.width/2,y:r.top+r.height/2};
-    active={adapter,mode:mode==='duplicate'?'translate':mode,axis:'',numeric:'',start:initial,pointer:initial,controlsEnabled:controls.enabled};
+    active={adapter,mode:mode==='duplicate'?'translate':mode,axis,numeric:'',start:initial,pointer:initial,controlsEnabled:controls.enabled};
     controls.enabled=false;canvas.dataset.keyboardTransform=mode;render();return true;
   }
   document.addEventListener('duplicate-selection',()=>begin('duplicate'));
@@ -111,5 +111,5 @@ export function bindKeyboardTransform({ canvas, camera, modelRoot, controls, sta
   canvas.addEventListener('wheel', e => { if (active) consume(e); }, { capture: true, passive: false });
   window.addEventListener('blur', () => finish(false));
   window.addEventListener('resize', () => finish(false));
-  return { cancel: () => finish(false), get active() { return Boolean(active); } };
+  return { begin, cancel: () => finish(false), get active() { return Boolean(active); } };
 }

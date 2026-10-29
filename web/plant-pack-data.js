@@ -4,9 +4,11 @@ import {unpackPrefab,portablePrefabAssets,normalizePrefabAssets} from './prefab-
 import {validateBranchPrefab} from './branch-prefab-data.js';
 import {normalizeTrunkPreset} from './trunk-preset-store.js';
 import {normalizePlantUnitPack} from './plant-unit-data.js';
-export const PACK_TYPES={plant:'整株样板',prefab:'预制枝干',branch:'完整单元枝',units:'叶花果单元包',material:'材质与配方'};
+import {validateImportedTrunk,validateTrunkGuides,trunkCalibrationMatrix} from './imported-trunk-data.js';
+export const PACK_TYPES={plant:'整株样板',trunk:'树干素材',prefab:'预制枝干',branch:'完整单元枝',units:'叶花果单元包',material:'材质与配方'};
 export const PACK_FORMAT=1;
 export const PACK_MIN_VERSION='0.2.22';
+export const PACK_CURRENT_VERSION='0.2.52';
 export const clone=value=>JSON.parse(JSON.stringify(value));
 export function portableBranch(item,library=[],fallback=null){
   const result=clone(item);
@@ -20,7 +22,7 @@ export function portableBranch(item,library=[],fallback=null){
 }
 function referenced(value,ids=new Set()){
   if(!value||typeof value!=='object')return ids;
-  if(Array.isArray(value)){for(const v of value)referenced(v,ids);return ids;}
+  if(Array.isArray(value)){if(value.length&&typeof value[0]!=='object')return ids;for(const v of value)referenced(v,ids);return ids;}
   for(const [key,v]of Object.entries(value)){if(key==='branch_library'||key==='prefab_assets')continue;if(['asset_id','material_asset_id','sourceAssetId','source_asset_id'].includes(key)&&typeof v==='string')ids.add(v);else referenced(v,ids);}
   return ids;
 }
@@ -45,6 +47,8 @@ export function validateAsset(type,value){
   if(type==='plant'&&(!value.settings||!value.authoring||value.version>4))throw Error('整株样板缺少造型数据或需要更新软件');
   if(type==='plant'&&((value.authoring.branch_library?.length||0)>100||(value.authoring.branch_instances?.length||0)>1600))throw Error('整株超出当前软件的素材或装配数量上限');
   if(type==='plant'){const library=value.authoring.branch_library||[];for(const i of value.authoring.branch_instances||[])if(i.asset_id&&!library.some(a=>a.id===i.asset_id))throw Error('整株缺少单元枝源模型：'+i.asset_id);}
+  if(type==='trunk'){validateImportedTrunk(value);validateTrunkGuides(value.guides);trunkCalibrationMatrix(value.calibration);if(!value.source?.glb_base64||!/^[a-f0-9]{64}$/.test(value.source.sha256||''))throw Error('树干素材缺少原始 GLB');}
+  if(type==='plant'&&value.authoring.imported_trunks){for(const model of value.authoring.imported_trunks.assets||[])validateAsset('trunk',model);for(const mount of value.authoring.imported_trunks.mounts||[])if(!value.authoring.imported_trunks.assets.some(a=>a.id===mount.asset_id&&a.revision===mount.revision))throw Error('整株树干素材版本缺失');}
   if(type==='prefab'){const p=validateBranchPrefab(prefabPayload(value));if(p.kind!=='branchforge-branch-prefab'||!Array.isArray(p.library)||!p.operation?.records?.length||!Array.isArray(p.copies))throw Error('预制枝干数据无效');for(const i of p.copies)if(i.asset_id&&!p.library.some(a=>a.id===i.asset_id))throw Error('预制缺少单元枝源模型');}
   if(type==='branch'&&(!value.id||!value.sample||!value.shape))throw Error('完整单元枝缺少源模型');
   if(type==='units'&&(!Array.isArray(value.units)||!value.units.length))throw Error('叶花果套装没有真实单元');
@@ -58,6 +62,7 @@ export function describeDependencies(type,value){
   const p=type==='prefab'?prefabPayload(value):value;
   const lib=type==='plant'?p.authoring?.branch_library:type==='prefab'?p.library:[];
   const deps=(lib||[]).map(a=>({type:'branch',id:a.id,revision:a.revision||1,name:a.name||a.id,payload:portableBranch(a,lib)}));
+  if(type==='plant')for(const asset of p.authoring?.imported_trunks?.assets||[])deps.push({type:'trunk',id:asset.id,revision:asset.revision,name:asset.name,payload:asset});
   const leaves=p.leaf_meshes||p.sample?.leaf_meshes||[],organs=p.organ_units||p.authoring?.tree_organs?.units||p.sample?.authoring?.tree_organs?.units||[];
   return {assets:deps,geometry:leaves.length+organs.length,note:'模型、纹理、校准、构造记录随资源固定保存'};
 }

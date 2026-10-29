@@ -29,6 +29,40 @@ function fixture(count=12){
 }
 const signature=a=>({branches:a.masterBranches.map(b=>[b.stableId,b.parentId,b.points.map(v=>v.toArray()),b.startRadius]),leaves:a.placements.map(p=>[p.stableId,p.source,p.position.toArray(),p.scale]),organs:a.treeOrgans.map(p=>[p.stableId,p.source,p.position.toArray(),p.scale])});
 
+test('installed complete samples recover their source rendering without a whole-tree template tag',()=>{
+ const f=fixture(3),raw=structuredClone(f.authoring);raw.recipe.tags=['WHOLE_PLANT','FOLIAGE_ON_INSTANCES_ONLY'];
+ // Imported carriers intentionally have no independent foliage at all.
+ f.settings.max_leaves=0;f.authoring.recipe.tags.push('WHOLE_PLANT');const before=JSON.stringify(raw),a=normalizeAuthoring(raw);
+ assert(a.recipe.tags.includes('SAMPLE_FOLIAGE_FROM_LIBRARY'));assert(canCompileSamples(a));
+ const recovered=f.build(true,a),expected=f.build();
+ assert(recovered.placements.length>0);assert.deepEqual(signature(recovered),signature(expected));
+ assert.deepEqual(createPVESkeleton(recovered,f.leaves),createPVESkeleton(expected,f.leaves));
+ assert.equal(JSON.stringify(raw),before);assert.deepEqual(a.branch_library,f.authoring.branch_library);
+ const doc=createProjectDocument(recovered,f.leaves),cold=normalizeAuthoring(JSON.parse(JSON.stringify(doc)).authoring);
+ assert.deepEqual(signature(f.build(true,cold)),signature(recovered));
+});
+
+test('complete-source recovery respects pinned versions, independent instances and explicit seeded layouts',()=>{
+ const f=fixture(1),raw=structuredClone(f.authoring),item=raw.branch_library[0];
+ raw.recipe.tags=[];item.revision=2;item.versions=[{revision:1,shape:item.shape,sample:item.sample}];item.sample=null;
+ raw.branch_instances[0].pinned_revision=1;raw.branch_instances[0].linked=false;raw.branch_instances[0].shape=item.shape;
+ const a=normalizeAuthoring(raw);assert(canCompileSamples(a));assert(f.build(true,a).placements.length>0);
+ raw.workbench={sample_layout:'INSTANCE_SEEDED'};const seeded=normalizeAuthoring(raw);
+ assert.equal(seeded.workbench.sample_layout,'INSTANCE_SEEDED');assert(!canCompileSamples(seeded));
+ const explicit=structuredClone(seeded);explicit.recipe.tags=['SAMPLE_FOLIAGE_FROM_LIBRARY'];
+ assert.deepEqual(signature(f.build(false,seeded)),signature(f.build(false,explicit)));
+});
+
+test('source mode is inferred only from installed full samples and remains stable at the tag limit',()=>{
+ const f=fixture(1),raw=structuredClone(f.authoring);raw.recipe.tags=[];raw.branch_instances=[];
+ assert(!normalizeAuthoring(raw).recipe.tags.includes('SAMPLE_FOLIAGE_FROM_LIBRARY'));
+ raw.branch_instances=f.authoring.branch_instances;raw.branch_library=raw.branch_library.map(item=>({...item,sample:null}));
+ assert(!normalizeAuthoring(raw).recipe.tags.includes('SAMPLE_FOLIAGE_FROM_LIBRARY'));
+ raw.branch_library=f.authoring.branch_library;raw.recipe.tags=Array.from({length:16},(_,n)=>'TAG_'+n);
+ const a=normalizeAuthoring(raw);assert(a.recipe.tags.includes('SAMPLE_FOLIAGE_FROM_LIBRARY'));
+ assert.deepEqual(normalizeAuthoring(a).recipe.tags,a.recipe.tags);
+});
+
 test('exact prototype reuse survives retirement of the first palette owner and matches a cold build',()=>{
  const f=fixture(3),root=source.shape.branches[0].id;for(const id of ['I0','I1','I2'])f.authoring.overrides[id+'.'+root]={leaf_density:1};
  const old=f.build(),records=compiledSamples(old).records,first=[...records.values()][0],other=[...records.values()][1],palette=first.palette;
