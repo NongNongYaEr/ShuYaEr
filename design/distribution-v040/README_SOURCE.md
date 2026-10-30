@@ -1,6 +1,6 @@
 # 树鸭儿 {{VERSION}} · 精简公开源码
 
-V030 确定版本，Windows x64。允许免费使用、学习、修改以及用软件制作商业作品；商业分发软件、源码、修改版或原始素材库需作者单独书面授权。本项目采用 **源码可用许可**，不宣称为 OSI 标准开源软件。详见 LICENSE.txt、ASSETS_LICENSE.md 和 BRAND_NOTICE.md。
+V040 确定版本，Windows x64。允许免费使用、学习、修改以及用软件制作商业作品；商业分发软件、源码、修改版或原始素材库需作者单独书面授权。本项目采用 **源码可用许可**，不宣称为 OSI 标准开源软件。详见 LICENSE.txt、ASSETS_LICENSE.md 和 BRAND_NOTICE.md。
 
 ## 目录
 
@@ -14,7 +14,7 @@ V030 确定版本，Windows x64。允许免费使用、学习、修改以及用�
 
 ## 本地准备与运行
 
-1. 取得与本源码对应的 **0.3.0 精简单文件 EXE**。V030 交付中为相邻 `01_精简EXE` 内唯一的 `树鸭儿.exe`。完整目录形式的运行版也继续兼容。
+1. 取得与本源码对应的 **0.4.0 精简单文件 EXE**。V040 交付中为相邻 `01_精简EXE` 内唯一的 `树鸭儿.exe`。完整目录形式的运行版也继续兼容。
 2. 在源码目录运行：
 
 ```powershell
@@ -44,3 +44,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-native-viewpor
 SDK 版本和下载哈希固定在准备脚本中，生成目录为 `.runtime/native-editor`；用 `scripts/package-professional-desktop.ps1 -BuiltDirectory .runtime/native-editor` 发布到本源码目录。更新前保存并退出本目录中的软件，发布脚本会保护运行中的编辑器。
 
 更改 UI 和 JS 可直接重开软件；更改原生渲染需重建模块。第三方许可见 THIRD_PARTY_NOTICES.md。生成的运行依赖、解压资源和缓存已列入 `.gitignore`，不应重新提交到公开仓库。
+
+## V0.4 新增与修复
+
+模型雕刻支持完整的局部调整与保护范围；修复梳理挂点、装配数量容量与空选区辅助线。主视窗右上「风动预览」或左侧「预览 → 风动模拟」提供大致风动观察，停止恢复实际编辑造型；风动参数随工程保存。具体见 [V040 归档说明](交付说明/V040版本归档.md)。

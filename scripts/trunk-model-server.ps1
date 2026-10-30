@@ -19,11 +19,17 @@ function Invoke-TrunkModelRoute($Context,[string]$Path){
 }
 function Invoke-TrunkPreparationRoute($Context,[string]$Path){
  $folder=Join-Path $script:ConfigDir 'trunk-preparation/drafts';$method=$Context.Request.HttpMethod
- if($Path -eq '/api/trunk-preparation-drafts' -and $method -eq 'GET'){$items=@();if(Test-Path -LiteralPath $folder){$items=@(Get-ChildItem -LiteralPath $folder -Filter '*.json' -File|ForEach-Object{try{$d=Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8|ConvertFrom-Json;@{id=$d.id;name=$d.edits.name;updatedAt=$d.updatedAt;revision=$d.revision}}catch{}}|Sort-Object updatedAt -Descending)};Send-Json $Context @{success=$true;items=$items};return $true}
+ if($Path -eq '/api/trunk-preparation-drafts' -and $method -eq 'GET'){$items=@();if(Test-Path -LiteralPath $folder){$items=@(Get-ChildItem -LiteralPath $folder -Filter '*.json' -File|ForEach-Object{try{$d=Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8|ConvertFrom-Json;@{id=$d.id;name=$d.edits.name;updatedAt=$d.updatedAt;revision=$d.revision;workbench=$d.workbench;bytes=$_.Length}}catch{}}|Sort-Object updatedAt -Descending)};Send-Json $Context @{success=$true;items=$items};return $true}
  $id=[string]$Context.Request.QueryString['id'];if($id -cnotmatch '^[a-f0-9-]{36}$'){throw '树干整理草稿身份无效'};$file=Join-Path $folder ($id+'.json')
  if($method -eq 'GET'){if(Test-Path -LiteralPath $file){Send-File $Context $file}else{Send-Json $Context @{success=$false;message='树干整理草稿不存在'} 404};return $true}
+ if($method -eq 'DELETE'){
+  if(-not(Test-Path -LiteralPath $file -PathType Leaf)){Send-Json $Context @{success=$false;message='草稿不存在'} 404;return $true}
+  $old=Get-Content -LiteralPath $file -Raw -Encoding UTF8|ConvertFrom-Json
+  if($old.workbench -ne 'sculpt' -or [long]$old.revision -ne [long]$Context.Request.QueryString['revision']){Send-Json $Context @{success=$false;message='草稿已改变，请刷新后删除'} 409;return $true}
+  Remove-Item -LiteralPath $file;Send-Json $Context @{success=$true};return $true
+ }
  if($method -eq 'POST'){
-  if($Context.Request.ContentLength64 -gt 2MB){throw '树干整理草稿过大'};$data=Read-RequestJson $Context.Request
+  if($Context.Request.ContentLength64 -gt 192MB){throw '树干整理草稿过大'};$data=Read-RequestJson $Context.Request
   if($data.id -ne $id -or $data.version -ne 1 -or ([string]$data.sourceId) -cnotmatch '^TRUNK_[A-Za-z0-9_]{1,90}$' -or [int]$data.sourceRevision -lt 1 -or @($data.edits.guides).Count -lt 1 -or @($data.edits.guides).Count -gt 256){throw '树干整理草稿格式无效'}
   if(Test-Path -LiteralPath $file){$old=Get-Content -LiteralPath $file -Raw -Encoding UTF8|ConvertFrom-Json;if([long]$old.revision -ne [long]$data.revision){Send-Json $Context @{success=$false;message='此树干草稿已在另一窗口更新，请重新打开后继续'} 409;return $true}}
   $data|Add-Member -NotePropertyName revision -NotePropertyValue ([long]$data.revision+1) -Force;$data|Add-Member -NotePropertyName updatedAt -NotePropertyValue ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()) -Force;$null=Write-AtomicText $file ($data|ConvertTo-Json -Depth 32 -Compress);Send-Json $Context @{success=$true;revision=$data.revision;updatedAt=$data.updatedAt};return $true

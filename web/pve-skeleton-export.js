@@ -172,7 +172,7 @@ export function validatePVESkeleton(skeleton) {
   }
   if (thin_parent_connections) warnings.push(`${thin_parent_connections} 处母枝比接入的子枝细`);
   if (displaced_connections) warnings.push(`${displaced_connections} 处连接点离母枝较远`);
-  if (branches.length >= 2200) warnings.push('枝条数达到当前生成器的 2200 根上限');
+  // The source mix determines capacity; branch count alone cannot prove truncation.
   const foliage = skeleton.version >= 2 ? skeleton.foliage : [];
   const sources = skeleton.version >= 2 ? skeleton.foliage_sources : [];
   if (skeleton.version >= 2 && (!Array.isArray(foliage) || !Array.isArray(sources) || !sources.length&&!(skeleton.version===3&&Array.isArray(foliage)&&foliage.length===0))) errors.push('叶片实例或叶片源列表缺失');

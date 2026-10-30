@@ -36,7 +36,7 @@ import { createBranchQuickControls } from './branch-quick-controls.js';
 import { createBranchVariantWorkspace } from './branch-variant-workspace.js';
 import { createPlantUnitWorkspace } from './plant-unit-workspace.js';
 import { normalizeFoliageUnit } from './foliage-unit-data.js';
-import { ASSEMBLY_ZONES, normalizeAssemblySlots, inferAssemblySlots, addAssemblyAsset, assignAssemblyInstances, seedAssemblyInstances, countAssemblyInstances, resizeAssemblyInstances } from './branch-assembly.js';
+import { ASSEMBLY_ZONES, normalizeAssemblySlots, inferAssemblySlots, addAssemblyAsset, assignAssemblyInstances, seedAssemblyInstances, countAssemblyInstances, resizeAssemblyInstances, assemblyCountCapacity } from './branch-assembly.js';
 import { recoverLegacyBranchAsset } from './legacy-branch-recovery.js';
 import { createBranchLibraryManager } from './branch-library-manager.js';
 import { createBranchAssetStore } from './branch-asset-store.js';
@@ -70,6 +70,7 @@ const cloneDocument = (doc) => { const { history, future, selection, pointIndex,
 export function createBranchWorkbench(api) {
   let mode = 'TREE'; let parked = { TREE: null, BRANCH: null, VINE: null }; let busy = false; let selectedAsset = ''; let selectedInstance = ''; let library = []; let ready;
   let trunkOwnsSkeletonMode = false;
+  let assemblyTargetAuthoring=null,assemblyTargetDraft=false,assemblyCapacity=null;
   const confirmAction=createAppConfirm('branchActionConfirm');
   const assetStorage = createBranchAssetStore();
   const organizer = createAssetOrganizer();
@@ -96,7 +97,7 @@ export function createBranchWorkbench(api) {
     <details><summary>造型参考图</summary><div class="wb-row"><button id="wbReferenceLoad">${icon('image-plus')}导入参考图</button>${button('wbReferenceRemove', 'trash-2', '移除参考图')}</div><input id="wbReferenceFile" type="file" accept="image/png,image/jpeg,image/webp" hidden><label class="wb-check"><input id="wbReferenceVisible" type="checkbox" checked>显示参考图</label><label>透明度<input id="wbReferenceOpacity" type="range" min="0.05" max="1" step="0.05" value="0.45"></label><div class="field-grid">${numeric('wbReferenceSize', '高度（m）', 2, 0.1, 30, 0.1)}${numeric('wbReferenceX', 'X（m）', 0.7, -30, 30, 0.05)}${numeric('wbReferenceY', 'Y（m）', 0, -30, 30, 0.05)}${numeric('wbReferenceZ', 'Z（m）', 0.7, -30, 30, 0.05)}</div></details></div>
     <label class="wb-branch-only">素材名称<input id="wbAssetName" type="text" value="造型枝条" maxlength="80"></label><div class="wb-row wb-branch-only"><button id="wbSaveAsset">${icon('save')}保存素材</button><button id="wbSaveReturn">${icon('corner-up-left')}保存并返回整树</button><button id="wbSaveCopy">${icon('copy-plus')}另存新素材</button></div>
     <div class="wb-library-heading"><strong>枝条素材库</strong><div class="wb-tools">${button('wbImportAsset', 'upload', '导入枝条素材')}${button('wbExportAsset', 'download', '导出选中素材')}${button('wbDeleteAsset', 'trash-2', '删除素材')}</div></div><input id="wbAssetFile" type="file" accept=".json" hidden><input id="wbAssetSearch" type="search" placeholder="搜索枝条素材" aria-label="搜索枝条素材"><div id="wbAssetLibrary" class="wb-library"></div><div class="wb-row"><button id="wbEditAsset">${icon('pencil')}打开素材</button><button id="wbExportSampleGlb">${icon('box')}导出树枝样本 GLB</button></div><div class="wb-row"><button id="wbRenameAsset">${icon('text-cursor-input')}重命名</button></div>
-    <div class="wb-tree-only wb-assembly"><div class="wb-library-heading"><strong>整树 · 三类枝条装配</strong><button id="wbAssemblyJumpCount" type="button">单元枝 <b id="wbAssemblyCurrent">0</b> · 调数量</button></div><p class="vine-note">拖动左侧素材卡到区间；每区可放多个样本，末尾会保留空槽。双击卡片编辑，保存后点更新才应用新版。</p><div id="wbAssemblyZones"></div><div class="wb-assembly-count"><label>目标单元枝数量<input id="wbAssemblyTarget" type="number" min="0" max="1600" step="1" value="0"></label><button id="wbApplyAssemblyCount" type="button">应用数量</button></div><p class="vine-note">数量控制增减整树上的单元枝实例；每张卡片仍是可编辑的枝条样本。增加数量受枝干预算限制。</p><button id="wbUpdateSamples" type="button">${icon('refresh-cw')}更新树枝样本</button></div>
+    <div class="wb-tree-only wb-assembly"><div class="wb-library-heading"><strong>整树 · 三类枝条装配</strong><button id="wbAssemblyJumpCount" type="button">单元枝 <b id="wbAssemblyCurrent">0</b> · 调数量</button></div><p class="vine-note">拖动左侧素材卡到区间；每区可放多个样本，末尾会保留空槽。双击卡片编辑，保存后点更新才应用新版。</p><div id="wbAssemblyZones"></div><div class="wb-assembly-count"><label>目标单元枝数量<input id="wbAssemblyTarget" aria-describedby="wbAssemblyCapacity" type="number" min="0" max="1600" step="1" value="0"></label><button id="wbApplyAssemblyCount" type="button">应用数量</button><p id="wbAssemblyCapacity" class="wb-assembly-capacity" role="status"></p></div><p class="vine-note">数量控制增减整树上的单元枝实例；每张卡片仍是可编辑的枝条样本。增加数量受枝干预算限制。</p><button id="wbUpdateSamples" type="button">${icon('refresh-cw')}更新树枝样本</button></div>
     <div class="wb-tree-only"><details open><summary>安装枝条</summary><label>安装方式<select id="wbInstallMode"><option value="COPY">独立副本</option><option value="LINK">关联实例</option></select></label><label>挂接位置<input id="wbInstallT" type="range" min="0.02" max="0.98" step="0.01" value="0.65"></label><div class="field-grid">${numeric('wbInstallAngle', '分枝角（°）', 45, 0, 180, 1)}${numeric('wbInstallAzimuth', '绕枝角（°）', 0, -180, 180, 1)}${numeric('wbInstallRoll', '滚转（°）', 0, -180, 180, 1)}${numeric('wbInstallScale', '整体缩放', 1, 0.05, 5, 0.05)}${numeric('wbInstallVariation', '缩放变化', 0, 0, 0.8, 0.05)}${numeric('wbInstallSeed', '变化种子', 1, 1, 2147483646, 1)}</div><button id="wbInstall">${icon('git-pull-request-arrow')}安装到选中枝</button><label>已安装枝条<select id="wbInstances"><option value="">未选择实例</option></select></label><div class="wb-tools">${button('wbUnlink', 'unlink', '转为独立副本')}${button('wbRemoveInstance', 'trash-2', '删除安装实例')}</div></details></div>`;
   document.querySelector('[data-page="structure"]').prepend(section);
   bar.append($('applyBranchBack'));
@@ -483,14 +484,19 @@ export function createBranchWorkbench(api) {
     await api.applyPlantAssets(doc);
     api.toast(refreshLinked ? '树枝样本与缩略图已更新' : '三类样本枝已应用到整树实例');
   }
+  function refreshAssemblyCountHint(){
+    if(!assemblyCapacity)return;const input=$('wbAssemblyTarget'),hint=$('wbAssemblyCapacity'),target=input.valueAsNumber;
+    const {current,maximum}=assemblyCapacity,valid=Number.isInteger(target)&&target>=0&&target<=maximum;
+    input.setAttribute('aria-invalid',String(!valid));hint.classList.toggle('invalid',!valid);
+    hint.textContent=`当前 ${current} 支 · 当前素材组合最多 ${maximum} 支`
+      +(!valid?' · 目标超出范围':target>current?` · 将增加 ${target-current} 支`:target<current?` · 将减少 ${current-target} 支`:'');
+  }
   async function setAssemblyCount(target) {
     if (mode !== 'TREE') return;
     await api.flush();
     const slots = currentSlots(), doc = api.capture(), branchCount = api.getAsset().masterBranches.length;
     const previousIds = new Set(doc.authoring.branch_instances.map(i => i.id));
-    const tags = doc.authoring.recipe?.tags || [];
-    const branchLimit = tags.includes('DENSE_AUTHORED_SAMPLE_ASSEMBLY') ? 11000
-      : tags.includes('DENSE_AUTHORED_CROWN') ? 3200 : 2200;
+    const branchLimit=assemblyBranchLimit(doc.authoring,{hadInstances:target>0});
     doc.authoring.workbench = { ...doc.authoring.workbench, assembly_slots: normalizeAssemblySlots(slots, library) };
     doc.authoring.branch_instances = resizeAssemblyInstances(doc.authoring.branch_instances, slots, library,
       target, api.getAsset().masterBranches, branchLimit, branchCount, doc.authoring);
@@ -499,6 +505,7 @@ export function createBranchWorkbench(api) {
     applyGrowthRules(doc.authoring, api.getAsset().masterBranches);
     if (doc.authoring.workbench.assembly_scale) syncAssemblyScale(doc.authoring);
     await api.applyPlantAssets(doc);
+    assemblyTargetDraft=false;
     api.toast(`整树单元枝已调整为 ${countAssemblyInstances(doc.authoring.branch_instances, slots)} 个`);
   }
   function assemblyRoots(assetId,role) {
@@ -773,8 +780,12 @@ export function createBranchWorkbench(api) {
       const assemblyCount = countAssemblyInstances(api.getAuthoring().branch_instances, slots);
       $('wbAssemblyCurrent').textContent = String(assemblyCount);
       const targetInput = $('wbAssemblyTarget');
-      targetInput.max = String(1600 - api.getAuthoring().branch_instances.length + assemblyCount);
-      if (document.activeElement !== targetInput) targetInput.value = String(assemblyCount);
+      const a=api.getAuthoring();
+      if(assemblyTargetAuthoring!==a){assemblyTargetAuthoring=a;assemblyTargetDraft=false;}
+      assemblyCapacity=assemblyCountCapacity(a.branch_instances,slots,library,assemblyBranchLimit(a,{hadInstances:true}),api.getAsset()?.masterBranches.length||0);
+      targetInput.max=String(assemblyCapacity.maximum);
+      if(!assemblyTargetDraft&&document.activeElement!==targetInput)targetInput.value=String(assemblyCount);
+      refreshAssemblyCountHint();
       for (const zone of ASSEMBLY_ZONES) {
         const row = document.createElement('div'); row.className = 'wb-assembly-zone'; row.dataset.assemblyRole = zone.role;
         const title = document.createElement('strong');
@@ -907,6 +918,7 @@ export function createBranchWorkbench(api) {
   bind('wbSaveAsset', () => saveAsset()); bind('wbSaveReturn', async () => { if (await saveAsset()) { await switchMode('TREE'); revealAssembly(); } }); bind('wbSaveCopy', () => saveAsset(true)); bind('wbInstall', install);
   bind('wbEditAsset', () => openAsset(assetById()));
   bind('wbUpdateSamples', async () => updateAssembly(currentSlots(), ASSEMBLY_ZONES.map((zone) => zone.role), true));
+  $('wbAssemblyTarget').addEventListener('input',()=>{assemblyTargetDraft=true;refreshAssemblyCountHint();});
   bind('wbApplyAssemblyCount', async () => setAssemblyCount($('wbAssemblyTarget').valueAsNumber));
   bind('wbExportSampleGlb', async () => {
     const item = assetById(); if (!item) return;

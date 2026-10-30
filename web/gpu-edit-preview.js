@@ -93,7 +93,7 @@ vec4 worldPosition=modelMatrix*duckEditPosition;
   result.customProgramCacheKey=()=>key+':tree-duck-edit-v1:'+Number(instanced);return result;
 }
 
-export function createGpuMeshPreview(asset,snapshot,{sampleLine,lineTangent,targets=null,rigid=false,rigidFollowers=false,rigidUnits=false}){
+export function createGpuMeshPreview(asset,snapshot,{sampleLine,lineTangent,targets=null,rigid=false,rigidFollowers=false,rigidUnits=false,anchorFollowers=true}){
   asset.activeEditPreview?.restore();
   const meshes=[];asset.group.traverse(o=>{if(o.isMesh&&!o.userData.imported_trunk)meshes.push(o);});
   if(meshes.some(m=>m.isSkinnedMesh||m.isBatchedMesh||m.geometry.morphAttributes.position?.length||
@@ -370,7 +370,7 @@ export function createGpuMeshPreview(asset,snapshot,{sampleLine,lineTangent,targ
         }
       };
     }
-    imported=createImportedTrunkPreview(asset,snapshot,{affected,texture,shaderMaterial,limit});stats.importedFrames=imported?.frames||0;nativeTextures=Object.freeze([...(records.some(r=>r.installed)?[lookupTexture,frameTexture]:[]),...(imported?.textures||[])]);
+    imported=createImportedTrunkPreview(asset,snapshot,{affected,texture,shaderMaterial,limit,anchorFollowers});stats.importedFrames=imported?.frames||0;nativeTextures=Object.freeze([...(records.some(r=>r.installed)?[lookupTexture,frameTexture]:[]),...(imported?.textures||[])]);
     markNativeModelChanged(asset);asset.activeEditPreview=preview;return preview;
   }catch(error){restore();throw error;}
 }

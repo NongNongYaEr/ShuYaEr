@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {cloneAxis} from './branch-axis.js';
 import { resolveInstanceShape } from './branch-workbench-data.js';
 import { instanceMatrix, reframeInstanceEdits, instanceEditBase } from './branch-instance-edit.js';
 import { branchInstanceFrame } from './branch-kernel.js';
@@ -174,7 +175,10 @@ export function instanceFromMatrix(instance,shape,parent,matrix,scale=null){
   if(scale===null)scale=dimensions.x/(branchInstanceFrame(instance,null,{}).scale/instance.scale);
   const aligned=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(...shape.connector.direction),direction),twist=rotation.clone().multiply(aligned.invert());
   const degrees=THREE.MathUtils.radToDeg(2*Math.atan2(new THREE.Vector3(twist.x,twist.y,twist.z).dot(direction),twist.w)),roll=((degrees+180)%360+360)%360-180;
-  const points=parent?.points.map(p=>inverse?p.clone().applyMatrix4(inverse):p);
+  // The inverse frame must sample the same carrier station as the forward
+  // placement. Plain map drops nonuniform axis times and moves the connector
+  // even for an identity conversion; repeated brush dabs then accumulate drift.
+  const points=parent&&(inverse?cloneAxis(parent.points,p=>p.clone().applyMatrix4(inverse)):parent.points);
   return {...instance,scale,roll,assembly_refined:true,assembly_manual:true,frame:{position:position.toArray(),direction:direction.toArray(),parent_position:points?sampleLine(points,instance.attach).toArray():null,parent_tangent:points?lineTangent(points,instance.attach).toArray():[0,0,1]}};
 }
 
@@ -253,7 +257,7 @@ export function applyInstanceFamilyPlacement(authoring,before,after,shape,branch
   const ctx=placementContextFor(authoring,branches,settings,context),family=ctx.familyOf(before.id),childrenRecords=family.filter(i=>i.id!==before.id),owned=family.flatMap(i=>ctx.branchesByOwner.get(i.id)||[]),manual=owned.filter(b=>b.manual&&!b.instanceId);
   if(!childrenRecords.length&&!manual.length){applyInstancePlacement(authoring,before,after,shape,branches,settings,null,ctx);return;}
   const matrix=instanceTransformMatrix(before,after,shape,[ctx.byStable.get(before.parent),ctx.byStable.get(after.parent)].filter(Boolean),settings),ratio=after.scale/before.scale,movedByStable=new Map(),movedById=new Map();
-  for(const b of owned){const moved={...b,points:b.points.map(p=>p.clone().applyMatrix4(matrix)),controlPoints:b.controlPoints.map(p=>p.clone().applyMatrix4(matrix))};movedByStable.set(b.stableId,moved);movedById.set(b.id,moved);ctx.stats.movedBranches++;}
+  for(const b of owned){const moved={...b,points:cloneAxis(b.points,p=>p.clone().applyMatrix4(matrix)),controlPoints:cloneAxis(b.controlPoints,p=>p.clone().applyMatrix4(matrix))};movedByStable.set(b.stableId,moved);movedById.set(b.id,moved);ctx.stats.movedBranches++;}
   const children=childrenRecords.map(i=>{const localShape=resolveInstanceShape(i,authoring.branch_library),oldParent=ctx.byStable.get(i.parent),newParent=movedByStable.get(i.parent)||oldParent,desired=matrix.clone().multiply(instanceMatrix(i,localShape,oldParent?[oldParent]:[],settings));
     return {before:structuredClone(i),shape:localShape,temporary:instanceFromMatrix(i,localShape,oldParent,desired,i.scale*ratio),after:instanceFromMatrix(i,localShape,newParent,desired,i.scale*ratio)};});
   applyInstancePlacement(authoring,before,after,shape,branches,settings,null,ctx);

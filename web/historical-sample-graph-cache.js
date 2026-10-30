@@ -1,3 +1,4 @@
+import {assemblyBranchLimit} from './assembly-budget.js';
 import {resolveInstanceShape} from './branch-workbench-data.js';
 
 const independentOperations=new Set(['MOUNT','POINT_ROTATE','ROOT_SCALE','POINT_SCALE','RADIUS','DUPLICATE','POINT_SLIDE','CONTROL_CURVE']);
@@ -14,7 +15,7 @@ export function historicalSampleGraphPlan(settings,a,managed,baseBranches,edited
   const ids=new Set(managed.map(i=>i.id));
   const ownerOf=id=>typeof id==='string'&&ids.has(id.split('.')[0])?id.split('.')[0]:null;
   if(managed.some(i=>ownerOf(i.parent))||baseBranches.some(b=>ownerOf(b.stableId)))return null;
-  const limit=a.recipe.tags.includes('DENSE_AUTHORED_SAMPLE_ASSEMBLY')?11000:a.recipe.tags.includes('DENSE_AUTHORED_CROWN')?3200:2200;
+  const limit=assemblyBranchLimit(a);
   const upperBound=baseBranches.length+managed.reduce((n,i)=>n+(resolveInstanceShape(i,a.branch_library)?.branches.length||0),0)
     +a.sculpt_layers.reduce((n,l)=>n+(l.operation?.type==='DUPLICATE'?(l.operation.records?.length||0):0),0);
   if(upperBound>=limit)return null;

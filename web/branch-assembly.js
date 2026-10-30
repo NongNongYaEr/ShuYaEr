@@ -35,6 +35,28 @@ export function countAssemblyInstances(instances, slots) {
   return (instances || []).filter((instance) => instance.linked && ids.has(instance.asset_id)).length;
 }
 
+// Capacity and placement consume one deterministic role/source sequence.
+function assemblySourceSequence(instances,slots,library) {
+  const byId=new Map(library.map(asset=>[asset.id,asset])),ids=new Set(Object.values(slots||{}).flat());
+  const managed=instances.filter(i=>i.linked&&ids.has(i.asset_id));
+  const roles=ASSEMBLY_ZONES.map(z=>z.role).filter(role=>slots[role]?.some(id=>byId.has(id)));
+  const counts=Object.fromEntries(roles.map(role=>[role,managed.filter(i=>i.shootRole===role).length]));
+  const weights=Object.fromEntries(roles.map(role=>[role,managed.length?Math.max(1,counts[role]):({MATURE:4,MIXED:5,YOUNG:1})[role]]));
+  return {roles,next(){
+    if(!roles.length)return null;
+    const role=roles.reduce((best,current)=>counts[current]/weights[current]<counts[best]/weights[best]?current:best);
+    const candidates=slots[role].map(id=>byId.get(id)).filter(Boolean),asset=candidates[counts[role]%candidates.length];
+    counts[role]++;return {role,asset};
+  }};
+}
+export function assemblyCountCapacity(instances,slots,library,branchLimit,currentBranchCount) {
+  const current=countAssemblyInstances(instances,slots),sequence=assemblySourceSequence(instances,slots,library);
+  const unitLimit=1600-(instances.length-current);let maximum=current,usedBranches=currentBranchCount;
+  while(maximum<unitLimit){const next=sequence.next();if(!next||usedBranches+next.asset.shape.branches.length>branchLimit)break;
+    usedBranches+=next.asset.shape.branches.length;maximum++;}
+  return {current,maximum,branchLimit,currentBranchCount};
+}
+
 export function resizeAssemblyInstances(instances, slots, library, requested, branches, branchLimit, currentBranchCount, authoring = null) {
   const ids = new Set(Object.values(slots || {}).flat());
   const managed = instances.filter((instance) => instance.linked && ids.has(instance.asset_id));
@@ -63,9 +85,10 @@ export function resizeAssemblyInstances(instances, slots, library, requested, br
     });
     return instances.filter((instance) => !managed.includes(instance) || chosen.has(instance));
   }
-  const byId = new Map(library.map((asset) => [asset.id, asset]));
-  const activeRoles = ASSEMBLY_ZONES.map(({ role }) => role).filter((role) => slots[role]?.some((id) => byId.has(id)));
+  const sequence=assemblySourceSequence(instances,slots,library),activeRoles=sequence.roles;
   if (!activeRoles.length) throw new Error('请先将枝条素材拖入至少一个装配区间');
+  const capacity=assemblyCountCapacity(instances,slots,library,branchLimit,currentBranchCount);
+  if(target>capacity.maximum)throw new Error(`目标 ${target} 支超过当前素材组合上限 ${capacity.maximum} 支；当前 ${managed.length} 支保持不变`);
   const native = skeletonBranches(branches || []).filter((branch) => branch.stableId && branch.order >= 1 && branch.length >= 0.2);
   const gapOrder = new Map(findAssemblyGaps(branches || [], instances).map((gap, n) => [gap.branch.stableId, n]));
   if (!native.length) throw new Error('当前树形没有可用的单元枝挂接点');
@@ -78,16 +101,10 @@ export function resizeAssemblyInstances(instances, slots, library, requested, br
   }).sort((a, b) => a.exposure - b.exposure);
   parents.forEach((parent, index) => { const fraction = (index + 0.5) / parents.length;
     parent.role = fraction < 0.4 ? 'MATURE' : fraction < 0.9 ? 'MIXED' : 'YOUNG'; });
-  const roleCounts = Object.fromEntries(activeRoles.map((role) => [role, managed.filter((instance) => instance.shootRole === role).length]));
-  const roleWeights = Object.fromEntries(activeRoles.map((role) => [role, managed.length ? Math.max(1, roleCounts[role]) : ({ MATURE: 4, MIXED: 5, YOUNG: 1 })[role]]));
   const usedIds = new Set(instances.map((instance) => instance.id));
-  const added = []; let usedBranches = currentBranchCount; let serial = 1;
+  const added = []; let serial = 1;
   for (let index = managed.length; index < target; index++) {
-    const role = activeRoles.reduce((best, current) => roleCounts[current] / roleWeights[current] < roleCounts[best] / roleWeights[best] ? current : best);
-    const candidates = slots[role].map((id) => byId.get(id)).filter(Boolean);
-    const asset = candidates[roleCounts[role] % candidates.length];
-    const cost = asset.shape.branches.length;
-    if (usedBranches + cost > branchLimit) throw new Error(`枝干预算最多可容纳 ${managed.length + added.length} 个装配单元枝；可减少其他枝条或选用更短样本`);
+    const {role,asset}=sequence.next();
     const roleParents = parents.filter((parent) => parent.role === role || !activeRoles.includes(parent.role));
     const pool = (roleParents.length ? roleParents : parents).filter(parent=>[.36,.5,.64,.78,.82,.9].some(t=>!isPreservedAssemblyGap(authoring,parent.branch.stableId,t,role)));
     if (!pool.length) throw Error('可用挂点均被保留空隙覆盖，请调整空隙范围');
@@ -109,7 +126,6 @@ export function resizeAssemblyInstances(instances, slots, library, requested, br
       angle: 29 + (serial * 19 % 34), azimuth: -180 + (serial * 137.5 % 360), roll: -25 + (serial * 23 % 51),
       scale: asset.sample ? 1 : Math.max(0.15, Math.min(1.4, radius * 0.62 / Math.max(0.001, asset.shape.branches[0].start_radius))),
       variation: 0.12, seed: 1009 + serial * 7919 });
-    roleCounts[role]++; usedBranches += cost;
   }
   return [...instances, ...added];
 }

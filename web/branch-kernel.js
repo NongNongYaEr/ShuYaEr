@@ -1,3 +1,4 @@
+import {assemblyBranchLimit} from './assembly-budget.js';
 import {deriveLodBranches} from './branch-lod.js';
 import {importedTrunkHostIds,buildImportedTrunkMeshes,disposeImportedTrunkTextures} from './imported-trunk-runtime.js';
 import {resolveTrunkAttachmentFrames,trunkInstanceSurfaceFrame,captureTrunkCarrierMotion,followTrunkCarrierMotion,resolveTrunkCarrierFrames} from './imported-trunk-attachments.js';
@@ -608,10 +609,10 @@ function* buildBranchGraphSteps(settings, state, rawAuthoring, hadInstances = fa
   const authoring = normalizeAuthoring(rawAuthoring, settings.seed);
   const branches = [];
   const maxLevel = Math.max(1, settings.branch_levels);
-  const maximumBranches = authoring.recipe.tags.includes('DENSE_AUTHORED_SAMPLE_ASSEMBLY') ? 11000
-    : authoring.recipe.tags.includes('DENSE_AUTHORED_CROWN') ? 3200
-    : authoring.vine || authoring.branch_shape || authoring.branch_instances.length || hadInstances ? 2200
-      : Math.max(24, Math.min(520, authoring.root_count * (42 + settings.child_count * 24)));
+  const authored = authoring.recipe.tags.some(tag=>['DENSE_AUTHORED_SAMPLE_ASSEMBLY','DENSE_AUTHORED_CROWN'].includes(tag))
+    || authoring.vine || authoring.branch_shape || authoring.branch_instances.length || hadInstances;
+  const maximumBranches = authored ? assemblyBranchLimit(authoring,{hadInstances})
+    : Math.max(24,Math.min(520,authoring.root_count*(42+settings.child_count*24)));
   let nextId = 0;
   const addBranch = ({ stableId, parentId = -1, parentT = 0, order = 0, start, direction, length, radius, phase = 0, manual = false, spawnChildren = true, generator = null, sourceRecord = null, instanceId = '', junction = null }) => {
     if (branches.length >= maximumBranches) return null;

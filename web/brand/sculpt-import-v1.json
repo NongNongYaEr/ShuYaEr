@@ -1,0 +1,10 @@
+{
+  "mode": "built-in image_gen",
+  "useCase": "illustration-story",
+  "asset": "web/brand/sculpt-import-v1.png",
+  "references": [
+    "web/brand/tree-duck-v5.png",
+    "web/brand/category-material-v1.png"
+  ],
+  "prompt": "Use case: illustration-story. Asset type: a single transparent mascot illustration for the empty GLB-import state of the Tree Duck desktop model-sculpting workbench. Input image 1 is the canonical character identity reference, and input image 2 is the established category illustration style reference. These are references only; create a NEW sculpting scene. Preserve the exact recognizable Tree Duck: fluffy golden yellow duck, large dark brown eyes with bright white highlights, broad orange duck beak, cream swept spiky hair tuft, dark charcoal work goggles on the forehead with eyes completely visible, cobalt blue work jacket with round brass buttons, friendly focused expression, polished clean cartoon shading and strong smooth dark outlines. One duck only, compact landscape composition approximately 3:2, bust or three-quarter view, whole head and props visible, generous transparent outer margins. Duck on the right, ONE small sculpted curved tree trunk on the left on a minimal round wooden display disk. The bare brown trunk forks into two or three graceful branches with one noticeably tapered branch tip. The duck uses ONE small handheld wood-carving gouge/chisel with a blue handle to gently refine that branch tip, other wing steadies the trunk. The contact of the sculpting tool with the branch is clear and readable. Distinctive wood shaping, not painting; no brush, no palette, no hammer, no axe. Keep the tree and tool simple enough to read when the whole illustration is reduced to 240 pixels wide. Isolated illustration, genuine transparent background everywhere outside the duck and props, no background rectangle, no workshop scenery, no haze or glow, no floor shadow, no words, no typography, no UI, no symbols, no watermark. Designed to sit naturally on a dark green software panel."
+}

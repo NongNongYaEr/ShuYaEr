@@ -1,3 +1,5 @@
+import {assemblyBranchLimit} from './assembly-budget.js';
+export {assemblyBranchLimit} from './assembly-budget.js';
 import { skeletonBranches } from './skeleton-thickness.js';
 import { descendants } from './branch-selection.js';
 import { protectedAssemblyInstances, isAutomaticPlacement, recordGeneratedPlacements } from './assembly-distribution.js';
@@ -35,10 +37,7 @@ export function localAssemblyState(authoring, targets, range = {}) {
   const editable = total.filter(i => !symmetry && !protection.get(i.id));
   return { total, editable, protected: total.filter(i => !editable.includes(i)), protection };
 }
-export function assemblyBranchLimit(authoring) {
-  const tags = authoring.recipe?.tags || [];
-  return tags.includes('DENSE_AUTHORED_SAMPLE_ASSEMBLY') ? 11000 : tags.includes('DENSE_AUTHORED_CROWN') ? 3200 : 2200;
-}
+
 export function inAssemblyVoid(authoring, parent, attach, role) {
   return (authoring.workbench?.assembly_voids || []).some(r => r.parents.includes(parent) && attach >= r.start && attach <= r.end && (r.role === 'ANY' || r.role === role));
 }

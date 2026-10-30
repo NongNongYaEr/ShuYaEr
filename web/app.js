@@ -1,3 +1,5 @@
+import {createWindPreview} from './wind-preview.js';
+import {normalizeWindPreview} from './wind-preview-settings.js';
 import {nativeModelRevision,markNativeModelChanged} from './native-model-changes.js';
 import {upgradeStructuralCurves} from './branch-kernel.js';
 import {sealCompiledSampleMaterials,compiledSampleCacheStats,compiledSampleHistoryStats} from './compiled-sample-cache.js';
@@ -80,7 +82,7 @@ import { createUnitCombController } from './unit-comb-controller.js';
 import { mergeUnitAssemblySelection } from './unit-assembly-selection.js';
 import { unitBranchIndex, resolveUnitEditScope } from './unit-branch-boundary.js';
 import { legacyUnitBranches, legacyUnitInstances } from './legacy-unit-placement.js';
-import { SELECTION_TOOLS, TRANSFORM_TOOLS, insidePolygon } from './branch-selection.js';
+import { SELECTION_TOOLS, TRANSFORM_TOOLS, insidePolygon, descendants } from './branch-selection.js';
 import { createBranchSelectionController } from './branch-selection-controller.js';
 import { createParameterWorkspace } from './parameter-workspace.js';
 import { createBranchWorkflowUI } from './branch-workflow-ui.js';
@@ -88,6 +90,7 @@ import { createWorkspaceNavigation } from './workspace-navigation.js';
 import { prepareTreeAssemblyLayout } from './tree-assembly-layout.js';
 import { createResourceCenter } from './resource-center.js';
 import {createTrunkPreparation} from './trunk-preparation.js';
+import {createModelSculpt} from './model-sculpt.js';
 import {createTrunkModelStore} from './trunk-model-store.js';
 import {importedTrunkShape,hydrateImportedTrunkMaterials} from './imported-trunk-runtime.js';
 import {pickImportedTrunkAttachment} from './imported-trunk-picker.js';
@@ -98,6 +101,8 @@ import {emptyPrefabAssets,normalizePrefabAssets,normalizePrefabInstances,portabl
 import { createPanelGuides } from './panel-guides.js';
 import { arrangeCompanionPanels } from './companion-panels.js';
 import { bindLocalBranchEdit } from './local-branch-edit.js';
+import {createSculptTrunkReplacementPreview} from './sculpt-trunk-replacement-preview.js';
+import {sculptReplacementTargets} from './sculpt-trunk-replacement.js';
 import { renderBranchCandidate } from './branch-candidate-renderer.js';
 import { renderPlantThumbnail } from './project-thumbnail.js';
 import { profileValue } from './generator-data.js';
@@ -173,7 +178,7 @@ let gridVisible = true;
 let matrixVariants = [];
 let buildTimer = null;
 let toastTimer = null;
-let windTime = 0;
+let windPreview = null;
 let generationSnapshot = null;
 let resetLeafTextureCache = false;
 let editTimings = {};
@@ -375,7 +380,13 @@ const bundle = createBranchSelectionController({
   getSelection: () => selectedBranchIds, setSelection: setBranchSelection, getTool: () => viewportTool,
   getSelectionExclusions: () => selectedBranchExclusions,
   getEditTargets: branchEditTargets,
-  getOutlineTargets: () => branchWorkbench?.trunkForm.enabled ? new Set() : null,
+  getOutlineTargets: () => {
+    // Guides follow actual selection; operation scope can include more targets.
+    // Complete units keep all their owned wood in the displayed selection.
+    if (branchWorkbench?.trunkForm.enabled || !selectedBranchIds.size) return new Set();
+    if (branchWorkbench?.mode !== 'TREE') return null;
+    return treeUnitMode() ? descendants(asset?.masterBranches || [], selectedBranchIds) : new Set(selectedBranchIds);
+  },
   getWorkspace: () => branchWorkbench?.mode,
   selectableBranch: branch => branchWorkbench?.mode !== 'TREE'
     ? true
@@ -504,12 +515,8 @@ function animate(time) {
   if (!document.body.classList.contains('resource-center-active') && !branchWorkbench?.trunkForm.active && !branchWorkbench?.assemblyGrowth.dragging && !branchWorkbench?.tools.dragging && !sculpt.active && !bundle.active && !spatialControls?.dragging && !generatorWorkspace?.rangeDragging && !pointDrag && !pruneStroke) controls.update();
   updateAxisWidget();
   branchWorkbench?.assemblyGrowth.update();
-  windTime = time * 0.001;
-  if (!branchWorkbench?.views.enabled && !branchWorkbench?.installation.active && branchWorkbench?.mode !== 'BRANCH' && asset && viewMode === 'SOLID' && asset.settings.wind_strength > 0 && !["UNIT_PAINT","UNIT_DENSITY"].includes(viewportTool) && !advancedGesture && !generatorWorkspace?.rangeActive && !spatialControls?.active && !selectedBranchId && !SCULPT_TOOLS.has(viewportTool) && !SELECTION_TOOLS.has(viewportTool) && !TRANSFORM_TOOLS.has(viewportTool)) {
-    const amount = asset.settings.wind_strength * 0.012;
-    modelRoot.rotation.y = Math.sin(windTime * 0.75) * amount;
-    modelRoot.rotation.x = Math.sin(windTime * 1.15 + 0.7) * amount * 0.45;
-  } else modelRoot.rotation.set(0, 0, 0);
+  modelRoot.rotation.set(0, 0, 0);
+  windPreview?.tick(time);
   if (previewFogRadius > 2) {
     const viewDistance = camera.position.distanceTo(controls.target);
     scene.fog.near = Math.max(7, viewDistance + previewFogRadius * 1.1);
@@ -594,6 +601,7 @@ function pushHistory(previous) {
 }
 
 function restoreProject(previous) {
+  windPreview?.stop();
   if(previous.prefab_items){prefabAssets={...prefabAssets,items:previous.prefab_items};prefabInstances=previous.prefab_instances||[];prefabEpoch++;branchWorkbench?.prefabs.refresh();}
   if(previous.prefabOnly){updateHistoryButtons();return;}
   if (previous.leaf_meshes) {
@@ -676,6 +684,7 @@ function setAuthoring(next, { rebuild = true, refresh = true, normalized = false
 
 const curveOverrideKeys = ['curve_knots', 'curve_samples', 'curve_sample_times', 'curve_reference_knots', 'curve_parent_frame', 'frozen_points', 'locked', 'offset'];
 function transactAuthoring(label, mutation, { bypassLayers = false, deferControls = false } = {}) {
+  windPreview?.stop();
   const timingStart=performance.now(),timings={},baseline=authoring,draft=createAuthoringDraft(baseline);
   mutation(draft.value);let next=draft.finish();timings.draft=performance.now()-timingStart;
   let symmetry=null;
@@ -818,6 +827,7 @@ function collectAuthoringFromControls() {
   next.timeline.enabled = checked('timelineEnabled');
   next.timeline.time = number('timelineTime');
   next.timeline.loop = checked('timelineLoop');
+  next.wind_preview = normalizeWindPreview(authoring.wind_preview);
   next.wind_profile = {
     root_stiffness: number('rootStiffness'), branch_stiffness: number('branchStiffness'), tip_stiffness: number('tipStiffness'),
     leaf_flutter: number('leafFlutter'), gust_frequency: number('gustFrequency'), turbulence: number('windTurbulence'),
@@ -1363,7 +1373,7 @@ function renderControlPoints(pointsOverride = null, showCurvePreview = true, gui
   });
   controlPointRoot.clear();
   const branch = selectedBranch();
-  if (!branch || branchWorkbench?.trunkForm.enabled || viewMode === 'SKELETON' || !canEditSelectedBranch()) return;
+  if (!branch || !selectedBranchIds.has(branch.stableId) || branchWorkbench?.trunkForm.enabled || viewMode === 'SKELETON' || !canEditSelectedBranch()) return;
   const editPoints = (pointsOverride || editableBranchPoints(branch)).map((point) => point.isVector3 ? point.clone() : new THREE.Vector3(...point));
   const selectedPoints=new Set(currentCurvePoints().indices);
   const pinned = new Set(authoring.overrides[branch.stableId]?.pinned_points || []);
@@ -2183,6 +2193,7 @@ function addModifier() {
 }
 
 function treeUnitMode() {return branchWorkbench?.mode==='TREE'&&selectionKind==='INSTANCE';}
+function unitSizeEffectSelected() {return treeUnitMode()&&$('unitBrushEffect').value==='SCALE';}
 function clearAssemblyDecoration(object) {
   if(!object)return;
   object.removeFromParent();object.traverse(child=>{child.geometry?.dispose();if(Array.isArray(child.material))child.material.forEach(m=>m.dispose());else child.material?.dispose();});
@@ -2287,6 +2298,7 @@ function clearPruneStroke() {
 }
 
 function setViewportTool(tool) {
+  if (!windPreview?.state.preparing) windPreview?.stop();
   if(treeUnitMode()&&((SCULPT_TOOLS.has(tool)&&tool!=='COMB')||viewportStrokeTools.has(tool))){
     showToast('单元枝模式使用 C 梳理或 G/R/S 整支微调；需要塑造骨架时切到「主枝干」');return;
   }
@@ -2338,7 +2350,8 @@ function setViewportTool(tool) {
   syncTreeSelectionMode();
   branchWorkbench?.context.setMode(next);
   refreshBranchEditScope();
-  setStatus(`${viewportToolLabels[next]} · 就绪`, 'ready');
+  const label = next === 'COMB' && treeUnitMode() ? `单元枝 · ${$('unitBrushEffect').selectedOptions[0].textContent}` : viewportToolLabels[next];
+  setStatus(`${label} · 就绪`, 'ready');
 }
 
 function projectBranchForPruning(branch, bounds) {
@@ -2719,20 +2732,26 @@ function insertCurvePointAt(hit){
   if(plan.reason)return showToast(plan.reason,true);
   commitCurveTopology(plan.points,'已在曲线上添加控制点',{focusPoint:hit.point,pinnedPoints:plan.pinned});
 }
-function selectBranchFromViewport(event,{keepPointContextOnEmpty=false}={}) {
+function selectBranchFromViewport(event) {
   if (!asset || viewMode === 'SKELETON') return;
   if (leafBrushMode !== 'SELECT' && !allowLeafStyleWrite()) return;
   if (leafBrushMode === 'SELECT' && branchWorkbench?.mode === 'TREE' && selectionKind === 'INSTANCE') {
-    if(!branchWorkbench.instances.selectHit(event,{shift:event.shiftKey,ctrl:event.ctrlKey})&&!event.shiftKey&&!event.ctrlKey)setBranchSelection([]);return;
+    if (!branchWorkbench.instances.selectHit(event, {shift:event.shiftKey,ctrl:event.ctrlKey}) && !event.shiftKey && !event.ctrlKey) {
+      setBranchSelection([]); setStatus('未选中枝干 · 已隐藏编辑辅助线', 'ready');
+    }
+    return;
   }
   setPointerRay(event);
   const candidates = [];
   asset.group.traverse((object) => { if (object.isMesh && object.visible && object.userData.category === 'branch' && bundle.isVisible(object.userData.stable_id) && (branchWorkbench?.instances.isEditable(object.userData.stable_id) ?? true) && (branchWorkbench?.mode!=='TREE'||!asset.masterBranches.find(b=>b.stableId===object.userData.stable_id)?.instanceId)) candidates.push(object); });
   const hit = raycaster.intersectObjects(candidates, false)[0];
   const stableId = hit?.object?.userData?.imported_trunk ? pickImportedTrunkAttachment(asset,authoring,hit)?.parent : hit?.object?.userData?.stable_id || null;
-  if(!hit&&keepPointContextOnEmpty&&currentCurvePoints().scope==='POINTS'){if(!event.ctrlKey&&!event.shiftKey)selectCurvePoints([]);return;}
   if (!hit && SCULPT_TOOLS.has(viewportTool) && (event.ctrlKey || event.shiftKey)) return;
-  if (!hit || leafBrushMode === 'SELECT') return selectBranch(stableId, event.ctrlKey || event.shiftKey);
+  if (!hit || leafBrushMode === 'SELECT') {
+    selectBranch(stableId, event.ctrlKey || event.shiftKey);
+    if (!stableId && leafBrushMode === 'SELECT' && !event.ctrlKey && !event.shiftKey) setStatus('未选中枝干 · 已隐藏编辑辅助线', 'ready');
+    return;
+  }
   const branch = asset.branches.find((item) => item.stableId === stableId);
   if (!branch) return;
   const localPoint = asset.group.worldToLocal(hit.point.clone());
@@ -2806,6 +2825,7 @@ function finishPlacementEdit() {
 }
 
 async function generateModel({ fit = false, throwOnError = false } = {}) {
+  if (!windPreview?.state.preparing) windPreview?.stop();
   const generationProfile=performanceRecorder.begin('generation.total_wall');
   let profileScope='PENDING',profileOutcome='STALE',profileError=null;
   if(branchWorkbench?.mode==='TREE')ensureDefaultTreeBark(authoring);
@@ -3135,6 +3155,7 @@ function applyExportProfile(settings) {
 }
 
 function createExportBundle(settings, seed = settings.seed, explicitAuthoring = null, sourceLeaves = leafSources,{rigged=false}={}) {
+  windPreview?.stop();
   const exportAuthoring = explicitAuthoring || authoringForVariant(seed, settings.seed);
   const frame = exportAuthoring.timeline.enabled ? evaluateTimeline(exportAuthoring.timeline.keyframes, exportAuthoring.timeline.time) : {};
   const exportSettings = applyExportProfile(normalizeSettings({ ...settings, ...frame, seed }));
@@ -3495,6 +3516,7 @@ async function saveProject(options = {}) {
 }
 
 async function loadProjectFile(file) {
+  windPreview?.stop();
   if (branchWorkbench) {
     if(projectSession&&!await projectSession.guard(file.name))return;
     const operation=async progress=>{await progress(0,'读取 '+file.name);const doc=migrateProjectDocument(JSON.parse(await file.text()));await branchWorkbench.load(doc,{progress,origin:{fileName:file.name}});await projectSession?.loaded();};
@@ -3607,7 +3629,15 @@ function bindEvents() {
   $('fitViewBtn').addEventListener('click', fitView);
   document.querySelectorAll('[data-viewport-tool]').forEach((button) => button.addEventListener('click', () => {
     const tool = button.dataset.viewportTool;
-    setViewportTool(viewportTool === tool && tool !== 'SELECT' ? 'SELECT' : tool);
+    // Size shares the rigid-instance controller, but the visible Comb command
+    // must leave its SCALE effect before applying the active-tool toggle.
+    const leavingSize = tool === 'COMB' && unitSizeEffectSelected();
+    if (leavingSize) {
+      $('unitBrushEffect').value = 'TURN';
+      $('unitBrushEffect').dispatchEvent(new Event('input', {bubbles:true}));
+      $('unitBrushEffect').dispatchEvent(new Event('change', {bubbles:true}));
+    }
+    setViewportTool(!leavingSize && viewportTool === tool && tool !== 'SELECT' ? 'SELECT' : tool);
   }));
   $('toggleGridBtn').addEventListener('click', () => {
     if (sizeReference) { sizeReference.toggleGrid(); return; }
@@ -3827,7 +3857,7 @@ function bindEvents() {
       && !spatialControls?.dragging && !branchWorkbench?.busy && $('busyOverlay').hidden && !asset?.group.userData.pending_rebuild) {
       event.preventDefault();
       // Use the same route as a click, including the pending-preview safeguard.
-      if (viewportTool !== toolShortcut || branchWorkbench?.vines.surface.active) document.querySelector(`.viewport-tool-rail [data-viewport-tool="${toolShortcut}"]`)?.click();
+      if (viewportTool !== toolShortcut || toolShortcut === 'COMB' && unitSizeEffectSelected() || branchWorkbench?.vines.surface.active) document.querySelector(`.viewport-tool-rail [data-viewport-tool="${toolShortcut}"]`)?.click();
       return;
     }
     if (!editingField && event.ctrlKey && event.key.toLowerCase() === 'z') { event.preventDefault(); undoAuthoring(); return; }
@@ -3873,6 +3903,7 @@ function captureWorkbench({includeHistory=true}={}) {
 }
 
 async function restoreWorkbench(document, progress=async()=>{}) {
+  windPreview?.stop();
   prefabInstances=normalizePrefabInstances(document.prefab_instances);
   editUiRefresh.invalidate();
   skeletonEditMode = false;
@@ -3962,7 +3993,7 @@ async function initialize() {
     project:p=>{const q=new THREE.Vector4(p.x,p.y,p.z,1).applyMatrix4(curvePointProjection.matrix),r=curvePointProjection;return{x:(q.x/q.w+1)*r.width/2,y:(1-q.y/q.w)*r.height/2,z:q.z/q.w,w:q.w};},
     select:selectCurvePoints,insert:insertCurvePointAt,
     gizmoOwns:()=>Boolean(bundle.debug.gizmo.enabled&&bundle.debug.gizmo.axis),
-    click:event=>selectBranchFromViewport(event,{keepPointContextOnEmpty:true}),
+    click:selectBranchFromViewport,
   });
   bindTemporaryBranchSelection({ canvas, selection: bundle, status: setStatus,
     shouldHandle: event => !curvePointInteraction?.active&&!branchWorkbench?.trunkForm.enabled && !branchWorkbench?.trunkForm.active && !branchWorkbench?.unitEditor.enabled && !sculpt.adjusting && !sculpt.canSmoothBegin(event),
@@ -4211,11 +4242,21 @@ async function initialize() {
     const settings=normalizeSettings({...DEFAULT_SETTINGS,object_name:model.name,child_count:0,leaf_density:0,max_leaves:0,buds_enabled:false,fruit_enabled:false,wind_strength:0,branch_levels:3}),document={format:'ProceduralBranchProject',version:4,settings,authoring:normalizeAuthoring({branch_shape:shape,imported_trunks:{version:1,assets:[model],mounts:[mount]},recipe:{name:model.name,tags:['WHOLE_PLANT','FOLIAGE_ON_INSTANCES_ONLY']}},settings.seed),leaf_meshes:[]};
     await projectLoadFlow.run(model.name,async progress=>{await branchWorkbench.load(migrateProjectDocument(document),{progress});await projectSession.loaded();});return true;
   }
-  const trunkPreparation=createTrunkPreparation({native:nativeViewport,toast:showToast,use:useTrunk,async saveProject(value){
+  async function saveProjectTrunk(value){
     if(!packageCaptureAllowed(true))throw Error('请先完成当前调整，再保存树干素材');const model=portableTrunk(value),existing=projectTrunks().find(a=>a.id===model.id);
     if(existing&&authoring.imported_trunks.mounts.some(m=>m.asset_id===model.id))model.id='TRUNK_'+crypto.randomUUID().replaceAll('-','');
     transactAuthoring('已保存项目树干素材',draft=>{const data=draft.imported_trunks||{version:1,assets:[],mounts:[]};if(!data.assets.some(a=>a.id===model.id)&&data.assets.length>=16)throw Error('当前项目最多保留 16 款树干素材');draft.imported_trunks={...data,assets:[...data.assets.filter(a=>a.id!==model.id),model]};},{bypassLayers:true});
+  }
+  const sculptReplacement=createSculptTrunkReplacementPreview({authoring:()=>authoring,async preview(next){if(!packageCaptureAllowed(true)||branchWorkbench.mode!=='TREE')throw Error('请返回整树并结束当前编辑');const document=createProjectDocument(asset,leafSources,structuredClone(authoring));const before=await renderBranchCandidate(document,renderer),after=await renderBranchCandidate({...document,authoring:next},renderer);return {before:before.image,after:after.image};},async apply(proposal){if(!packageCaptureAllowed(true))throw Error('请先结束当前编辑');transactAuthoring('已应用雕刻树干；原素材保留，可撤销',draft=>Object.assign(draft,proposal.authoring),{bypassLayers:true});}});
+  const trunkPreparation=createTrunkPreparation({canReplace:value=>branchWorkbench.mode==='TREE'&&!!value&&sculptReplacementTargets(authoring,value).length>0,replace:value=>sculptReplacement.open(value),native:nativeViewport,toast:showToast,use:useTrunk,saveProject:saveProjectTrunk,async sculpt(value,context){
+    await trunkPreparation.close({resume:false});await modelSculpt.open({model:value,onReturn:()=>trunkPreparation.open({model:value,...context}),onApply:next=>trunkPreparation.open({model:next,...context})});
   }});
+  const modelSculpt=createModelSculpt({native:nativeViewport,toast:showToast,saveProject:saveProjectTrunk,continue:value=>trunkPreparation.open({model:value,onReturn:()=>resourceCenter.resume()})});
+  async function openModelSculpt(record=null){
+    if(!packageCaptureAllowed(true))throw Error('请先完成当前工程调整，再进入模型雕刻');
+    const model=record?(record.inspection||(record.packageAsset?await readPackAsset(record.id):record.scope==='project'?projectTrunks().find(a=>a.id===record.id):await trunkStore.get(record.id,record.revision))):null;
+    resourceCenter.close();await modelSculpt.open({model,onReturn:()=>resourceCenter.resume()});
+  }
   async function openTrunkPreparation(record=null){
     if(branchWorkbench.busy||projectLoadFlow.active||!$('busyOverlay').hidden)throw Error('请等待当前工程处理完成');
     let model=null;if(record)model=record.inspection|| (record.packageAsset?(await readPackAsset(record.id)):record.scope==='project'?projectTrunks().find(a=>a.id===record.id):await trunkStore.get(record.id,record.revision));
@@ -4236,7 +4277,7 @@ async function initialize() {
     }
   });
   const resourceCenter=createResourceCenter({toast:showToast,projects:projectLibrary,packs:plantPacks,prefabs:branchWorkbench.prefabs,
-    trunks:projectTrunks,prepareTrunk:openTrunkPreparation,inspectTrunk:openTrunkPreparation,
+    trunks:projectTrunks,prepareTrunk:openTrunkPreparation,inspectTrunk:openTrunkPreparation,sculptTrunk:openModelSculpt,
     branches:()=>branchWorkbench.library,
     canUse:type=>packageCaptureAllowed(true)&&(type!=='branch'&&type!=='prefab'||branchWorkbench.mode==='TREE'&&!skeletonEditMode),
     editBranch:id=>branchWorkbench.libraryManager.edit(id),
@@ -4262,6 +4303,21 @@ async function initialize() {
     setGridVisible(visible) { gridVisible = visible; grid.visible = ground.visible = visible; $('toggleGridBtn').classList.toggle('active', visible); },
   });
   sizeReference.update(performance.now(), true);
+  // Wind is a reversible GPU presentation pose; authored shapes stay at rest.
+  const legacyWind=$('rootStiffness').closest('.parameter-section'),windAdvanced=document.createElement('details');
+  windAdvanced.innerHTML='<summary>高级 · 原有风动权重设置</summary>';legacyWind.before(windAdvanced);windAdvanced.append(legacyWind);
+  $('windStrength').closest('.range-field').hidden=true;
+  windPreview=createWindPreview({canvas,markerRoot:modelRoot,getAsset:()=>asset,getAuthoring:()=>authoring,status:setStatus,
+    save:values=>{authoring={...authoring,wind_preview:values};if(asset)asset.authoring=authoring;projectSaver?.activated();},
+    async prepare(){
+      if(branchWorkbench.busy||asset?.group.userData.pending_rebuild||advancedGesture||keyboardTransform?.active||sculpt.active||sculpt.adjusting||bundle.active||pointDrag||branchWorkbench.trunkForm.active||branchWorkbench.unitBrushes.active||branchWorkbench.tools.dragging||branchWorkbench.assemblyGrowth.dragging||branchWorkbench.views.enabled)throw Error('请先完成当前调整或关闭多视图，再播放风动');
+      branchWorkbench.trunkForm.deactivate();
+      if(skeletonEditMode)await setSkeletonEditMode(false);
+      setViewportTool('SELECT');setBranchSelection([]);viewMode='SOLID';updateViewMode();
+      document.querySelectorAll('.view-mode').forEach(b=>b.classList.toggle('active',b.dataset.view==='SOLID'));
+    },
+    blocked:()=>Boolean(branchWorkbench.busy||advancedGesture||keyboardTransform?.active||sculpt.active||bundle.active||pointDrag||document.body.classList.contains('resource-center-active')||branchWorkbench.views.enabled),
+  });
   window.__branchForge = {
     performance:performanceRecorder,
     nativeViewport,
@@ -4274,7 +4330,7 @@ async function initialize() {
     get keyboardTransformActive() { return keyboardTransform?.active || false; },
     get skeletonEditMode() { return skeletonEditMode; },
     projectLibrary,projectSession,projectLoadFlow,
-    plantPacks,resourceCenter,trunkPreparation,
+    plantPacks,resourceCenter,trunkPreparation,modelSculpt,
     renderer, scene, camera, controls, modelRoot, skeletonRoot,
     get asset() { return asset; },
     get leafGeometry() { return leafSources[0]?.geometry || null; },
@@ -4282,6 +4338,7 @@ async function initialize() {
     get authoring() { return authoring; },
     get sculptState() { return sculpt.debug; },
     get unitComb() { return unitComb; },
+    get windPreview() { return windPreview; },
     get selectedCurvePoint() { return {branchId:selectedBranchId,index:selectedPointIndex}; },
     get curvePointSelection(){return currentCurvePoints();},
     get bundleState() { return bundle.debug; },

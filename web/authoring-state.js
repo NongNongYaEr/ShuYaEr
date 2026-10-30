@@ -1,3 +1,4 @@
+import {normalizeWindPreview} from './wind-preview-settings.js';
 import {recoverImportedTrunkCurveLayers} from './imported-trunk-curve-recovery.js';
 import { normalizeUnitEditing } from './unit-authoring.js';
 import {normalizeImportedTrunks,normalizeImportedTrunkShapeTimes} from './imported-trunk-runtime.js';
@@ -93,6 +94,7 @@ export const DEFAULT_AUTHORING = {
     snapshots: [],
   },
   wind_profile: {...DEFAULT_WIND_PROFILE},
+  wind_preview: normalizeWindPreview(),
   recipe: { name: '未命名配方', tags: [], locked_parameters: [] },
   quality: { max_attachment_overlap: 0.08, require_tangents: true, require_uvs: true },
 };
@@ -352,6 +354,7 @@ export function normalizeAuthoring(raw = {}, fallbackSeed = 12037, previous = nu
     })).sort((a, b) => a.time - b.time),
     snapshots: (sourceTimeline.snapshots || []).map((snapshot, index) => ({ id: String(snapshot.id || `POSE_${index + 1}`), name: String(snapshot.name || `姿态 ${index + 1}`).slice(0, 48), time: clamp(finite(snapshot.time, 0.5), 0, 1) })),
   };
+  result.wind_preview = normalizeWindPreview(source.wind_preview);
   result.wind_profile = {
     root_stiffness: clamp(finite(source.wind_profile?.root_stiffness, 1), 0, 2),
     branch_stiffness: clamp(finite(source.wind_profile?.branch_stiffness, 0.58), 0, 2),

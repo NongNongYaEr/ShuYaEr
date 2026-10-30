@@ -1,16 +1,16 @@
 import * as THREE from './vendor/three.module.min.js';
-import {axisTime,axisSegment,withAxisTimes,sampleAxis} from './branch-axis.js';
+import {axisTime,axisSegment,withAxisTimes,sampleAxis,normalizeAxisTimes} from './branch-axis.js';
 import {branchMountAt} from './branch-mount-frame.js';
 import {transformLegacyRigidGeometry} from './legacy-unit-placement.js';
 
 // Shape-preserving Hermite interpolation: each coordinate stays between its
 // neighbouring controls. A level pair cannot acquire a hidden hump from old R.
-export function controlCurveAxis(controls){
+export function controlCurveAxis(controls,{times:referenceTimes=null,previous=null,previousControls=null}={}){
   const knots=controls.map(p=>p.isVector3?p.clone():new THREE.Vector3(...p)),nodes=[];
   for(const p of knots)if(!nodes.length||p.distanceToSquared(nodes.at(-1))>1e-16)nodes.push(p);
   if(nodes.length<2)return null;
   const lengths=nodes.slice(1).map((p,i)=>p.distanceTo(nodes[i])),total=lengths.reduce((a,b)=>a+b,0),weights=lengths.map(n=>Math.max(n,total*1e-6)),sum=weights.reduce((a,b)=>a+b,0),times=[0];
-  weights.forEach(n=>times.push(times.at(-1)+n/sum));times[times.length-1]=1;
+  weights.forEach(n=>times.push(times.at(-1)+n/sum));times[times.length-1]=1;const fixed=normalizeAxisTimes(referenceTimes,nodes.length);if(fixed)times.splice(0,times.length,...fixed);
   const slopes=nodes.map(()=>new THREE.Vector3());
   for(const axis of ['x','y','z']){
     const secants=nodes.slice(1).map((p,i)=>(p[axis]-nodes[i][axis])/(times[i+1]-times[i]));
@@ -33,6 +33,11 @@ export function controlCurveAxis(controls){
     points.push(step===counts[i]?nodes[i+1].clone():nodes[i].clone().multiplyScalar(2*u3-3*u2+1).addScaledVector(nodes[i+1],-2*u3+3*u2).addScaledVector(slopes[i],h*(u3-2*u2+u)).addScaledVector(slopes[i+1],h*(u3-u2)));
     ts.push(step===counts[i]?times[i+1]:times[i]+h*u);
   }
+  // Keep authored stations and untouched curve intervals stable during a local edit.
+  // Recomputing normalized arc length moves unrelated attachment points.
+  if(fixed&&previous&&previousControls?.length===nodes.length){for(let i=0;i<points.length;i++){const t=ts[i];const upper=times.findIndex((v,j)=>j>0&&v>t+1e-12),segment=upper<0?nodes.length-2:upper-1;
+    const unchanged=[segment,segment+1].every(k=>nodes[k].distanceToSquared(previousControls[k])<1e-20);if(unchanged)points[i]=sampleAxis(previous,t);
+  }}
   return withAxisTimes(points,ts,times);
 }
 
@@ -68,7 +73,7 @@ export function evaluateControlCurve(branches,operation,strength=1,overrides={})
   if(!root||root.unitOwner||root.instanceId||root.symmetryGroup||strength<=0)return branches;
   const knots=operation.knots.map((p,i)=>{const v=new THREE.Vector3(...p);return strength<1&&root.controlPoints.length===operation.knots.length?root.controlPoints[i].clone().lerp(v,strength):v;});
   if(root.controlPoints.length===knots.length&&(overrides[root.stableId]?.pinned_points||[]).some(i=>knots[i]&&knots[i].distanceToSquared(root.controlPoints[i])>1e-16))return branches;
-  const points=controlCurveAxis(knots);if(!points)return branches;
+  const points=controlCurveAxis(knots,{times:root.points.axisCuts,previous:root.points,previousControls:root.controlPoints});if(!points)return branches;
   const old={...root},before=axisFrame(root.points,root.phase),after=axisFrame(points,root.phase),motion=t=>after(t).multiply(before(t).invert()),identity=new THREE.Matrix4();
   const at=t=>motion(t).multiply(branchMountAt(old,t)||identity),frames=points.slice(1).map((_,i)=>at((axisTime(points,i)+axisTime(points,i+1))*.5));
   const byId=new Map(branches.map(b=>[b.id,b])),moves=new Map(),visiting=new Set();

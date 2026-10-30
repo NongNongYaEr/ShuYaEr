@@ -57,6 +57,8 @@ function sourceBinding(asset) {
   });
   const result={guides,byId,primitives};if(isImmutableJson(asset))sourceCache.set(asset,result);return result;
 }
+// Stretch is local to each rest station. A longer tip must not stretch the base.
+function localAlong(before,after,index){const a=Math.max(0,index-1),b=Math.min(before.length-1,index+1);let rest=0,posed=0;for(let i=a;i<b;i++){rest+=before[i].distanceTo(before[i+1]);posed+=after[i].distanceTo(after[i+1]);}return Math.max(1e-6,Math.min(1e6,posed/Math.max(1e-12,rest)));}
 function initialRotation(current,rest) {
   if(current.trunkQuaternion)return new T.Quaternion(...current.trunkQuaternion).normalize();
   const explicit=new T.Quaternion().setFromEuler(new T.Euler(...(current.override?.rotation||[0,0,0]).map(T.MathUtils.degToRad))),inherited=branchMountAt(current,0);
@@ -74,7 +76,7 @@ export function createTrunkPose(asset,mount,branches) {
     const points=rest.times.map(t=>axisTimes(current.points)?sampleAxis(current.points,t):pointOnTrunkGuide(posed.points,t).position),posedFrames=frames(points,x);
     const radial0=(current.startRadius??rest.start_radius)/rest.start_radius,radial1=(current.endRadius??rest.end_radius)/rest.end_radius,along=posed.length/rest.length;
     if(![radial0,radial1,along].every(s=>Number.isFinite(s)&&s>1e-6&&s<1e6))fail('缩放超出有效范围');
-    bones.set(rest.id,rest.frames.map((frame,i)=>{let target=posedFrames[i];const inherited=branchMountAt(current,rest.times[i]);if(inherited&&!current.trunkQuaternion){const rotation=new T.Quaternion().setFromRotationMatrix(new T.Matrix4().extractRotation(inherited)).multiply(new T.Quaternion().setFromEuler(new T.Euler(...(current.override?.rotation||[0,0,0]).map(T.MathUtils.degToRad))));target=new T.Matrix4().makeRotationFromQuaternion(rotation).multiply(frame.clone().setPosition(0,0,0)).setPosition(points[i]);}return target.clone().scale(new T.Vector3(T.MathUtils.lerp(radial0,radial1,rest.times[i]),T.MathUtils.lerp(radial0,radial1,rest.times[i]),along)).multiply(frame.clone().invert());}));
+    bones.set(rest.id,rest.frames.map((frame,i)=>{let target=posedFrames[i];const inherited=branchMountAt(current,rest.times[i]);if(inherited&&!current.trunkQuaternion){const rotation=new T.Quaternion().setFromRotationMatrix(new T.Matrix4().extractRotation(inherited)).multiply(new T.Quaternion().setFromEuler(new T.Euler(...(current.override?.rotation||[0,0,0]).map(T.MathUtils.degToRad))));target=new T.Matrix4().makeRotationFromQuaternion(rotation).multiply(frame.clone().setPosition(0,0,0)).setPosition(points[i]);}return target.clone().scale(new T.Vector3(T.MathUtils.lerp(radial0,radial1,rest.times[i]),T.MathUtils.lerp(radial0,radial1,rest.times[i]),localAlong(rest.points,points,i))).multiply(frame.clone().invert());}));
   }
   if(mount.binding==='PRESERVE'){
     const root=source.guides[0],current=byStable.get(mount.guide_map[root.id]),q=initialRotation(current,root),ratio=axis(current.points).length/root.length;

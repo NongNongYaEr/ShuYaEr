@@ -1,13 +1,14 @@
+import {restoreSculptGeometry} from './model-sculpt-patch.js';
 import * as T from './vendor/three.module.min.js';
 import {validateImportedTrunk,validateTrunkGuides,trunkCalibrationMatrix,setTrunkPhysicalLength,pointOnTrunkGuide,closestTrunkGuide} from './imported-trunk-data.js';
-export const trunkEditable=model=>({name:model.name,revision:model.revision,calibration:structuredClone(model.calibration),guides:structuredClone(model.guides),binding:structuredClone(model.binding||{}),thumbnail:model.thumbnail||''});
-export function restoreTrunkEdits(source,edits){const result={...source,...structuredClone(edits)};validateImportedTrunk(result);validateTrunkGuides(result.guides);trunkCalibrationMatrix(result.calibration);return result;}
+export const trunkEditable=model=>({id:model.id,name:model.name,revision:model.revision,calibration:structuredClone(model.calibration),guides:structuredClone(model.guides),binding:structuredClone(model.binding||{}),thumbnail:model.thumbnail||'',...(model.sculpt_parent?{sculpt_parent:structuredClone(model.sculpt_parent)}:{}),physical_size_confirmed:!!model.physical_size_confirmed,...(model.sculpt?{sculpt:structuredClone(model.sculpt),sculptMask:model.sculptMask||''}:{})});
+export function restoreTrunkEdits(source,edits){const result={...source,...structuredClone(edits),primitives:restoreSculptGeometry(source.primitives,edits.sculpt)};validateImportedTrunk(result);validateTrunkGuides(result.guides);trunkCalibrationMatrix(result.calibration);return result;}
 export function recalibrateTrunk(model,next,{anchorRoot=true}={}){
  const before=trunkCalibrationMatrix(model.calibration),after=trunkCalibrationMatrix(next),matrix=after.clone().multiply(before.invert()),ratio=next.scale/model.calibration.scale;
  const guides=model.guides.map(g=>({...g,points:g.points.map(p=>new T.Vector3(...p).applyMatrix4(matrix).toArray()),start_radius:g.start_radius*ratio,end_radius:g.end_radius*ratio}));
  if(anchorRoot)guides[0].points[0]=[0,0,0];validateTrunkGuides(guides);return {...model,calibration:structuredClone(next),guides};
 }
-export function resizeTrunk(model,length){return recalibrateTrunk(model,setTrunkPhysicalLength(model,length));}
+export function resizeTrunk(model,length){return {...recalibrateTrunk(model,setTrunkPhysicalLength(model,length)),physical_size_confirmed:true};}
 export function addTrunkGuide(model,{parent=model.guides[0].id,attach=.65}={}){
  const base=model.guides.find(g=>g.id===parent);if(!base)throw Error('请先选择一条父控制枝');if(model.guides.length>=256)throw Error('最多保留 256 条控制枝');
  const frame=pointOnTrunkGuide(base.points,attach),length=base.points.slice(1).reduce((sum,p,i)=>sum+new T.Vector3(...p).distanceTo(new T.Vector3(...base.points[i])),0)*.3;

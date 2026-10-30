@@ -1,10 +1,10 @@
 [项目首页](../README.md) / [使用文档](README.md) / 构建源码
 
-> 本次公开的是 V030 精简源码。桌面 EXE 的公开下载链接尚待作者补充；本仓库不包含 EXE、DLL 或完整资产库。已有对应单EXE时可按下列步骤准备依赖。
+> 本次公开的是 V040 精简源码。桌面 EXE 的公开下载链接尚待作者补充；本仓库不包含 EXE、DLL 或完整资产库。已有对应单EXE时可按下列步骤准备依赖。
 
-# 树鸭儿 0.3.0 · 精简公开源码
+# 树鸭儿 0.4.0 · 精简公开源码
 
-V030 确定版本，Windows x64。允许免费使用、学习、修改以及用软件制作商业作品；商业分发软件、源码、修改版或原始素材库需作者单独书面授权。本项目采用 **源码可用许可**，不宣称为 OSI 标准开源软件。详见 ../LICENSE.txt、../ASSETS_LICENSE.md 和 ../BRAND_NOTICE.md。
+V040 确定版本，Windows x64。允许免费使用、学习、修改以及用软件制作商业作品；商业分发软件、源码、修改版或原始素材库需作者单独书面授权。本项目采用 **源码可用许可**，不宣称为 OSI 标准开源软件。详见 ../LICENSE.txt、../ASSETS_LICENSE.md 和 ../BRAND_NOTICE.md。
 
 ## 目录
 
@@ -18,7 +18,7 @@ V030 确定版本，Windows x64。允许免费使用、学习、修改以及用�
 
 ## 本地准备与运行
 
-1. 取得与本源码对应的 **0.3.0 精简单文件 EXE**。V030 交付中为相邻 `01_精简EXE` 内唯一的 `树鸭儿.exe`。完整目录形式的运行版也继续兼容。
+1. 取得与本源码对应的 **0.4.0 精简单文件 EXE**。V040 交付中为相邻 `01_精简EXE` 内唯一的 `树鸭儿.exe`。完整目录形式的运行版也继续兼容。
 2. 在源码目录运行：
 
 ```powershell
@@ -31,12 +31,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-desktop.ps1
 3. 开发检查：
 
 ```powershell
-runtime/node.exe --experimental-loader ./tests/vendor-loader.mjs --test tests/unit-preparation.test.mjs tests/keyboard-transform.test.mjs tests/plant-unit-grid.test.mjs tests/unit-authoring.test.mjs
+runtime/node.exe --experimental-loader ./tests/vendor-loader.mjs --test tests/unit-preparation.test.mjs tests/keyboard-transform.test.mjs tests/plant-unit-grid.test.mjs tests/unit-authoring.test.mjs tests/wind-preview.test.mjs
 ```
+
+本次核心检查共 30 项，包含风动姿态、根部固定和完整单元枝整体跟随。
 
 `npm test` 同样运行不依赖完整素材库的核心检查。`npm run test:all` 包含完整素材数量、历史样本及本机桌面条件检查，不作为精简包的一键验收。
 
-单文件 EXE 的 SHA256 固定在 [`portable-runtime.json`](../portable-runtime.json)。本版为 `40a997aeae45966374700ca287dc4e8d721e8eb62103b512263ecd998231812d`；准备脚本拒绝混用其他版本。样本使用 `sample-resources/manifest.json` 与 `volumes/*.bin`，会校验分块、解压内容和最终文件，并拒绝覆盖已有修改。
+单文件 EXE 的 SHA256 固定在 [`portable-runtime.json`](../portable-runtime.json)。本版为 `b4696858377da386eb2bea81b3a79487b1f54a4d0f165d4a8e4ac10068a714be`；准备脚本拒绝混用其他版本。样本使用 `sample-resources/manifest.json` 与 `volumes/*.bin`，会校验分块、解压内容和最终文件，并拒绝覆盖已有修改。
 
 ## 完整重建 DX12
 
