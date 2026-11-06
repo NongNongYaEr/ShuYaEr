@@ -1,0 +1,7 @@
+// Presentation groups only: all material parameters retain their existing meaning.
+export function materialFieldGroups(type,fields){
+ const explicit={moss:{appearance:['mossColor','mossRough'],relief:['mossNormalStrength','mossThicknessMm','mossClumpCm','mossFiberMm','mossPorosity'],ao:['mossAO']},paint:{appearance:['paintColor','paintRough'],relief:['paintBarkNormal','paintNormalStrength'],coverage:['paintCoverage','paintDepthAmount','paintDepthContrast'],peeling:['paintPeel','paintPeelSizeCm','paintPeelEdge','paintPeelDetail','paintPeelChips'],ao:['paintWear','paintAO']}}[type];
+ const titles={scatter:'数量与选点',scatterAdvanced:'高度与复现',appearance:'外观',relief:'凹凸与细节',coverage:'树皮覆盖',peeling:'大片剥落',ao:'遮蔽与细磨损'},groups=new Map();
+ for(const[k,f]of Object.entries(fields)){if(f.group==='legacy'||f.kind==='boolean')continue;let group=f.group==='scatter'?(/burlMinHeight|burlMaxHeight|burlPlacementSeed/.test(k)?'scatterAdvanced':'scatter'):explicit&&Object.entries(explicit).find(([,keys])=>keys.includes(k))?.[0];if(!group)group=/AO$/.test(k)?'ao':/Normal|Height|Grain|BarkKeep|Thickness|Clump|Fiber/.test(k)?'relief':'appearance';if(!groups.has(group))groups.set(group,{id:group,name:titles[group],open:['scatter','appearance','relief','coverage'].includes(group),fields:{}});groups.get(group).fields[k]=f;}
+ return [...groups.values()].sort((a,b)=>Object.keys(titles).indexOf(a.id)-Object.keys(titles).indexOf(b.id));
+}

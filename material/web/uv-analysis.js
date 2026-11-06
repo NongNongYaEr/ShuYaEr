@@ -1,0 +1,25 @@
+// Geometry-backed UV diagnostics, independent of renderer and desktop host.
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+function weighted(values,q){if(!values.length)return null;values.sort((a,b)=>a[0]-b[0]);const total=values.reduce((s,v)=>s+v[1],0);let sum=0;for(const [v,w]of values){sum+=w;if(sum>=total*q)return v;}return values.at(-1)[0];}
+export function analyzeUV(mesh,{resolution=2048,sampleSize=512,actualHeightMeters=10,includeFaces=false}={}){
+  const {pos,uv,indices}=mesh,n=pos.length/3,faces=indices.length/3;
+  if(uv.length!==n*2)throw Error('UV数量不匹配。');sampleSize=Math.max(64,Math.min(1024,Math.trunc(sampleSize)));
+  let minY=Infinity,maxY=-Infinity;for(const i of indices){minY=Math.min(minY,pos[i*3+1]);maxY=Math.max(maxY,pos[i*3+1]);}const height=maxY-minY,metersPerUnit=actualHeightMeters/Math.max(height,1e-12),raster=new Uint16Array(sampleSize*sampleSize),parent=Int32Array.from({length:faces},(_,i)=>i),uvEdges=new Map(),geoEdges=new Map(),density=[],anisotropy=[];
+  function find(i){while(parent[i]!==i){parent[i]=parent[parent[i]];i=parent[i];}return i;}
+  const positionKey=i=>[0,1,2].map(c=>Math.round(pos[i*3+c]/Math.max(height,1e-6)*1e7)).join(','),uvKey=i=>Math.round(uv[i*2]*1e8)+','+Math.round(uv[i*2+1]*1e8),edge=(a,b)=>a<b?a+'|'+b:b+'|'+a;
+  const positionKeys=Array.from({length:n},(_,i)=>positionKey(i)),uvKeys=Array.from({length:n},(_,i)=>uvKey(i));
+  let uvArea=0,surfaceArea=0,degenerate=0,missing=0,flipped=0,outOfRange=0,boundaryLength=0,seamLength=0;
+  for(let f=0;f<faces;f++){
+    const ids=[indices[f*3],indices[f*3+1],indices[f*3+2]],p=ids.map(i=>Array.from(pos.subarray(i*3,i*3+3))),t=ids.map(i=>Array.from(uv.subarray(i*2,i*2+2)));
+    const e=p[1].map((v,c)=>v-p[0][c]),g=p[2].map((v,c)=>v-p[0][c]),area3=Math.hypot(...cross(e,g))*.5,det=(t[1][0]-t[0][0])*(t[2][1]-t[0][1])-(t[1][1]-t[0][1])*(t[2][0]-t[0][0]),area2=Math.abs(det)*.5;
+    if(area3<1e-14)degenerate++;surfaceArea+=area3;uvArea+=area2;if(area2<1e-14)missing++;if(det<0)flipped++;if(t.some(x=>x.some(v=>v<0||v>1)))outOfRange++;
+    if(area3>1e-14&&area2>1e-14){density.push([resolution*Math.sqrt(area2/area3)/metersPerUnit,area3]);const l=Math.hypot(...e),gx=dot(g,e)/l,gy=2*area3/l,a=(t[1][0]-t[0][0])/l,c=(t[1][1]-t[0][1])/l,b=((t[2][0]-t[0][0])-a*gx)/gy,d=((t[2][1]-t[0][1])-c*gx)/gy,trace=a*a+b*b+c*c+d*d,disc=Math.sqrt(Math.max(0,trace*trace-4*(a*d-b*c)**2)),lo=(trace-disc)*.5,hi=(trace+disc)*.5;anisotropy.push([Math.sqrt(hi/Math.max(lo,1e-30)),area3]);}
+    for(let k=0;k<3;k++){const a=ids[k],b=ids[(k+1)%3],uk=edge(positionKeys[a]+'@'+uvKeys[a],positionKeys[b]+'@'+uvKeys[b]),gk=edge(positionKeys[a],positionKeys[b]);if(uvEdges.has(uk)){const other=uvEdges.get(uk);parent[find(f)]=find(other);}else uvEdges.set(uk,f);const length=Math.hypot(...p[k].map((x,c)=>x-p[(k+1)%3][c]));if(!geoEdges.has(gk))geoEdges.set(gk,{faces:[],uv:new Set(),length});const record=geoEdges.get(gk);record.faces.push(f);record.uv.add(edge(uvKeys[a],uvKeys[b]));}
+    if(area2<1e-14)continue;const s=t.map(([u,v])=>[u*sampleSize,v*sampleSize]),signed=det<0?-1:1,minX=Math.max(0,Math.floor(Math.min(...s.map(p=>p[0])))),maxX=Math.min(sampleSize-1,Math.ceil(Math.max(...s.map(p=>p[0])))),minY=Math.max(0,Math.floor(Math.min(...s.map(p=>p[1])))),maxY=Math.min(sampleSize-1,Math.ceil(Math.max(...s.map(p=>p[1]))));
+    for(let y=minY;y<=maxY;y++)for(let x=minX;x<=maxX;x++){let inside=true;for(let k=0;k<3;k++){let a=s[k],b=s[(k+1)%3];if(signed<0)[a,b]=[b,a];const dx=b[0]-a[0],dy=b[1]-a[1],value=dx*(y+.5-a[1])-dy*(x+.5-a[0]),topLeft=dy>0||(dy===0&&dx<0);if(value<0||(value===0&&!topLeft)){inside=false;break;}}if(inside&&raster[y*sampleSize+x]<65535)raster[y*sampleSize+x]++;}
+  }
+  let nonManifoldEdges=0;for(const record of geoEdges.values()){if(record.faces.length===1)boundaryLength+=record.length;if(record.faces.length>2)nonManifoldEdges++;if(record.faces.length>=2&&record.uv.size>1)seamLength+=record.length;}
+  let occupied=0,overlap=0;for(const count of raster){if(count)occupied++;if(count>1)overlap++;}
+  const roots=new Map(),faceIslands=includeFaces?new Int32Array(faces):null;for(let i=0;i<faces;i++){const root=find(i);if(!roots.has(root))roots.set(root,roots.size);if(faceIslands)faceIslands[i]=roots.get(root);}
+  return {triangles:faces,vertices:n,islands:roots.size,...(faceIslands?{faceIslands}:{}),coverage:occupied/raster.length,overlap:overlap/Math.max(occupied,1),sampleSize,summedUvTriangleArea:uvArea,surfaceAreaUnits:surfaceArea,degenerateGeometryFaces:degenerate,zeroUvFaces:missing,mirroredFaces:flipped,outOfRangeFaces:outOfRange,nonManifoldEdges,boundaryLengthMeters:boundaryLength*metersPerUnit,seamLengthMeters:seamLength*metersPerUnit,texelDensity:{units:'px/m',actualHeightMeters,p10:weighted(density.slice(),.1),median:weighted(density.slice(),.5),p90:weighted(density.slice(),.9)},anisotropy:{p50:weighted(anisotropy.slice(),.5),p95:weighted(anisotropy.slice(),.95),note:'singular value ratio; 1 is locally isotropic'},raster};
+}

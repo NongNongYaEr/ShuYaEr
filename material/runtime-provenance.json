@@ -1,0 +1,48 @@
+{
+  "source": "植物软件V040/01_精简EXE/树鸭儿V04.exe",
+  "sourceSHA256": "b4696858377da386eb2bea81b3a79487b1f54a4d0f165d4a8e4ac10068a714be",
+  "version": "0.4.0",
+  "method": "bounded verified resource extraction; no source application executed or modified",
+  "files": [
+    {
+      "path": "Microsoft.Web.WebView2.Core.dll",
+      "bytes": 698208,
+      "sha256": "24b1a6be3a7956e00d0509d4eaebf08e418fc219e964b6c269d2e04439333685"
+    },
+    {
+      "path": "Microsoft.Web.WebView2.WinForms.dll",
+      "bytes": 38752,
+      "sha256": "c6221acfe974e74d2bcc629116301c8cfba9c2041ad5d81187b0036a0b45e278"
+    },
+    {
+      "path": "runtime/NODE-LICENSE.txt",
+      "bytes": 115581,
+      "sha256": "93ac846282ce6c5255e00fada2fd2e7e292255239fe58d5502b0a554859e6a3e"
+    },
+    {
+      "path": "runtime/node.exe",
+      "bytes": 72041112,
+      "sha256": "3aeea08ace2b232f7ae2d05198f8a1dd9d2d9fbe5688f93c0deec53ad37b6bef"
+    },
+    {
+      "path": "runtime/NOTICE.txt",
+      "bytes": 344,
+      "sha256": "c74509caf7777a50fc51ba2c1af57dc8c5ae7153b84c789591d4735f5232dc04"
+    },
+    {
+      "path": "WEBVIEW2-LICENSE.txt",
+      "bytes": 1487,
+      "sha256": "0af8f1b807512aae39c2ac1aa4d0cae65cabecb6fd554b8439a5162a0d6eca55"
+    },
+    {
+      "path": "WEBVIEW2-NOTICE.txt",
+      "bytes": 3894,
+      "sha256": "106423785c5b7eba0a8e61d1837f2132e9c828e20ad530f565d981c1df60dd90"
+    },
+    {
+      "path": "WebView2Loader.dll",
+      "bytes": 164192,
+      "sha256": "239a9d6614a6cfade62b47cdb0be36e3069eedc438c3e0647a9e7b7c84ef6ea0"
+    }
+  ]
+}

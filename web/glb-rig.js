@@ -20,11 +20,24 @@ export function createGlbRig(asset,frame,{maxBones=4096}={}){
  if(!structural.length&&!index.roots.size)throw Error('当前模型没有可用的枝干骨架，请先完成树干整理');
  const root=new T.Bone();root.name='Tree_Root';root.userData={kind:'plant_root'};
  const bones=[root],points=[new T.Vector3()],chains=new Map(),units=new Map(),required=new Map(structural.map(b=>[b.stableId,new Set([0,1,...adaptiveTimes(b)])])),building=new Set();
+ const trunkCache=new Map();
+ function trunk(key){if(trunkCache.has(key))return trunkCache.get(key);const mount=asset.authoring.imported_trunks?.mounts.find(m=>m.id===key),model=asset.authoring.imported_trunks?.assets.find(a=>a.id===mount?.asset_id);if(!mount||!model)throw Error('雕刻树干绑定来源缺失');const pose=createTrunkPose(model,mount,branches),result={mount,source:pose.source};trunkCache.set(key,result);return result;}
  function add(parent,name,point,data){if(bones.length>=Math.min(65535,maxBones))throw Error(`骨骼数量超过 ${maxBones}，请减少装配数量或拆分植物后导出`);const bone=new T.Bone(),position=point.clone().applyMatrix4(frame),parentIndex=bones.indexOf(parent);bone.name=name.replace(/[^A-Za-z0-9_.-]/g,'_').slice(0,110);bone.position.copy(position).sub(points[parentIndex]);bone.userData=data;parent.add(bone);points.push(position);bones.push(bone);return {bone,index:bones.length-1};}
  for(const b of structural){const parent=byRuntime.get(b.parentId);if(parent&&required.has(parent.stableId))required.get(parent.stableId).add(clamp(b.parentT));}
  for(const id of index.roots.values()){const b=index.byBranch.get(id),parent=byRuntime.get(b?.parentId);if(parent&&required.has(parent.stableId))required.get(parent.stableId).add(clamp(b.parentT));}
+ for(const mount of asset.authoring.imported_trunks?.mounts||[]){
+  if(!asset.authoring.imported_trunks.assets.find(model=>model.id===mount.asset_id)?.binding?.weight_repairs)continue;
+  const {source}=trunk(mount.id);
+  for(const p of source.primitives)for(const i of p.overrides?.keys()||[]){
+   const guide=source.guides[p.guideIndices[i]],times=required.get(mount.guide_map[guide.id]),node=p.nodes[i],u=p.factors[i];
+   if(!times)throw Error('权重修复引用的枝干无法导出');
+   if(u<1)times.add(guide.times[node]);
+   if(u>0)times.add(guide.times[node+1]);
+  }
+ }
  function pair(id,t){const chain=chains.get(id);if(!chain)throw Error('骨骼链丢失：'+id);t=clamp(t);let n=0;while(n<chain.length-2&&chain[n+1].t<t-1e-10)n++;const a=chain[n],b=chain[n+1],u=clamp((t-a.t)/Math.max(1e-12,b.t-a.t));return [{index:a.index,weight:1-u},{index:b.index,weight:u}].filter(v=>v.weight>1e-10);}
- function station(id,t){const chain=chains.get(id),point=chain?.find(p=>Math.abs(p.t-t)<1e-8);if(!point)throw Error('挂接骨骼站点丢失：'+id);return point.bone;}
+ function stationRecord(id,t){const chain=chains.get(id),point=chain?.find(p=>Math.abs(p.t-t)<1e-8);if(!point)throw Error('挂接骨骼站点丢失：'+id);return point;}
+ const station=(id,t)=>stationRecord(id,t).bone;
  function chainFor(branch){if(chains.has(branch.stableId))return;if(building.has(branch.stableId))throw Error('枝干层级存在循环，无法建立骨架');building.add(branch.stableId);const parent=byRuntime.get(branch.parentId);if(parent&&byStable.has(parent.stableId))chainFor(parent);
   let parentBone=parent&&chains.has(parent.stableId)?station(parent.stableId,clamp(branch.parentT)):root;const result=[];
   for(const t of [...required.get(branch.stableId)].sort((a,b)=>a-b)){const record=add(parentBone,'Guide_'+String(bones.length).padStart(4,'0')+'_'+branch.stableId,sampleLine(branch.points,t),{kind:'carrier',branch_id:branch.stableId,axis_t:t});result.push({...record,t});parentBone=record.bone;}
@@ -45,9 +58,14 @@ export function createGlbRig(asset,frame,{maxBones=4096}={}){
   while(e&&e.type!=='BRANCH'&&!seen.has(e.index)){seen.add(e.index);e=asset.elements[e.parentIndex];}
   if(!e)return null;const owner=index.ownerOf(e.id),branch=index.byBranch.get(e.id);if(!branch)return null;const result=owner?{unit:owner.id}:{branch:e.id,rigid:origin?.type!=='BRANCH',t:nearestParameter(branch.points,new T.Vector3(...(origin?.pivot||e.pivot)))};elementCache.set(indexValue,result);return result;
  }
- const trunkCache=new Map();function trunk(object){const key=object.userData.trunk_mount_id;if(trunkCache.has(key))return trunkCache.get(key);const mount=asset.authoring.imported_trunks?.mounts.find(m=>m.id===key),model=asset.authoring.imported_trunks?.assets.find(a=>a.id===mount?.asset_id);if(!mount||!model)throw Error('雕刻树干绑定来源缺失');const pose=createTrunkPose(model,mount,branches),result={mount,source:pose.source};trunkCache.set(key,result);return result;}
  function vertex(object,n,localPosition){const data=object.userData;
-  if(data.imported_trunk){const {mount,source}=trunk(object),primitive=source.primitives.find(p=>p.id===data.trunk_primitive_id),sourceIndex=data.trunk_source_vertices?.[n];if(!primitive||sourceIndex===undefined)throw Error('雕刻树干源顶点映射丢失');const guide=source.guides[primitive.guideIndices[sourceIndex]],node=primitive.nodes[sourceIndex],u=primitive.factors[sourceIndex],t=guide.times[node]*(1-u)+guide.times[node+1]*u;return weights(mount.guide_map[guide.id],t);}
+  if(data.imported_trunk){
+   const {mount,source}=trunk(data.trunk_mount_id),primitive=source.primitives.find(p=>p.id===data.trunk_primitive_id),sourceIndex=data.trunk_source_vertices?.[n];
+   if(!primitive||sourceIndex===undefined)throw Error('雕刻树干源顶点映射丢失');
+   const guide=source.guides[primitive.guideIndices[sourceIndex]],node=primitive.nodes[sourceIndex],u=primitive.factors[sourceIndex],id=mount.guide_map[guide.id];
+   if(primitive.overrides?.has(sourceIndex))return [1-u,u].flatMap((weight,side)=>weight>0?[{index:stationRecord(id,guide.times[node+side]).index,weight}]:[]);
+   return weights(id,guide.times[node]*(1-u)+guide.times[node+1]*u);
+  }
   const owned=index.ownerOf(data.stable_id)||index.ownerOf(typeof data.branch_id==='string'?data.branch_id:byRuntime.get(data.branch_id)?.stableId);if(owned)return [{index:unitFor(owned.id).index,weight:1}];
   const uv=object.geometry.getAttribute('uv1'),lookup=asset.lookupTexture;let target=null;if(uv&&lookup){const i=Math.floor(uv.getY(n)*lookup.height)*lookup.width+Math.floor(uv.getX(n)*lookup.width);target=element(i);}
   if(target?.unit)return [{index:unitFor(target.unit).index,weight:1}];

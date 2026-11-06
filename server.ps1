@@ -1,8 +1,11 @@
 ﻿param(
+    [ValidateRange(1, 65535)]
     [int]$Port = 18872,
-    [switch]$NoBrowser
+    [switch]$NoBrowser,
+    [switch]$Desktop
 )
 
+if ($Desktop) { [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false) }
 Add-Type -AssemblyName System.Windows.Forms
 $ErrorActionPreference = "Stop"
 
@@ -215,25 +218,34 @@ $defaultDirectory = if ($config -and $config.output_directory -and (Test-Path -L
 } else { Join-Path $script:AppDir '导出' }
 if (-not (Test-Path -LiteralPath $defaultDirectory)) { New-Item -ItemType Directory -Path $defaultDirectory -Force | Out-Null }
 
-$listener = New-Object Net.HttpListener
-$started = $false
-for ($attempt = 0; $attempt -lt 20 -and -not $started; $attempt++) {
-    $candidatePort = $Port + $attempt
-    $listener.Prefixes.Clear()
+$requestedPort = $Port
+$lastCandidate = [Math]::Min(65535, $requestedPort + 19)
+for ($candidatePort = $requestedPort; $candidatePort -le $lastCandidate; $candidatePort++) {
+    $listener = New-Object Net.HttpListener
     $listener.Prefixes.Add("http://localhost:$candidatePort/")
-    try { $listener.Start(); $Port = $candidatePort; $started = $true } catch { if ($attempt -eq 19) { throw } }
+    try {
+        $listener.Start()
+        $Port = $candidatePort
+        break
+    } catch {
+        $listener.Close()
+        Write-ServerLog ("Cannot bind localhost:{0}: {1}" -f $candidatePort, $_.Exception.Message)
+        if ($candidatePort -eq $lastCandidate) { throw }
+    }
 }
 
 $url = "http://localhost:$Port/"
-Write-ServerLog "BranchForge server started at $url"
-if (-not $NoBrowser) { Start-Process $url }
-
 $running = $true
 try {
+    . (Join-Path $script:AppDir 'scripts/material-handoff-server.ps1')
+    Write-ServerLog "BranchForge server started at $url"
+    if ($Desktop) { [Console]::WriteLine("BRANCHFORGE_READY $Port") }
+    if (-not $NoBrowser) { Start-Process $url }
     while ($running -and $listener.IsListening) {
         $context = $listener.GetContext()
         $path = $context.Request.Url.AbsolutePath
         try {
+            if(Invoke-MaterialHandoffRoute $context $path){continue}
             if ($path -eq '/api/appearance' -and $context.Request.HttpMethod -eq 'GET') {
                 $saved = Test-Path -LiteralPath $script:AppearancePath
                 $appearance = if ($saved) { Confirm-AppearanceSettings (Get-Content -LiteralPath $script:AppearancePath -Raw -Encoding UTF8 | ConvertFrom-Json) }

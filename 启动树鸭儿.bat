@@ -1,6 +1,3 @@
 @echo off
 chcp 65001 >nul
-setlocal
-cd /d "%~dp0"
-start "" "%~dp0树鸭儿.exe"
-endlocal
+start "" /d "%~dp0." "%~dp0树鸭儿V052.exe"

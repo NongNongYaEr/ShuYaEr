@@ -86,6 +86,7 @@ import { SELECTION_TOOLS, TRANSFORM_TOOLS, insidePolygon, descendants } from './
 import { createBranchSelectionController } from './branch-selection-controller.js';
 import { createParameterWorkspace } from './parameter-workspace.js';
 import { createBranchWorkflowUI } from './branch-workflow-ui.js';
+import {createMaterialIntegration} from './material-integration.js';
 import { createWorkspaceNavigation } from './workspace-navigation.js';
 import { prepareTreeAssemblyLayout } from './tree-assembly-layout.js';
 import { createResourceCenter } from './resource-center.js';
@@ -4248,9 +4249,11 @@ async function initialize() {
     transactAuthoring('已保存项目树干素材',draft=>{const data=draft.imported_trunks||{version:1,assets:[],mounts:[]};if(!data.assets.some(a=>a.id===model.id)&&data.assets.length>=16)throw Error('当前项目最多保留 16 款树干素材');draft.imported_trunks={...data,assets:[...data.assets.filter(a=>a.id!==model.id),model]};},{bypassLayers:true});
   }
   const sculptReplacement=createSculptTrunkReplacementPreview({authoring:()=>authoring,async preview(next){if(!packageCaptureAllowed(true)||branchWorkbench.mode!=='TREE')throw Error('请返回整树并结束当前编辑');const document=createProjectDocument(asset,leafSources,structuredClone(authoring));const before=await renderBranchCandidate(document,renderer),after=await renderBranchCandidate({...document,authoring:next},renderer);return {before:before.image,after:after.image};},async apply(proposal){if(!packageCaptureAllowed(true))throw Error('请先结束当前编辑');transactAuthoring('已应用雕刻树干；原素材保留，可撤销',draft=>Object.assign(draft,proposal.authoring),{bypassLayers:true});}});
-  const trunkPreparation=createTrunkPreparation({canReplace:value=>branchWorkbench.mode==='TREE'&&!!value&&sculptReplacementTargets(authoring,value).length>0,replace:value=>sculptReplacement.open(value),native:nativeViewport,toast:showToast,use:useTrunk,saveProject:saveProjectTrunk,async sculpt(value,context){
+  let materialIntegration;
+  const trunkPreparation=createTrunkPreparation({material:async (value,options)=>materialIntegration.send(value,options),canReplace:value=>branchWorkbench.mode==='TREE'&&!!value&&sculptReplacementTargets(authoring,value).length>0,replace:value=>sculptReplacement.open(value),native:nativeViewport,toast:showToast,use:useTrunk,saveProject:saveProjectTrunk,async sculpt(value,context){
     await trunkPreparation.close({resume:false});await modelSculpt.open({model:value,onReturn:()=>trunkPreparation.open({model:value,...context}),onApply:next=>trunkPreparation.open({model:next,...context})});
   }});
+  materialIntegration=createMaterialIntegration({toast:showToast,component:trunkPreparation.materialComponent,prepared:(session,pending)=>trunkPreparation.noteMaterialSession(session,pending),current:()=>({model:trunkPreparation.model,draft:trunkPreparation.draft}),canReceive:async pending=>packageCaptureAllowed(true)&&trunkPreparation.draft?.id===pending.sessionId,receive:async (model,pending)=>{await trunkPreparation.acceptMaterial(model,pending);showToast('材质GLB已保存，继续自动骨架与绑定。');},prepareClose:async()=>{await flushCompleteWorkbench();await trunkPreparation.flush();await modelSculpt.flush();if(projectSession.needsSave()&&!await projectSession.checkpoint(true))return false;return true;}});
   const modelSculpt=createModelSculpt({native:nativeViewport,toast:showToast,saveProject:saveProjectTrunk,continue:value=>trunkPreparation.open({model:value,onReturn:()=>resourceCenter.resume()})});
   async function openModelSculpt(record=null){
     if(!packageCaptureAllowed(true))throw Error('请先完成当前工程调整，再进入模型雕刻');

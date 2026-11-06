@@ -1,9 +1,9 @@
 {
   "product": "树鸭儿",
-  "version": "0.4.0",
+  "version": "0.5.2",
   "channel": "professional",
   "edition": "professional",
-  "entry": "树鸭儿.exe",
+  "entry": "树鸭儿V052.exe",
   "viewport": "DX12",
   "viewport_abi": 1,
   "projectFormatVersion": 4

@@ -1,0 +1,6 @@
+// Reusing several recognition scales avoids retracing rays when switching
+// presets. Keep the derived fields bounded, including adaptive AO patch buffers.
+export const SURFACE_ANALYSIS_CACHE_BYTES=32*1024*1024,SURFACE_ANALYSIS_CACHE_ENTRIES=8;
+export function analysisBytes(value){const seen=new Set(),buffers=new Set();let total=0;function visit(v){if(!v||typeof v!=='object'||seen.has(v))return;seen.add(v);if(ArrayBuffer.isView(v)){if(!buffers.has(v.buffer)){buffers.add(v.buffer);total+=v.buffer.byteLength;}return;}if(v instanceof ArrayBuffer){if(!buffers.has(v)){buffers.add(v);total+=v.byteLength;}return;}if(v instanceof Map){for(const v2 of v.values())visit(v2);}else for(const v2 of Object.values(v))visit(v2);}visit(value);return total;}
+export function cachedSurfaceAnalysis(cache,key){const v=cache.get(key);if(v){cache.delete(key);cache.set(key,v);}return v;}
+export function rememberSurfaceAnalysis(cache,key,value){cache.delete(key);const bytes=analysisBytes(value);if(bytes>SURFACE_ANALYSIS_CACHE_BYTES)return;let retained=[...cache.values()].reduce((n,v)=>n+analysisBytes(v),0);while(cache.size&&(cache.size>=SURFACE_ANALYSIS_CACHE_ENTRIES||retained+bytes>SURFACE_ANALYSIS_CACHE_BYTES)){const old=cache.keys().next().value;retained-=analysisBytes(cache.get(old));cache.delete(old);}cache.set(key,value);}

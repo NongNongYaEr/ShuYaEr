@@ -1,0 +1,4 @@
+import {planGuidedUnwrap,packGuidedUnwrap} from './uv-guides.js';
+let plan=null;
+const arrays=mesh=>['pos','normal','uv','indices','faceGroups','sourceIndices','chartIds','tangent'].filter(k=>mesh?.[k]).map(k=>mesh[k].buffer);
+self.onmessage=({data})=>{try{if(data.operation==='prepare'){plan=planGuidedUnwrap(data.mesh,data.options);self.postMessage({id:data.id,result:{mesh:plan.mesh,protectedFaces:plan.protectedSet.size,partitions:plan.partitionCount}},arrays(plan.mesh));}else if(data.operation==='pack'){if(!plan)throw Error('UV接缝计划已失效。');const result=packGuidedUnwrap(plan,data.nativeResult,{onProgress:progress=>self.postMessage({id:data.id,progress})});plan=null;self.postMessage({id:data.id,result},arrays(result));}else throw Error('未知UV接缝操作。');}catch(e){plan=null;self.postMessage({id:data.id,error:e.message});}};

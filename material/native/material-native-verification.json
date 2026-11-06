@@ -1,0 +1,16 @@
+{
+  "passed": true,
+  "pending": null,
+  "sha256": "af69c4ebefa23ce4c166521a174fd9bbace54e7029ce0b4164e73eb26b4949a2",
+  "verification": ".runtime/sculpt-local-response-v2-test/verification.json",
+  "abi": 1,
+  "slots": 13,
+  "shaderLayoutSHA256": "3c65f13ec9d2bb9ce75cac50f459e9c3ff3ebf39d6c62e2ee0c9392717ef3871",
+  "emissionVerification": ".runtime/material-emission-test/embedded-map-audit.json",
+  "sources": [
+    "native/material/TreeMaterialDX12.cpp",
+    "material/web/renderer.js",
+    "material/web/material-blend-shader.js"
+  ],
+  "packaged": true
+}

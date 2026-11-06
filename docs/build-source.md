@@ -1,54 +1,30 @@
 [项目首页](../README.md) / [使用文档](README.md) / 构建源码
 
-> 本次公开的是 V040 精简源码。桌面 EXE 的公开下载链接尚待作者补充；本仓库不包含 EXE、DLL 或完整资产库。已有对应单EXE时可按下列步骤准备依赖。
+> 对应 V052 精简单文件 EXE 的公开下载地址待补充。已有该 EXE 时可按下列步骤准备。
 
-# 树鸭儿 0.4.0 · 精简公开源码
+# 树鸭儿 0.5.2 · 精简公开源码
 
-V040 确定版本，Windows x64。允许免费使用、学习、修改以及用软件制作商业作品；商业分发软件、源码、修改版或原始素材库需作者单独书面授权。本项目采用 **源码可用许可**，不宣称为 OSI 标准开源软件。详见 ../LICENSE.txt、../ASSETS_LICENSE.md 和 ../BRAND_NOTICE.md。
+完整功能源码与八类用途样本。采用《树鸭儿免费使用与源码公开许可 1.0》，允许内部生产和商业作品创作；商业分发软件、源码、修改版或原始素材库需单独书面授权。见 [软件许可](../LICENSE.txt)、[素材许可](../ASSETS_LICENSE.md)、[品牌说明](../BRAND_NOTICE.md)和[第三方许可](../THIRD_PARTY_NOTICES.md)。本项目是源码可用许可。
 
-## 目录
+## 准备与重建
 
-- `web/`：当前网页 UI、编辑逻辑、模型算法及前端运行代码。
-- `native/`：C# 桌面壳、C++ DX12 模块、着色器和几何内核源码。
-- `scripts/`：本地服务、导出、构建与分发工具。
-- `tests/`：开发检查与桌面交互验收。
-- `sample-resources/`：去重压缩的样本分卷及校验清单，准备时按块还原并校验原文件。
-
-精简样本覆盖乔木、灌木、观叶、常春藤、花藤、草叶、大叶草本和花卉；实际依赖与数量见资产清单。没有完整素材库、EXE、DLL、旧发布包、缓存或个人恢复草稿。
-
-## 本地准备与运行
-
-1. 取得与本源码对应的 **0.4.0 精简单文件 EXE**。V040 交付中为相邻 `01_精简EXE` 内唯一的 `树鸭儿.exe`。完整目录形式的运行版也继续兼容。
-2. 在源码目录运行：
+取得对应 V052 精简单文件 EXE，在本目录执行：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-source-runtime.ps1 -RuntimeSource "..\01_精简EXE"
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-desktop.ps1
 ```
 
-准备脚本先按 `portable-runtime.json` 验证单文件 EXE 的 SHA256，然后以隐藏的仅准备模式读取其内置运行资源，复制 Node / WebView2 / 已验证 DX12 运行库，并按清单还原源码样本。之后双击源码目录中生成的 `树鸭儿.exe`。GitHub 单独下载源码时，先取得对应的单文件 EXE 并传入其路径即可，不依赖原开发磁盘。
+准备脚本先检查 portable-runtime.json 固定的 EXE 哈希，再以隐藏的仅准备模式提取 Node、WebView2、植物和材质两套已验证的 DX12 依赖，并按样本清单还原压缩资源。之后双击生成的“树鸭儿V052.exe”。无需原开发磁盘或开发者缓存。
 
-3. 开发检查：
-
-```powershell
-runtime/node.exe --experimental-loader ./tests/vendor-loader.mjs --test tests/unit-preparation.test.mjs tests/keyboard-transform.test.mjs tests/plant-unit-grid.test.mjs tests/unit-authoring.test.mjs tests/wind-preview.test.mjs
-```
-
-本次核心检查共 30 项，包含风动姿态、根部固定和完整单元枝整体跟随。
-
-`npm test` 同样运行不依赖完整素材库的核心检查。`npm run test:all` 包含完整素材数量、历史样本及本机桌面条件检查，不作为精简包的一键验收。
-
-单文件 EXE 的 SHA256 固定在 [`portable-runtime.json`](../portable-runtime.json)。本版为 `b4696858377da386eb2bea81b3a79487b1f54a4d0f165d4a8e4ac10068a714be`；准备脚本拒绝混用其他版本。样本使用 `sample-resources/manifest.json` 与 `volumes/*.bin`，会校验分块、解压内容和最终文件，并拒绝覆盖已有修改。
-
-## 完整重建 DX12
-
-安装 Visual Studio C++ x64 构建工具和 Windows SDK；Windows 自带 .NET Framework C# 编译器用于桌面壳。运行：
+`web/` 与 `native/` 是植物工作台；`material/web/`、`material/core/`、`material/native/` 是嵌入式材质工作台；`scripts/` 包含构建及服务。样本在 `sample-resources/` 按内容块去重压缩，保留校验清单。公开目录不含 EXE、DLL、CSO、私人工程、恢复资料或完整植物库。
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-native-sdk.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-native-viewport.ps1
+runtime/node.exe --experimental-loader ./tests/vendor-loader.mjs --test tests/unit-preparation.test.mjs tests/keyboard-transform.test.mjs tests/plant-unit-grid.test.mjs tests/unit-authoring.test.mjs tests/sculpt-material-response.test.mjs tests/sculpt-distribution-templates.test.mjs tests/local-endgrain.test.mjs
 ```
 
-SDK 版本和下载哈希固定在准备脚本中，生成目录为 `.runtime/native-editor`；用 `scripts/package-professional-desktop.ps1 -BuiltDirectory .runtime/native-editor` 发布到本源码目录。更新前保存并退出本目录中的软件，发布脚本会保护运行中的编辑器。
+源码自带构建记录、第三方许可和原生模块源码。普通 C# 桌面重建复用经过校验的 DX12 运行库；修改原生渲染后需按构建脚本安装 Visual Studio C++、Windows SDK 和着色器翻译工具，再重建对应模块。`test:all` 包含全资产、历史夹具和桌面环境测试，不等于精简包的一键验收。
 
-更改 UI 和 JS 可直接重开软件；更改原生渲染需重建模块。第三方许可见 ../THIRD_PARTY_NOTICES.md。生成的运行依赖、解压资源和缓存已列入 `.gitignore`，不应重新提交到公开仓库。
+材质资源包含设计/推导 PBR，来源和实际尺寸随资源登记。48 方向、60 叠加和 18 组合的功能验收与逐套展示级美术审核分开。
+
+当前 EXE 的 SHA256 见 [portable-runtime.json](../portable-runtime.json)。GitHub 源码单独下载时，将 `-RuntimeSource` 指向作者提供的同版 EXE 即可。

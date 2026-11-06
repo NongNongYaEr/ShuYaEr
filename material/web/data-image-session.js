@@ -1,0 +1,5 @@
+import {dataImage} from './png-data.js';
+export function decodeDataImage(bytes,channel,{signal,onProgress=()=>{},workerFactory=()=>new Worker('./data-image-worker.js',{type:'module'})}={}){
+ if(signal?.aborted)return Promise.reject(Object.assign(Error('数据图解码已取消。'),{name:'AbortError'}));const worker=workerFactory();
+ return new Promise((resolve,reject)=>{let ended=false;const cancel=()=>finish(Object.assign(Error('数据图解码已取消。'),{name:'AbortError'})),finish=(error,value)=>{if(ended)return;ended=true;signal?.removeEventListener('abort',cancel);worker.terminate();error?reject(error):resolve(value);};signal?.addEventListener('abort',cancel,{once:true});worker.onmessage=({data})=>{if(ended)return;if(data.error)finish(Error(data.error));else if(data.done)finish(null,dataImage(data.result));else onProgress(data.progress);};worker.onerror=e=>finish(Error(e.message||'数据图解码失败。'));if(signal?.aborted){cancel();return;}const copy=Uint8Array.from(bytes);worker.postMessage({bytes:copy,channel},[copy.buffer]);});
+}

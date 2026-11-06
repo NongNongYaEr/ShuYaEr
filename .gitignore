@@ -9,7 +9,6 @@ web/assets/
 !web/assets/.gitkeep
 runtime/native/*.json
 runtime/native/*.hlsl
-
 # Local credentials and developer output
 .env
 .env.*
@@ -21,3 +20,8 @@ runtime/native/*.hlsl
 恢复资料/
 *.blend
 *.binlog
+*.cso
+material/projects/
+material/exports/
+material/runtime/
+material/web/assets/

@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import * as T from 'three';
 import {buildBranchAsset,disposeBranchAsset,normalizeSettings,createProjectDocument} from '../web/branch-kernel.js';
 import {normalizeAuthoring} from '../web/authoring-state.js';
@@ -9,6 +11,9 @@ import {modelOutputPath,bindGlbTextures} from '../web/glb-export.js';
 import {importedTrunkFixture} from './imported-trunk-fixture.mjs';
 import {readImportedTrunkGlb} from '../web/imported-trunk-glb.js';
 import {prepareImportedTrunk,importedTrunkShape} from '../web/imported-trunk-runtime.js';
+import {trunkSourceBinding} from '../web/imported-trunk-binding.js';
+import {FIXED_TRUNK_ROOT,withTrunkWeightEdits} from '../web/trunk-weight-data.js';
+import {createImportedTrunkSkinExporter} from '../scripts/imported-trunk-skin.mjs';
 const assets=[];test.afterEach(()=>assets.splice(0).forEach(disposeBranchAsset));
 const settings=normalizeSettings({leaf_density:0,max_leaves:0,child_count:0,buds_enabled:false,fruit_enabled:false,junction_collar:false,max_triangles:8e6});
 const wood={id:'WOOD',parent:'',points:[[0,0,0],[.3,0,.1],[.7,0,0]],length:.7,start_radius:.03,end_radius:.01};
@@ -27,6 +32,34 @@ test('complete unit wood and leaf/fruit vertices share one rigid unit bone and n
 });
 test('sculpted trunk source vertices bind through their original guide mapping and retain their current deformed pose',async()=>{
  const bytes=await importedTrunkFixture(),model=await readImportedTrunkGlb(bytes,{name:'rig fixture'});prepareImportedTrunk(model);const {shape,mount}=importedTrunkShape(model);mount.binding='FLEX';shape.branches[0].points=shape.branches[0].points.map(p=>[p[0]+.15*p[2]*p[2],p[1],p[2]]);shape.branches[0].knots=shape.branches[0].points;const asset=fixture({branch_shape:shape,imported_trunks:{version:1,assets:[model],mounts:[mount]}}),before=JSON.stringify(asset.authoring.imported_trunks),r=createSkinnedGlbScene(asset);try{assert(poseError(r,asset)<5e-6);assert.equal(JSON.stringify(asset.authoring.imported_trunks),before);assert(r.mesh.geometry.attributes.skinWeight.array.some(v=>v>0&&v<1));const b=r.rig.chains.get(Object.values(mount.guide_map)[0])[1].bone;b.rotation.z=.2;r.scene.updateMatrixWorld(true);r.skeleton.update();assert(r.mesh.geometry.attributes.position.count>50);}finally{r.dispose();}
+});
+test('repaired trunk vertices export the same station influences in GLB and the PVE weight file',async t=>{
+ const original=prepareImportedTrunk(await readImportedTrunkGlb(await importedTrunkFixture())),root=original.guides[0];
+ const height=root.points[1][2];root.points.splice(1,0,[0,0,height*.33],[0,0,height*.62]);
+ original.guides.push({id:'G1',parent:root.id,attach:.33,points:[[0,0,height*.33],[.6,0,height*.5],[1.2,0,height*.6]],start_radius:.1,end_radius:.05});
+ const {id,geometry}=original.primitives[0],vertices=[...new Set(geometry.index)].slice(0,2);
+ const {model}=withTrunkWeightEdits(original,new Map([[id,new Map([[vertices[0],FIXED_TRUNK_ROOT],[vertices[1],'G1']])]]));
+ const {shape,mount}=importedTrunkShape(model);mount.binding='FLEX';
+ const asset=fixture({branch_shape:shape,imported_trunks:{version:1,assets:[model],mounts:[mount]}}),r=createSkinnedGlbScene(asset);
+ t.after(()=>r.dispose());
+ let mesh;asset.group.traverse(o=>{if(o.userData.trunk_primitive_id===id)mesh=o;});
+ const source=trunkSourceBinding(model),primitive=source.primitives.find(p=>p.id===id),indices=vertices.map(v=>mesh.userData.trunk_source_vertices.indexOf(v));
+ const folder=fs.mkdtempSync(path.join(os.tmpdir(),'trunk-repaired-skin-')),file=path.join(folder,'whole.trunk-skin.bin');
+ t.after(()=>{if(fs.existsSync(file))fs.unlinkSync(file);fs.rmdirSync(folder);});
+ const exporter=createImportedTrunkSkinExporter(folder,asset);exporter.add(mesh,indices,0);
+ const pve=exporter.finish(),bytes=fs.readFileSync(file);assert.equal(bytes.subarray(0,8).toString(),'BFTS0001');
+ for(const [row,v] of vertices.entries()){
+  const guide=source.guides[primitive.guideIndices[v]],node=primitive.nodes[v],u=primitive.factors[v];
+  const expected=[1-u,u].flatMap((weight,side)=>weight>0?[[guide.times[node+side],weight]]:[]);
+  const glb=r.rig.vertex(mesh,indices[row]).map(({index,weight})=>{
+   const bone=r.rig.bones[index];assert.equal(bone.userData.branch_id,mount.guide_map[guide.id]);return [bone.userData.axis_t,weight];
+  });
+  assert.deepEqual(glb,expected);
+  for(const side of [0,1]){
+   const station=pve.nodes[bytes.readUInt32LE(8+row*12+side*4)];assert.equal(station.guide_id,guide.id);assert.equal(station.node,node+side);
+  }
+  assert(Math.abs(bytes.readFloatLE(16+row*12)-u)<1e-7);
+ }
 });
 test('joint budget fails explicitly without changing the export asset; persisted GLB mode keeps the format canonical',()=>{
  const asset=fixture(),before=JSON.stringify(asset.authoring);assert.throws(()=>createSkinnedGlbScene(asset,{maxBones:2}),/骨骼数量/);assert.equal(JSON.stringify(asset.authoring),before);assert.equal(normalizeSettings({export_format:'GLB',export_rigged:true}).export_rigged,true);assert.equal(normalizeSettings({export_format:'FBX',export_rigged:true}).export_rigged,false);assert.equal(modelOutputPath('tree.fbx','GLB_SKINNED'),'tree.glb');

@@ -1,0 +1,4 @@
+export function createClearanceSession(mesh,{onProgress=()=>{},workerFactory=()=>new Worker('./uv-clearance-worker.js',{type:'module'})}={}){
+ const worker=workerFactory();let settled=false,rejectPending;const dispose=()=>{if(settled)return;settled=true;worker.terminate();rejectPending(Object.assign(Error('UV间距计算已取消。'),{name:'AbortError'}));};
+ const promise=new Promise((resolve,reject)=>{rejectPending=reject;worker.onmessage=({data})=>{if(settled||data.id!==1)return;if(data.progress){onProgress(data.progress);return;}settled=true;worker.terminate();if(data.error)reject(Error(data.error));else resolve(data.report);};worker.onerror=error=>{if(settled)return;settled=true;worker.terminate();reject(Error(error.message||'UV间距计算失败。'));};try{worker.postMessage({id:1,mesh:{pos:mesh.pos,uv:mesh.uv,indices:mesh.indices}});}catch(error){settled=true;worker.terminate();reject(error);}});return{promise,dispose};
+}

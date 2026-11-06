@@ -6,7 +6,7 @@
 安装
 1. 保存并退出目标 UE 工程。
 2. 解压整个包。PowerShell 中执行：
-   & './install-ue-workbench.ps1' -ProjectFile 'Z:/UEproject/Day30Man/Day30Man.uproject' -EngineRoot 'Z:/UEEngine/UE_5.8'
+   & './install-ue-workbench.ps1' -ProjectFile 'C:/Projects/MyProject/MyProject.uproject' -EngineRoot 'C:/Program Files/Epic Games/UE_5.8'
 3. 重开 UE，从「工具 → BranchForge PVE 工作台」进入，标题显示 0.2.65。
    安装会校验文件与引擎版本，备份原文件。原有 init_unreal.py 入口、其他工作台与内容资产保留；缺少入口时才追加注册。
    只检查不安装：在命令末尾添加 -VerifyOnly。

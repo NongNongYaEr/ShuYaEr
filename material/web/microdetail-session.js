@@ -1,0 +1,3 @@
+export function runMicrodetailWorker(options,{setCancel=()=>{},onProgress=()=>{},workerFactory=()=>new Worker(new URL('./microdetail-worker.js',import.meta.url),{type:'module'})}={}){
+ const worker=workerFactory();return new Promise((resolve,reject)=>{let settled=false;const finish=(error,result)=>{if(settled)return;settled=true;worker.terminate();error?reject(error):resolve(result);};worker.onmessage=({data})=>{if(settled)return;if(data.error)finish(Error(data.error));else if(data.done)finish(null,data.result);else onProgress(data.progress);};worker.onerror=error=>finish(Error(error.message||'近景细节线程失败。'));try{setCancel(()=>finish(Object.assign(Error('近景细节生成已取消。'),{name:'AbortError'})));if(!settled)worker.postMessage({options});}catch(error){finish(error);}});
+}

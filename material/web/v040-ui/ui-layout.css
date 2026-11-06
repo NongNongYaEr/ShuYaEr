@@ -1,0 +1,90 @@
+/* Shared alignment rules, after the workspace-specific presentation. */
+.topbar { --toolbar-height:36px; }
+.topbar .top-actions { gap:8px; }
+.topbar :is(.icon-text,.file-button) {
+  height:var(--toolbar-height); min-height:var(--toolbar-height);
+  margin:0; line-height:1; flex-shrink:0;
+}
+.topbar :is(button,.file-button) svg { width:16px; height:16px; flex-shrink:0; }
+.project-save-group,.project-history-group { display:flex; align-items:center; flex-shrink:0; }
+.project-save-group { gap:0; background:var(--surface-2); border:1px solid var(--line); border-radius:7px; }
+.topbar .project-save-group #saveProjectBtn {
+  height:calc(var(--toolbar-height) - 2px); min-height:0; border:0;
+  border-radius:6px 0 0 6px; background:transparent;
+}
+.topbar .project-save-group #saveProjectBtn:hover { background:var(--surface-3); }
+.topbar #projectSaveState {
+  display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  min-width:66px; max-width:none; height:20px; padding:0 9px;
+  border-left:1px solid var(--line); font-size:11px; line-height:1;
+  color:var(--muted); overflow:visible;
+}
+.topbar #projectSaveState[data-dirty=true] { color:var(--accent-text); }
+.project-history-group { gap:4px; padding-left:10px; margin-left:2px; border-left:1px solid var(--line); }
+.project-history-group button {
+  display:grid; place-items:center; width:var(--toolbar-height); height:var(--toolbar-height);
+  padding:0; border-color:transparent; background:transparent;
+}
+.project-history-group button:hover:not(:disabled) { background:var(--surface-2); border-color:var(--line); }
+.topbar .brand-copy { gap:3px; }
+.topbar .brand-copy strong { line-height:1.15; }
+.topbar .brand-copy small { line-height:1.4; }
+#currentProject { flex:1 1 240px; min-width:80px; max-width:440px; padding:6px 12px; display:grid; gap:4px; text-align:left; border-color:transparent; background:transparent; }
+#currentProject:hover { background:var(--surface-2); border-color:var(--line); }
+#currentProjectName { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; line-height:1.4; color:var(--text); }
+#currentProjectMeta { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10px; line-height:1.4; color:var(--muted); }
+#currentProjectDialog { width:min(600px,92vw); max-height:85vh; padding:22px; border:1px solid var(--line); border-radius:12px; background:var(--surface); color:var(--text); }
+#currentProjectDialog::backdrop { background:#0009; }
+#currentProjectDialog header { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+#currentProjectDialog h2 { margin:0; font-size:20px; }
+#currentProjectDialog button { padding:8px 12px; }
+#currentProjectDialog dl { display:grid; grid-template-columns:80px minmax(0,1fr); gap:14px; margin:24px 0; font-size:12px; line-height:1.7; }
+#currentProjectDialog dt,#currentProjectDialog p { color:var(--muted); }
+#currentProjectDialog dd { margin:0; overflow-wrap:anywhere; user-select:text; }
+#currentProjectDialog p { font-size:11px; line-height:1.7; margin:0; }
+.branch-workspace-bar :is(button,label) { margin-block:0; }
+.branch-workspace-bar>button { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:30px; }
+.branch-workspace-modes button { display:inline-flex; align-items:center; justify-content:center; gap:6px; }
+.viewport-area:not(.multiview) .viewport-badge { top:66px; right:82px; align-items:center; min-height:27px; }
+.viewport-area:not(.multiview) .multiview-switch { top:66px; }
+@container(max-width:850px) {
+  .viewport-area:not(.multiview) :is(.viewport-badge,.multiview-switch) { top:114px; }
+}
+
+/* Equal columns remain contained when labels wrap in a narrow panel. */
+:is(.parameter-panel,.inspector-panel) .field-grid:not(.parameter-sample) { grid-template-columns:repeat(2,minmax(0,1fr)); }
+:is(.parameter-panel,.inspector-panel) :is(.field-grid,.generator-pair)>label { min-width:0; }
+:is(.parameter-panel,.inspector-panel) .parameter-number { min-width:0; }
+.parameter-number input { align-self:center; height:100%; }
+.parameter-reset { height:100%; align-self:stretch; }
+.generator-toolbar label { margin:0; }
+.generator-toolbar input[type=checkbox] { margin:0; }
+.outliner-finder { align-items:center; }
+.outliner-finder button { height:29px; flex-shrink:0; }
+
+/* Share caption/input/slider rows, including when only one caption wraps. */
+@supports(grid-template-rows:subgrid) {
+  :is(.parameter-panel,.inspector-panel) .field-grid:not(.parameter-sample):has(>label>.parameter-slider),
+  .generator-pair:has(>.generator-field>input[type=range]) { row-gap:8px; }
+  :is(.parameter-panel,.inspector-panel) .field-grid:not(.parameter-sample)>label:has(>.parameter-scrub):has(>.parameter-slider),
+  .generator-pair>.generator-field:has(>input[type=range]) {
+    display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:subgrid;
+    grid-row:span 3; align-items:start; margin:0 0 12px; row-gap:6px;
+  }
+  :is(.parameter-panel,.inspector-panel) .field-grid:not(.parameter-sample)>label>.parameter-scrub { padding:0; align-self:end; }
+  :is(.parameter-panel,.inspector-panel) .field-grid:not(.parameter-sample)>label>input.parameter-slider,
+  .generator-pair>.generator-field>input[type=range] { margin:0; height:16px; align-self:center; }
+}
+@media(min-width:761px) and (max-width:1280px) {
+  #currentProject { padding-inline:6px; min-width:80px; }
+  .topbar .top-actions { gap:5px; }
+  .project-history-group { padding-left:6px; margin-left:0; gap:2px; }
+  .topbar #projectSaveState { min-width:60px; padding-inline:6px; font-size:10px; }
+}
+@media(max-width:760px) {
+  .topbar { flex-wrap:wrap; }
+  #currentProject { order:3; flex-basis:100%; max-width:none; }
+  .topbar .project-actions { flex-wrap:wrap; }
+  .topbar .project-save-group #saveProjectBtn { width:auto; }
+  .project-history-group { padding-left:6px; }
+}

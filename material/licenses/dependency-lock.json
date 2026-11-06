@@ -1,0 +1,38 @@
+[
+  {
+    "repository": "jpcy/xatlas",
+    "revision": "f700c7790aaa030e794b52ba7791a05c085faf0c",
+    "files": [
+      {
+        "path": "xatlas.h",
+        "sha256": "e7675335ad8ab1c1cc9060ad153cf6b8ba2ee914282044eb5f02c49590218fbd"
+      },
+      {
+        "path": "xatlas.cpp",
+        "sha256": "0ed0283aad005c94738cb0cc4612dba264379d29dea5b3c9b242f2d4752d5df4"
+      },
+      {
+        "path": "LICENSE",
+        "sha256": "2c16d5b1c2808277fe975b4f70f0fd9afc9b3bcf04e6c676665a82cb2d5579e3"
+      }
+    ]
+  },
+  {
+    "repository": "mmikk/MikkTSpace",
+    "revision": "3e895b49d05ea07e4c2133156cfa94369e19e409",
+    "files": [
+      {
+        "path": "mikktspace.h",
+        "sha256": "17fc433894f24c73753d548086cc4d8c5c0379f4a6edfb98b5da243e4f0bc3d0"
+      },
+      {
+        "path": "mikktspace.c",
+        "sha256": "de87e74107df766ce68108801262bd8d53899414236b59810509a8fc2a51e288"
+      },
+      {
+        "path": "README.md",
+        "sha256": "295d4e37ac1980e1f811c340f618ffa68fc10bf906b34bc93a64c6960351bdfc"
+      }
+    ]
+  }
+]

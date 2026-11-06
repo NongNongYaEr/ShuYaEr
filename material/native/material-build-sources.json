@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "reason": "Recover matching material renderer sources/build chain for authorized V050 shader extensions. Archive unchanged; no user projects copied.",
+  "baselineShadersVerifiedAgainstCurrentRuntime": true,
+  "files": [
+    {
+      "source": "TreeMaterialLab/native/render/TreeMaterialDX12.cpp",
+      "target": "native/material/TreeMaterialDX12.cpp",
+      "sha256": "b846746994ff604921156790f463baa9054158ec2f8f1e775f5c1f41b22ee73d"
+    },
+    {
+      "source": "TreeMaterialLab/native/render/NativeMaterialVerify.cpp",
+      "target": "native/material/NativeMaterialVerify.cpp",
+      "sha256": "07dd4d1b6f572c3d73362d35d8798811dfa7fa159f23ff0428c6d622dcd549ef"
+    },
+    {
+      "source": "TreeMaterialLab/scripts/native-toolchain.ps1",
+      "target": "scripts/material-native-toolchain.ps1",
+      "sha256": "94a3c1a759ab2d878680f788d3fa8f698f4b9359024df60de5da3356e564b576"
+    },
+    {
+      "source": "TreeMaterialLab/.runtime/tools/glslang/glslang.exe",
+      "target": ".runtime\\tools\\glslang\\glslang.exe",
+      "sha256": "9643709c02c83e26773f96b6a87f197ab2e84f78be0879ad8fb3619418b5d9ad"
+    },
+    {
+      "source": "TreeMaterialLab/.runtime/tools/spirv-cross/spirv-cross.exe",
+      "target": ".runtime\\tools\\spirv-cross\\spirv-cross.exe",
+      "sha256": "a2b99399a368df9f5c4c94398a0b3d27855db1289a4a48c5b858b8e06b0c7b0a"
+    }
+  ]
+}

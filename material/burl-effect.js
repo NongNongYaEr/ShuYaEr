@@ -1,0 +1,10 @@
+import{validateDecalStyle,SURFACE_DECAL_STYLES}from'./surface-decal-styles.js';
+import{BURL_SCATTER_DEFAULTS,validateBurlScatter}from'./burl-rules.js';
+const n=(label,min,max,step,value,unit='',group='material')=>({kind:'number',label,min,max,step,value,unit,group});
+export const BURL_PREFERENCES=['smart','stem','junction','uniform'];
+export const BURL_EFFECT_TYPE={name:'表面贴花散布',layerKind:'detail',channels:['color','roughness','height','ao'],fields:{
+ burlStyle:n('表面样式',0,SURFACE_DECAL_STYLES.length-1,1,0,'','scatter'),burlCount:n('贴花数量',0,8,1,4,'个','scatter'),burlMinSizeCm:n('最小直径',2,150,1,24,'cm','scatter'),burlMaxSizeCm:n('最大直径',2,150,1,48,'cm','scatter'),burlSpacing:n('最小间距倍率',1,4,.05,1.25,'','scatter'),burlMinHeightMeters:n('最低位置',0,200,.05,.35,'m','scatter'),burlMaxHeightMeters:n('最高位置',0,200,.05,20,'m','scatter'),burlPlacementSeed:n('位置随机种子',0,10000,1,17,'','scatter'),burlPreference:n('选点模式',0,3,1,0,'','scatter'),
+ surfaceColor:{kind:'color',label:'材质色调',value:'#745a40',group:'material'},surfaceAmount:n('材质覆盖强度',0,1,.01,1),surfaceRoughness:n('粗糙度',.05,1,.01,.9),surfaceNormalStrength:n('自身法线',0,4,.05,1),surfaceHeightMm:n('表面起伏',0,20,.1,16,'mm'),surfaceGrainCm:n('程序回退颗粒尺寸',.1,10,.05,.8,'cm','legacy'),surfaceVariation:n('程序回退色差',0,1,.01,.45,'','legacy'),surfaceAO:n('自身遮蔽',0,1,.05,.4),surfaceBarkKeep:n('保留原树皮凹凸',0,1,.05,.45),burlRings:n('瘤纹密度',4,48,1,18),burlWarp:n('形状变化',0,1,.01,.55)
+}};
+export function burlSettings(params){validateDecalStyle(params.burlStyle??0);if(!Number.isInteger(params.burlPreference)||params.burlPreference<0||params.burlPreference>3)throw Error('树瘤选点模式无效。');return validateBurlScatter({...BURL_SCATTER_DEFAULTS,count:params.burlCount,minSizeCm:params.burlMinSizeCm,maxSizeCm:params.burlMaxSizeCm,spacing:params.burlSpacing,minHeightMeters:params.burlMinHeightMeters,maxHeightMeters:params.burlMaxHeightMeters,seed:params.burlPlacementSeed,preference:BURL_PREFERENCES[params.burlPreference]});}
+export const burlDistributionKey=e=>e.type==='burl'?{...burlSettings(e.params),manual:e.manualDecal||null}:null;

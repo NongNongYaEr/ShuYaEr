@@ -1,5 +1,13 @@
 ﻿param([string]$OutputPath)
 $ErrorActionPreference='Stop'
+$integrationBuild=Join-Path $PSScriptRoot 'build-v050.ps1'
+if(Test-Path -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) 'native/V050Integration.cs')){
+ if($OutputPath){ & $integrationBuild -OutputName ([IO.Path]::GetFileName($OutputPath)) }
+ else{ & $integrationBuild }
+ if($LASTEXITCODE -and $LASTEXITCODE -ne 0){throw 'Integrated desktop build failed'}
+ return
+}
+
 $root=Split-Path -Parent $PSScriptRoot
 $csc=Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if(-not $OutputPath){$OutputPath=Join-Path $root "树鸭儿.exe"}

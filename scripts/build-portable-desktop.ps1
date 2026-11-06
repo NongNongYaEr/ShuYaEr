@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$AppDirectory,[Parameter(Mandatory=$true)][string]$OutputPath,[string]$BuildDirectory,[string]$Flavor='lite')
+﻿param([Parameter(Mandatory=$true)][string]$AppDirectory,[Parameter(Mandatory=$true)][string]$OutputPath,[string]$BuildDirectory,[string]$Flavor='lite',[string]$DisplayName)
 $ErrorActionPreference='Stop'
 $projectRoot=Split-Path -Parent $PSScriptRoot
 $AppDirectory=(Resolve-Path -LiteralPath $AppDirectory).Path
@@ -17,7 +17,11 @@ $pack=Join-Path $BuildDirectory 'resources.pack'
 & $node (Join-Path $PSScriptRoot 'pack-release-resources.mjs') $AppDirectory (Join-Path $BuildDirectory 'input-manifest.json') $pack
 if($LASTEXITCODE -ne 0){throw 'Portable resource packing failed'}
 $portableVersion=(Get-Content -LiteralPath (Join-Path $AppDirectory 'release-config.json') -Raw -Encoding UTF8|ConvertFrom-Json).version
-& $node $helper config $AppDirectory $BuildDirectory ('树鸭儿 '+$portableVersion+' 精简单文件版') $Flavor
+if(-not $DisplayName){
+ $editionLabel=if($Flavor -match '(^|-)full($|-)'){'全资产单文件版'}else{'精简单文件版'}
+ $DisplayName='树鸭儿 '+$portableVersion+' '+$editionLabel
+}
+& $node $helper config $AppDirectory $BuildDirectory $DisplayName $Flavor
 if($LASTEXITCODE -ne 0){throw 'Portable configuration failed'}
 $csc=Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
 & $csc /nologo /target:winexe /platform:x64 ('/out:'+(Join-Path $BuildDirectory 'launcher.exe')) ('/win32icon:'+(Join-Path $projectRoot 'web/brand/tree-duck-v5.ico')) /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Web.Extensions.dll /reference:System.IO.Compression.dll /reference:System.IO.Compression.FileSystem.dll (Join-Path $projectRoot 'native/PortableDesktopLauncher.cs') (Join-Path $projectRoot 'native/PackedResourceReader.cs') (Join-Path $BuildDirectory 'PackageConfig.cs')

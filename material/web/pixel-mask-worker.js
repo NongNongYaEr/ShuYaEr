@@ -1,0 +1,3 @@
+import {buildBrushTopology,PixelMaskRasterizer} from './pixel-masks.js';
+let topology,working,rasterizer;
+self.onmessage=({data})=>{try{if(data.source){topology=buildBrushTopology(data.source);working=data.working;rasterizer=null;}if(!topology||!working)throw Error('像素遮罩未载入模型。');if(!rasterizer||rasterizer.size!==data.size||rasterizer.padding!==data.padding)rasterizer=new PixelMaskRasterizer(topology,working,data.size,{padding:data.padding});const result=rasterizer.render(data.regions,data.actualHeightMeters,data.parts);self.postMessage({id:data.id,...result},result.maps.map(m=>m.buffer));}catch(e){self.postMessage({id:data.id,error:e.message});}};

@@ -1,0 +1,47 @@
+{
+  "source": "植物软件V040/02_精简公开源码/web",
+  "framework": "V040 UI chrome, palette, panels, navigation and icons",
+  "files": [
+    {
+      "path": "v040-ui/app.css",
+      "source": "app.css",
+      "sha256": "efaa8f2243ff8cf616564481cec045f59b1f8acd5da1cd309c9c800a2ff84e2e"
+    },
+    {
+      "path": "v040-ui/brand-theme.css",
+      "source": "brand-theme.css",
+      "sha256": "00da2b67d2a8dc4343c4b5ae71caf398c515f2b0230baaf771dd38cae6a9aa06"
+    },
+    {
+      "path": "v040-ui/brand-palettes.css",
+      "source": "brand-palettes.css",
+      "sha256": "60a10c343470c1a65e28b764a91b81beaaccf8475755d2837c5a19a8f0a11e6e"
+    },
+    {
+      "path": "v040-ui/workspace-navigation.css",
+      "source": "workspace-navigation.css",
+      "sha256": "b5204d712325196e5b187a470f887d4be3bc85ea061e68674c93bd7074fb527f"
+    },
+    {
+      "path": "v040-ui/ui-layout.css",
+      "source": "ui-layout.css",
+      "sha256": "cf414ea5689c678d8907920e597b23b9ebe5bf7dd92b824e377be77dbfbb73dc"
+    },
+    {
+      "path": "v040-ui/lucide.min.js",
+      "source": "vendor/lucide.min.js",
+      "sha256": "ab85225ecc1daa2033607856f03dd2dabcbc08e2d260a5b97e17c690aa929766"
+    },
+    {
+      "path": "brand/tree-duck-v5-256.png",
+      "source": "brand/tree-duck-v5-256.png",
+      "sha256": "3684f1f37be00b6a4006421c14078f0161008e83ea5aef46fed78b06606dc06e"
+    },
+    {
+      "path": "brand/tree-duck-v5.ico",
+      "source": "brand/tree-duck-v5.ico",
+      "sha256": "7872c5fe1e92af063a0dbf9fd4ee4f34278071457a066b41329ac5b469075de7"
+    }
+  ],
+  "adaptation": "Tree material workbench mounted with existing authoring ids; module-specific controls remain scoped. Original CSS and brand files copied without changes."
+}

@@ -1,0 +1,11 @@
+{
+  "name": "tree-material-lab",
+  "version": "0.55.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node scripts/run-tests.mjs",
+    "test:shader": "node scripts/check-shaders.mjs",
+    "test:desktop": "node scripts/check-desktop.mjs"
+  }
+}

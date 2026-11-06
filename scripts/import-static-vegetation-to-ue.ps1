@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$PackageDirectory,
-    [string]$Project = 'Z:/UEproject/Day30Man/Day30Man.uproject',
-    [string]$Engine = 'Z:/UEEngine/UE_5.8/Engine/Binaries/Win64/UnrealEditor-Cmd.exe',
+    [Parameter(Mandatory=$true)][string]$Project,
+    [Parameter(Mandatory=$true)][string]$Engine,
     [string]$AssetName = ('IvyStatic_' + (Get-Date -Format 'yyyyMMdd_HHmmss'))
 )
 $ErrorActionPreference = 'Stop'

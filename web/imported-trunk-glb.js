@@ -7,15 +7,13 @@ const widths={SCALAR:1,VEC2:2,VEC3:3,VEC4:4,MAT4:16};
 export function trunkBytesBase64(bytes){let result='';for(let i=0;i<bytes.length;i+=24576)result+=String.fromCharCode(...bytes.subarray(i,i+24576));return btoa(result);}
 export async function trunkContentHash(bytes){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),x=>x.toString(16).padStart(2,'0')).join('');}
 
-// Independent static GLB reader: it retains original material channels instead
-// of flattening the model into the single leaf atlas used by unit preparation.
-export async function readImportedTrunkGlb(input,{name='树干.glb',maxBytes=256*1048576,maxTriangles=2000000,signal}={}){
+export function readTrunkGlbData(input,{maxBytes=256*1048576}={}){
  const bytes=input instanceof Uint8Array?input:new Uint8Array(input);if(bytes.length>maxBytes)fail('文件超过当前 256 MB 制作预算');
  if(bytes.length<28)fail('文件头不完整');const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
  if(view.getUint32(0,true)!==0x46546c67||view.getUint32(4,true)!==2||view.getUint32(8,true)!==bytes.length)fail('需要完整的 glTF 2.0 GLB');
  let json,bin;for(let offset=12;offset<bytes.length;){if(offset+8>bytes.length)fail('分块头越界');const size=view.getUint32(offset,true),type=view.getUint32(offset+4,true);offset+=8;if(size%4||offset+size>bytes.length)fail('分块长度无效');const data=bytes.subarray(offset,offset+size);if(type===0x4e4f534a){if(json)fail('重复 JSON 分块');try{json=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(data).replace(/[\u0000\s]+$/,''));}catch{fail('JSON 无法解析');}}else if(type===0x004e4942){if(bin)fail('重复二进制分块');bin=data;}offset+=size;}
  if(!json||!bin||json.asset?.version!=='2.0')fail('缺少模型数据');
- const extensions=new Set(['KHR_mesh_quantization','KHR_texture_transform','KHR_materials_unlit']);for(const ext of json.extensionsRequired||[])if(!extensions.has(ext))fail('暂不支持必需扩展 '+ext+'，请导出未压缩的静态 GLB');
+ const extensions=new Set(['KHR_mesh_quantization','KHR_texture_transform','KHR_materials_unlit','KHR_materials_emissive_strength']);for(const ext of json.extensionsRequired||[])if(!extensions.has(ext))fail('暂不支持必需扩展 '+ext+'，请导出未压缩的静态 GLB');
  if(json.buffers?.length!==1||json.buffers[0].uri||json.buffers[0].byteLength>bin.length||bin.length-json.buffers[0].byteLength>3)fail('请把模型和贴图嵌入同一 GLB');
  const bv=index=>{const b=json.bufferViews?.[index];if(!b||b.buffer!==0||!Number.isSafeInteger(b.byteLength)||b.byteLength<0||!Number.isSafeInteger(b.byteOffset||0)||(b.byteOffset||0)<0||(b.byteOffset||0)+b.byteLength>json.buffers[0].byteLength)fail('bufferView 越界');return b;};
  const accessor=index=>{
@@ -25,9 +23,15 @@ export async function readImportedTrunkGlb(input,{name='树干.glb',maxBytes=256
   for(let i=0;i<a.count;i++)for(let c=0;c<size;c++){let v=source[layout[1]](start+i*stride+c*layout[0],true);if(a.normalized&&a.componentType!==5126){const bits=layout[0]*8,signed=a.componentType===5120||a.componentType===5122;v=signed?Math.max(-1,v/(2**(bits-1)-1)):v/(2**bits-1);}if(!Number.isFinite(v))fail('顶点含非有限数');values[i*size+c]=v;}
   return {values,size,count:a.count,type:a.type,componentType:a.componentType};
  };
+ return {bytes,json,bin,bv,accessor};
+}
+
+// Retain original material channels for the native view and the rig workflow.
+export async function readImportedTrunkGlb(input,{name='树干.glb',maxBytes,maxTriangles=2000000,signal}={}){
+ const {bytes,json,bin,bv,accessor}=readTrunkGlbData(input,{maxBytes});
  const images=(json.images||[]).map(image=>{if(image.uri){if(!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(image.uri))fail('贴图引用了外部文件');return {data:image.uri,name:image.name||''};}if(!['image/png','image/jpeg','image/webp'].includes(image.mimeType))fail('暂不支持的贴图格式 '+image.mimeType);const b=bv(image.bufferView),data=bin.subarray(b.byteOffset||0,(b.byteOffset||0)+b.byteLength);return {data:'data:'+image.mimeType+';base64,'+trunkBytesBase64(data),name:image.name||''};});
  const texture=info=>{if(!info)return null;const t=json.textures?.[info.index],image=images[t?.source];if(!image)fail('材质缺少对应贴图');const transform=info.extensions?.KHR_texture_transform||{},channel=transform.texCoord??info.texCoord??0;if(channel!==0)fail('材质使用了 UV'+channel+'，请先统一到 UV0');return {image:t.source,offset:transform.offset||[0,0],scale:transform.scale||[1,1],rotation:transform.rotation||0,sampler:json.samplers?.[t.sampler]||{}};};
- const materials=(json.materials||[]).map((m,i)=>{if(Object.keys(m.extensions||{}).some(e=>e!=='KHR_materials_unlit'))fail('材质 '+(m.name||i)+' 含未支持的扩展，请先烘焙为标准 PBR');const p=m.pbrMetallicRoughness||{},alpha=m.alphaMode||'OPAQUE';if(!['OPAQUE','MASK','BLEND'].includes(alpha))fail('透明模式无效');return {id:'M'+i,name:m.name||'材质 '+(i+1),color:p.baseColorFactor||[1,1,1,1],roughness:p.roughnessFactor??1,metalness:p.metallicFactor??1,baseColor:texture(p.baseColorTexture),normal:texture(m.normalTexture),normalScale:m.normalTexture?.scale??1,metallicRoughness:texture(p.metallicRoughnessTexture),occlusion:texture(m.occlusionTexture),occlusionStrength:m.occlusionTexture?.strength??1,emissive:texture(m.emissiveTexture),emissiveFactor:m.emissiveFactor||[0,0,0],alphaMode:alpha,alphaCutoff:m.alphaCutoff??.5,doubleSided:!!m.doubleSided,unlit:!!m.extensions?.KHR_materials_unlit};});
+ const materials=(json.materials||[]).map((m,i)=>{if(Object.keys(m.extensions||{}).some(e=>!['KHR_materials_unlit','KHR_materials_emissive_strength'].includes(e)))fail('材质 '+(m.name||i)+' 含未支持的扩展，请先烘焙为标准 PBR');const p=m.pbrMetallicRoughness||{},alpha=m.alphaMode||'OPAQUE',emStrength=m.extensions?.KHR_materials_emissive_strength?.emissiveStrength??1,emFactor=m.emissiveFactor||[0,0,0];if(!Number.isFinite(emStrength)||emStrength<0||emStrength>320||!Array.isArray(emFactor)||emFactor.length!==3||emFactor.some(v=>!Number.isFinite(v)||v<0||v>1)||m.extensions?.KHR_materials_emissive_strength&&m.extensions?.KHR_materials_unlit)fail('发光强度或颜色无效');if(!['OPAQUE','MASK','BLEND'].includes(alpha))fail('透明模式无效');return {id:'M'+i,name:m.name||'材质 '+(i+1),color:p.baseColorFactor||[1,1,1,1],roughness:p.roughnessFactor??1,metalness:p.metallicFactor??1,baseColor:texture(p.baseColorTexture),normal:texture(m.normalTexture),normalScale:m.normalTexture?.scale??1,metallicRoughness:texture(p.metallicRoughnessTexture),occlusion:texture(m.occlusionTexture),occlusionStrength:m.occlusionTexture?.strength??1,emissive:texture(m.emissiveTexture),emissiveFactor:emFactor.map(v=>v*emStrength),alphaMode:alpha,alphaCutoff:m.alphaCutoff??.5,doubleSided:!!m.doubleSided,unlit:!!m.extensions?.KHR_materials_unlit};});
  const fallback=materials.length;materials.push({id:'M_default',name:'默认材质',color:[1,1,1,1],roughness:1,metalness:1,alphaMode:'OPAQUE',doubleSided:false});
  const primitives=[],warnings=[],nodes=json.nodes||[],visiting=new Set(),seen=new Set(),up=new THREE.Matrix4().makeRotationX(Math.PI/2);let triangles=0;
  const visit=(ni,parent)=>{if(signal?.aborted)throw new DOMException('已取消导入','AbortError');if(visiting.has(ni)||seen.has(ni))fail('节点层级有循环或重复父级');const node=nodes[ni];if(!node)fail('节点不存在');visiting.add(ni);seen.add(ni);if(node.skin!=null||node.weights?.some(v=>v))fail('请先把蒙皮或形态模型转换为静态制作副本');
@@ -46,5 +50,8 @@ export async function readImportedTrunkGlb(input,{name='树干.glb',maxBytes=256
  };
  const roots=json.scenes?.[json.scene??0]?.nodes;if(!roots?.length)fail('没有可用的场景根节点');for(const root of roots)visit(root,new THREE.Matrix4());if(!primitives.length)fail('模型中没有可用三角面');
  if(json.animations?.length)warnings.push('已读取静止模型，原动画仅随原始文件保留');
- const hash=await trunkContentHash(bytes);return {kind:'branchforge-trunk-model',version:1,id:'TRUNK_'+hash.slice(0,24),revision:1,name:name.replace(/\.glb$/i,''),source:{name,sha256:hash,bytes:bytes.length,glb_base64:trunkBytesBase64(bytes)},primitives,materials,images,warnings,triangles,calibration:{base:[0,0,0],tip:[0,0,1],front:[0,-1,0],scale:1},guides:[]};
+ const udim=json.extras?.branchforgeUdim;
+ const tiles=udim?.version===1&&Array.isArray(udim.tiles)&&udim.tiles.length<=64&&udim.tiles.every(tile=>Number.isInteger(tile)&&tile>=1001&&tile<=1999)?udim.tiles:null;
+ if(tiles?.length)warnings.push('UDIM 贴图已内嵌，瓦片 '+tiles.join('、'));
+ const hash=await trunkContentHash(bytes);return {kind:'branchforge-trunk-model',version:1,id:'TRUNK_'+hash.slice(0,24),revision:1,name:name.replace(/\.glb$/i,''),source:{name,sha256:hash,bytes:bytes.length,glb_base64:trunkBytesBase64(bytes),...(tiles?.length?{udimTiles:tiles}:{})},primitives,materials,images,warnings,triangles,calibration:{base:[0,0,0],tip:[0,0,1],front:[0,-1,0],scale:1},guides:[]};
 }

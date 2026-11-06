@@ -1,0 +1,11 @@
+{
+  "kind": "tree-duck-processing-illustration",
+  "version": 1,
+  "tool": "built-in image_gen",
+  "reference": "brand/tree-duck-v5-256.png",
+  "referenceSHA256": "3684f1f37be00b6a4006421c14078f0161008e83ea5aef46fed78b06606dc06e",
+  "file": "tree-duck-loading-v1.png",
+  "sha256": "30fed0e948b7cdec4fd26e4bba7631f112886cae8a0455a5fe8bb5e73859032b",
+  "transparentBackground": true,
+  "prompt": "Transparent loading illustration using the owned tree-duck mascot as identity reference: cheerful golden yellow duck, orange beak, brown eyes, black sunglasses on the head, cream feather tuft, blue denim overalls. Full body carefully tending one green sapling in a round soil root ball. Preserve the reference cartoon outline and soft cel shading. Compact centered composition, true alpha, no text, no watermark, no background. CSS animates the image and separate decorative leaves in the app."
+}

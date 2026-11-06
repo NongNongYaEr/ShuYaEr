@@ -1,0 +1,5 @@
+Bark Brown 01 — Rob Tuytel / Poly Haven
+Source: https://polyhaven.com/a/bark_brown_01
+License: CC0 1.0 — https://polyhaven.com/license
+Source files and local roughness quantization are recorded in assets/polyhaven-bark-brown-01-provenance.json.
+Offline reference asset; no runtime Poly Haven API integration or endorsement.

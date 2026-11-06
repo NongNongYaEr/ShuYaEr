@@ -5,7 +5,10 @@ if(-not $RuntimeSource){$RuntimeSource=Join-Path (Split-Path -Parent $sourceRoot
 $runtimeItem=Get-Item -LiteralPath (Resolve-Path -LiteralPath $RuntimeSource).Path
 $portableExe=$null
 if(-not $runtimeItem.PSIsContainer){$portableExe=$runtimeItem.FullName}
-elseif(-not(Test-Path -LiteralPath (Join-Path $runtimeItem.FullName 'release-config.json'))){$portableExe=Join-Path $runtimeItem.FullName '树鸭儿.exe'}
+elseif(-not(Test-Path -LiteralPath (Join-Path $runtimeItem.FullName 'release-config.json'))){
+ $runtimePin=Get-Content -LiteralPath (Join-Path $sourceRoot 'portable-runtime.json') -Raw -Encoding UTF8|ConvertFrom-Json
+ $portableExe=Join-Path $runtimeItem.FullName $runtimePin.filename
+}
 if($portableExe){
  $pinFile=Join-Path $sourceRoot 'portable-runtime.json'
  if(-not(Test-Path -LiteralPath $pinFile)){throw 'A pinned portable-runtime.json is required for a single-file runtime source'}
@@ -21,7 +24,7 @@ $wanted=Get-Content -LiteralPath (Join-Path $sourceRoot 'release-config.json') -
 $provided=Get-Content -LiteralPath (Join-Path $runtimeRoot 'release-config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $manifest=Get-Content -LiteralPath (Join-Path $runtimeRoot 'distribution-manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 if($provided.version -ne $wanted.version -or $manifest.release -ne $wanted.version){throw 'Runtime/source version mismatch'}
-$required=@($manifest.files|Where-Object {$_.path -match '^runtime/' -or $_.path -in @('Microsoft.Web.WebView2.Core.dll','Microsoft.Web.WebView2.WinForms.dll','WebView2Loader.dll')})
+$required=@($manifest.files|Where-Object {$_.path -match '^(runtime/|material/runtime/)' -or $_.path -in @('material/Microsoft.Web.WebView2.Core.dll','material/Microsoft.Web.WebView2.WinForms.dll','material/WebView2Loader.dll') -or $_.path -in @('Microsoft.Web.WebView2.Core.dll','Microsoft.Web.WebView2.WinForms.dll','WebView2Loader.dll')})
 if(-not($required|Where-Object {$_.path -eq 'runtime/node.exe'})){throw 'Node runtime is not listed'}
 if(-not($required|Where-Object {$_.path -eq 'runtime/native/BranchForgeViewport.dll'})){throw 'DX12 runtime is not listed'}
 $runtimePrefix=[IO.Path]::GetFullPath($runtimeRoot)+[IO.Path]::DirectorySeparatorChar
@@ -35,7 +38,9 @@ foreach($item in $required){
  Copy-Item -LiteralPath $from -Destination $target
 }
 & (Join-Path $PSScriptRoot 'restore-sample-assets.ps1')
-if($LASTEXITCODE -and $LASTEXITCODE -ne 0){throw 'Sample restoration failed'}
 & (Join-Path $sourceRoot 'runtime/node.exe') (Join-Path $PSScriptRoot 'native-runtime-provenance.mjs') verify (Join-Path $sourceRoot 'runtime/native')
 if($LASTEXITCODE -ne 0){throw 'Native source/runtime verification failed'}
+if(Test-Path -LiteralPath (Join-Path $sourceRoot 'native/V050Integration.cs')){
+ foreach($requiredMaterial in @('material/runtime/native/TreeUvCore.exe','material/runtime/native/TreeMeshOptimize.exe','material/runtime/native-material/TreeMaterialDX12.dll','material/runtime/native-material/shader-layout.json')){if(-not(Test-Path -LiteralPath (Join-Path $sourceRoot $requiredMaterial))){throw ('Missing integrated material dependency: '+$requiredMaterial)}}
+}
 Write-Output 'Runtime prepared. Run scripts/build-desktop.ps1 to build the desktop executable.'

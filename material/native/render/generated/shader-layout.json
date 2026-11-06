@@ -1,0 +1,1332 @@
+{
+  "version": 1,
+  "backend": "v040-dx12",
+  "optimization": "O1 material fragment, vertex and guides; dynamic layer and local-overlay loops retained to bound shader compilation",
+  "sourceHashes": {
+    "material-blend-shader.js": "b2fee5f2d5e6c6d840b4db5bf2ebbc17c46b514df3b4f6b6374f2d59034f88e6",
+    "form-effects.js": "90ed3309392a208dad1e853a678c11b5ce1d43345493dbe1bfc476c24c9b2b9f",
+    "material-paint-shader.js": "af94c0ef54e717178a174eb0db2146774a56671f1890dfe686a83ccc4d75dc98",
+    "surface-extra-shader.js": "d026870a5e78701cbdb4547260f70c71b6f491053e157484e2edd12bed5206dc",
+    "studio-lighting-shader.js": "138c08d8782cffdd595f27d447ffbe4358b445fae0d689f6c91bedafa327d714",
+    "organic-layers-shader.js": "e38e78b5ef13018342bf457a37386a314d10a3c2a5a7d6b0959115a1dfd60415",
+    "renderer.js": "00c90f21828af3eec826403057d0d52dd9c6e3167bada955f128ffef08750236",
+    "surface-effect-shader.js": "4be21dce119bda4178e4efd0e98452b439c59af3bb4a6da60c03aa238bde8259",
+    "burl-scatter-shader.js": "f49cf0051c3b5dedb9ee15b4e9d574b565f00862e64aa38844a89eaaea4c1508",
+    "local-patch-shader.js": "8e5453134d68242069174045f853e4c1d848bdeda1171f1d45c0101e4ad9ccc1"
+  },
+  "stages": {
+    "VERTEX": {
+      "file": "material/native/render/generated/VERTEX.hlsl",
+      "sha256": "000269990ebf5df186e03cd3fce97af4c53941b7887283e54ab0bb5cec34d5fe",
+      "binary": "VERTEX.cso",
+      "binarySHA256": "dd155194d43f0f4997c4ab08d2232ee197d50827c88601b9898e40f0f1ae2ade",
+      "profile": "vs_6_0",
+      "reflection": {
+        "entryPoints": [
+          {
+            "name": "main",
+            "mode": "vert"
+          }
+        ],
+        "types": {
+          "_62": {
+            "name": "gl_PerVertex",
+            "members": [
+              {
+                "name": "gl_Position",
+                "type": "vec4"
+              },
+              {
+                "name": "gl_PointSize",
+                "type": "float"
+              },
+              {
+                "name": "gl_ClipDistance",
+                "type": "float",
+                "array": [
+                  1
+                ],
+                "array_size_is_literal": [
+                  true
+                ]
+              },
+              {
+                "name": "gl_CullDistance",
+                "type": "float",
+                "array": [
+                  1
+                ],
+                "array_size_is_literal": [
+                  true
+                ]
+              }
+            ]
+          },
+          "_68": {
+            "name": "VertexUniforms",
+            "members": [
+              {
+                "name": "uVP",
+                "type": "mat4",
+                "offset": 0,
+                "matrix_stride": 16
+              },
+              {
+                "name": "uBake",
+                "type": "uint",
+                "offset": 64
+              },
+              {
+                "name": "uBakeRegion",
+                "type": "vec4",
+                "offset": 80
+              }
+            ]
+          }
+        },
+        "inputs": [
+          {
+            "type": "vec3",
+            "name": "aPosition",
+            "location": 0
+          },
+          {
+            "type": "vec3",
+            "name": "aNormal",
+            "location": 1
+          },
+          {
+            "type": "vec2",
+            "name": "aUV",
+            "location": 2
+          },
+          {
+            "type": "vec2",
+            "name": "aSourceUV",
+            "location": 5
+          },
+          {
+            "type": "vec4",
+            "name": "aTangent",
+            "location": 3
+          },
+          {
+            "type": "float",
+            "name": "aAO",
+            "location": 4
+          },
+          {
+            "type": "vec4",
+            "name": "aMask0",
+            "location": 6
+          },
+          {
+            "type": "vec2",
+            "name": "aMask1",
+            "location": 7
+          },
+          {
+            "type": "vec4",
+            "name": "aGrowth",
+            "location": 8
+          },
+          {
+            "type": "vec3",
+            "name": "aFlowPosition",
+            "location": 9
+          },
+          {
+            "type": "vec3",
+            "name": "aFlowAcross",
+            "location": 10
+          },
+          {
+            "type": "vec3",
+            "name": "aFlowAxis",
+            "location": 11
+          }
+        ],
+        "outputs": [
+          {
+            "type": "vec3",
+            "name": "vP",
+            "location": 0
+          },
+          {
+            "type": "vec3",
+            "name": "vN",
+            "location": 1
+          },
+          {
+            "type": "vec2",
+            "name": "vUV",
+            "location": 2
+          },
+          {
+            "type": "vec2",
+            "name": "vSourceUV",
+            "location": 3
+          },
+          {
+            "type": "vec4",
+            "name": "vT",
+            "location": 4
+          },
+          {
+            "type": "float",
+            "name": "vAO",
+            "location": 5
+          },
+          {
+            "type": "vec4",
+            "name": "vMask0",
+            "location": 6
+          },
+          {
+            "type": "vec2",
+            "name": "vMask1",
+            "location": 7
+          },
+          {
+            "type": "vec3",
+            "name": "vGrowth",
+            "location": 8
+          },
+          {
+            "type": "float",
+            "name": "vSculpt",
+            "location": 12
+          },
+          {
+            "type": "vec3",
+            "name": "vFlowPosition",
+            "location": 9
+          },
+          {
+            "type": "vec3",
+            "name": "vFlowAcross",
+            "location": 10
+          },
+          {
+            "type": "vec3",
+            "name": "vFlowAxis",
+            "location": 11
+          }
+        ],
+        "ubos": [
+          {
+            "type": "_68",
+            "name": "VertexUniforms",
+            "block_size": 96,
+            "set": 0,
+            "binding": 11
+          }
+        ]
+      }
+    },
+    "FRAGMENT": {
+      "file": "material/native/render/generated/FRAGMENT.hlsl",
+      "sha256": "0b11c4723892d5ea84b88c40d05132e401c4ec0ae4e3b950354257d649af113f",
+      "binary": "FRAGMENT.cso",
+      "binarySHA256": "2cd1b5a7dbb11993a097cd89720c62d2134039776fd93c4ab3aa38c818856596",
+      "profile": "ps_6_0",
+      "reflection": {
+        "entryPoints": [
+          {
+            "name": "main",
+            "mode": "frag"
+          }
+        ],
+        "types": {
+          "_47": {
+            "name": "PatchSurface",
+            "members": [
+              {
+                "name": "color",
+                "type": "vec3"
+              },
+              {
+                "name": "colorAlpha",
+                "type": "float"
+              },
+              {
+                "name": "rough",
+                "type": "float"
+              },
+              {
+                "name": "roughAlpha",
+                "type": "float"
+              },
+              {
+                "name": "h",
+                "type": "float"
+              },
+              {
+                "name": "normalKeep",
+                "type": "float"
+              }
+            ]
+          },
+          "_197": {
+            "name": "Surface",
+            "members": [
+              {
+                "name": "color",
+                "type": "vec3"
+              },
+              {
+                "name": "h",
+                "type": "float"
+              },
+              {
+                "name": "rough",
+                "type": "float"
+              },
+              {
+                "name": "normalWeight",
+                "type": "float"
+              },
+              {
+                "name": "coatH",
+                "type": "float"
+              },
+              {
+                "name": "localAO",
+                "type": "float"
+              },
+              {
+                "name": "detailGradient",
+                "type": "vec3"
+              },
+              {
+                "name": "paintMask",
+                "type": "float"
+              },
+              {
+                "name": "layerCoverage",
+                "type": "float"
+              },
+              {
+                "name": "selectedCoverage",
+                "type": "float"
+              }
+            ]
+          },
+          "_451": {
+            "name": "PixelUniforms",
+            "members": [
+              {
+                "name": "uPass",
+                "type": "int",
+                "offset": 0
+              },
+              {
+                "name": "uBake",
+                "type": "uint",
+                "offset": 4
+              },
+              {
+                "name": "uPixelMasks",
+                "type": "uint",
+                "offset": 8
+              },
+              {
+                "name": "uHasHeightMap",
+                "type": "uint",
+                "offset": 12
+              },
+              {
+                "name": "uHasRoughMap",
+                "type": "uint",
+                "offset": 16
+              },
+              {
+                "name": "uHasBarkFlow",
+                "type": "uint",
+                "offset": 20
+              },
+              {
+                "name": "uHasNormalMap",
+                "type": "uint",
+                "offset": 24
+              },
+              {
+                "name": "uFloatHeight",
+                "type": "uint",
+                "offset": 28
+              },
+              {
+                "name": "uHeightWithNormal",
+                "type": "uint",
+                "offset": 32
+              },
+              {
+                "name": "uHasMaskHeight",
+                "type": "uint",
+                "offset": 36
+              },
+              {
+                "name": "uHeightLevels",
+                "type": "int",
+                "offset": 40
+              },
+              {
+                "name": "uBarkRelief",
+                "type": "float",
+                "offset": 44
+              },
+              {
+                "name": "uBarkCavity",
+                "type": "float",
+                "offset": 48
+              },
+              {
+                "name": "uNormalStrength",
+                "type": "float",
+                "offset": 52
+              },
+              {
+                "name": "uNormalY",
+                "type": "float",
+                "offset": 56
+              },
+              {
+                "name": "uLightMode",
+                "type": "float",
+                "offset": 60
+              },
+              {
+                "name": "uLightStyle",
+                "type": "float",
+                "offset": 64
+              },
+              {
+                "name": "uDirectionMode",
+                "type": "float",
+                "offset": 68
+              },
+              {
+                "name": "uSculptResponse",
+                "type": "vec4",
+                "offset": 80
+              },
+              {
+                "name": "uBakedPreview",
+                "type": "uint",
+                "offset": 96
+              },
+              {
+                "name": "uBakedShared",
+                "type": "uint",
+                "offset": 100
+              },
+              {
+                "name": "uMicroEnabled",
+                "type": "uint",
+                "offset": 104
+              },
+              {
+                "name": "uMicroLevels",
+                "type": "int",
+                "offset": 108
+              },
+              {
+                "name": "uMicroPhase",
+                "type": "vec3",
+                "offset": 112
+              },
+              {
+                "name": "uMicroParams",
+                "type": "vec4",
+                "offset": 128
+              },
+              {
+                "name": "uPatchCount",
+                "type": "int",
+                "offset": 144
+              },
+              {
+                "name": "uPatchBits",
+                "type": "int",
+                "offset": 148
+              },
+              {
+                "name": "uPatchHeightBits",
+                "type": "int",
+                "offset": 152
+              },
+              {
+                "name": "uPatchOrigin",
+                "type": "vec4",
+                "array": [
+                  8
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 160,
+                "array_stride": 16
+              },
+              {
+                "name": "uPatchU",
+                "type": "vec4",
+                "array": [
+                  8
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 288,
+                "array_stride": 16
+              },
+              {
+                "name": "uPatchV",
+                "type": "vec4",
+                "array": [
+                  8
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 416,
+                "array_stride": 16
+              },
+              {
+                "name": "uPatchN",
+                "type": "vec4",
+                "array": [
+                  8
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 544,
+                "array_stride": 16
+              },
+              {
+                "name": "uPatchColor",
+                "type": "vec4",
+                "array": [
+                  8
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 672,
+                "array_stride": 16
+              },
+              {
+                "name": "uPatchShape",
+                "type": "vec4",
+                "array": [
+                  8
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 800,
+                "array_stride": 16
+              },
+              {
+                "name": "uPatchChannels",
+                "type": "vec4",
+                "array": [
+                  8
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 928,
+                "array_stride": 16
+              },
+              {
+                "name": "uPatchEpsilon",
+                "type": "float",
+                "offset": 1056
+              },
+              {
+                "name": "uEffectCount",
+                "type": "int",
+                "offset": 1060
+              },
+              {
+                "name": "uEffectSelected",
+                "type": "int",
+                "offset": 1064
+              },
+              {
+                "name": "uSurfacePreview",
+                "type": "uint",
+                "offset": 1068
+              },
+              {
+                "name": "uEffectConfig",
+                "type": "vec4",
+                "array": [
+                  16
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 1072,
+                "array_stride": 16
+              },
+              {
+                "name": "uEffectMeta",
+                "type": "vec4",
+                "array": [
+                  16
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 1328,
+                "array_stride": 16
+              },
+              {
+                "name": "uEffectData",
+                "type": "vec4",
+                "array": [
+                  160
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 1584,
+                "array_stride": 16
+              },
+              {
+                "name": "uEffectColor",
+                "type": "vec3",
+                "array": [
+                  16
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 4144,
+                "array_stride": 16
+              },
+              {
+                "name": "uEffectEmission",
+                "type": "vec4",
+                "array": [
+                  16
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 4400,
+                "array_stride": 16
+              },
+              {
+                "name": "uEffectEmissionShape",
+                "type": "vec4",
+                "array": [
+                  16
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 4656,
+                "array_stride": 16
+              },
+              {
+                "name": "uEmissionMaximum",
+                "type": "float",
+                "offset": 4912
+              },
+              {
+                "name": "uHasBakedEmission",
+                "type": "uint",
+                "offset": 4916
+              },
+              {
+                "name": "uBakedEmissionStrength",
+                "type": "float",
+                "offset": 4920
+              },
+              {
+                "name": "uBlendColor",
+                "type": "vec4",
+                "array": [
+                  16
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 4928,
+                "array_stride": 16
+              },
+              {
+                "name": "uBlendChannels",
+                "type": "vec4",
+                "array": [
+                  16
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 5184,
+                "array_stride": 16
+              },
+              {
+                "name": "uBlendExtra",
+                "type": "vec4",
+                "array": [
+                  16
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 5440,
+                "array_stride": 16
+              },
+              {
+                "name": "uBlendHeight",
+                "type": "vec4",
+                "array": [
+                  16
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 5696,
+                "array_stride": 16
+              },
+              {
+                "name": "uBlendHeightSource",
+                "type": "vec4",
+                "array": [
+                  16
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 5952,
+                "array_stride": 16
+              },
+              {
+                "name": "uBlendLimits",
+                "type": "vec4",
+                "array": [
+                  16
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 6208,
+                "array_stride": 16
+              },
+              {
+                "name": "uBlendTarget",
+                "type": "vec4",
+                "array": [
+                  16
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 6464,
+                "array_stride": 16
+              },
+              {
+                "name": "uLayerOrder",
+                "type": "int",
+                "array": [
+                  6
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 6720,
+                "array_stride": 16
+              },
+              {
+                "name": "uLayerParams",
+                "type": "vec4",
+                "array": [
+                  6
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 6816,
+                "array_stride": 16
+              },
+              {
+                "name": "uLayerSeed",
+                "type": "float",
+                "array": [
+                  6
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 6912,
+                "array_stride": 16
+              },
+              {
+                "name": "uLayerAO",
+                "type": "float",
+                "array": [
+                  6
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 7008,
+                "array_stride": 16
+              },
+              {
+                "name": "uEye",
+                "type": "vec3",
+                "offset": 7104
+              },
+              {
+                "name": "uTint",
+                "type": "vec3",
+                "offset": 7120
+              },
+              {
+                "name": "uMossColor",
+                "type": "vec3",
+                "offset": 7136
+              },
+              {
+                "name": "uPaintColor",
+                "type": "vec3",
+                "offset": 7152
+              },
+              {
+                "name": "uOriginalFactor",
+                "type": "vec3",
+                "offset": 7168
+              },
+              {
+                "name": "uCoatEnabled",
+                "type": "uint",
+                "offset": 7180
+              },
+              {
+                "name": "uCoatWidth",
+                "type": "float",
+                "offset": 7184
+              },
+              {
+                "name": "uMossNormalStrength",
+                "type": "float",
+                "offset": 7188
+              },
+              {
+                "name": "uPaintNormalStrength",
+                "type": "float",
+                "offset": 7192
+              },
+              {
+                "name": "uPaintBarkKeep",
+                "type": "float",
+                "offset": 7196
+              },
+              {
+                "name": "uMossThickness",
+                "type": "float",
+                "offset": 7200
+              },
+              {
+                "name": "uMossClump",
+                "type": "float",
+                "offset": 7204
+              },
+              {
+                "name": "uMossPorosity",
+                "type": "float",
+                "offset": 7208
+              },
+              {
+                "name": "uMossFiberMm",
+                "type": "float",
+                "offset": 7212
+              },
+              {
+                "name": "uMossAO",
+                "type": "float",
+                "offset": 7216
+              },
+              {
+                "name": "uPaintAO",
+                "type": "float",
+                "offset": 7220
+              },
+              {
+                "name": "uPaintCoverage",
+                "type": "float",
+                "offset": 7224
+              },
+              {
+                "name": "uPaintDepthAmount",
+                "type": "float",
+                "offset": 7228
+              },
+              {
+                "name": "uPaintDepthContrast",
+                "type": "float",
+                "offset": 7232
+              },
+              {
+                "name": "uPaintPeel",
+                "type": "float",
+                "offset": 7236
+              },
+              {
+                "name": "uPaintPeelSize",
+                "type": "float",
+                "offset": 7240
+              },
+              {
+                "name": "uPaintPeelEdge",
+                "type": "float",
+                "offset": 7244
+              },
+              {
+                "name": "uPaintPeelDetail",
+                "type": "float",
+                "offset": 7248
+              },
+              {
+                "name": "uPaintPeelChips",
+                "type": "float",
+                "offset": 7252
+              },
+              {
+                "name": "uCoatMossMean",
+                "type": "vec3",
+                "offset": 7264
+              },
+              {
+                "name": "uCoatPaintMean",
+                "type": "vec3",
+                "offset": 7280
+              },
+              {
+                "name": "uTreeHeight",
+                "type": "float",
+                "offset": 7292
+              },
+              {
+                "name": "uScale",
+                "type": "float",
+                "offset": 7296
+              },
+              {
+                "name": "uBarkScale",
+                "type": "float",
+                "offset": 7300
+              },
+              {
+                "name": "uBump",
+                "type": "float",
+                "offset": 7304
+              },
+              {
+                "name": "uRough",
+                "type": "float",
+                "offset": 7308
+              },
+              {
+                "name": "uVariation",
+                "type": "float",
+                "offset": 7312
+              },
+              {
+                "name": "uOriginalMix",
+                "type": "float",
+                "offset": 7316
+              },
+              {
+                "name": "uMoss",
+                "type": "float",
+                "offset": 7320
+              },
+              {
+                "name": "uMossRough",
+                "type": "float",
+                "offset": 7324
+              },
+              {
+                "name": "uMossEnabled",
+                "type": "float",
+                "offset": 7328
+              },
+              {
+                "name": "uPaintEnabled",
+                "type": "float",
+                "offset": 7332
+              },
+              {
+                "name": "uPaintHeight",
+                "type": "float",
+                "offset": 7336
+              },
+              {
+                "name": "uPaintWear",
+                "type": "float",
+                "offset": 7340
+              },
+              {
+                "name": "uPaintRough",
+                "type": "float",
+                "offset": 7344
+              },
+              {
+                "name": "uAOAmount",
+                "type": "float",
+                "offset": 7348
+              },
+              {
+                "name": "uSeed",
+                "type": "float",
+                "offset": 7352
+              },
+              {
+                "name": "uBarkAspect",
+                "type": "float",
+                "offset": 7356
+              },
+              {
+                "name": "uDirectional",
+                "type": "float",
+                "offset": 7360
+              },
+              {
+                "name": "uDetail",
+                "type": "float",
+                "offset": 7364
+              },
+              {
+                "name": "uRelief",
+                "type": "float",
+                "offset": 7368
+              },
+              {
+                "name": "uLichen",
+                "type": "float",
+                "offset": 7372
+              },
+              {
+                "name": "uLichenEnabled",
+                "type": "float",
+                "offset": 7376
+              },
+              {
+                "name": "uDirt",
+                "type": "float",
+                "offset": 7380
+              },
+              {
+                "name": "uDirtEnabled",
+                "type": "float",
+                "offset": 7384
+              },
+              {
+                "name": "uWet",
+                "type": "float",
+                "offset": 7388
+              },
+              {
+                "name": "uWetEnabled",
+                "type": "float",
+                "offset": 7392
+              },
+              {
+                "name": "uBarkStyle",
+                "type": "int",
+                "offset": 7396
+              },
+              {
+                "name": "uMaskChannel",
+                "type": "int",
+                "offset": 7400
+              },
+              {
+                "name": "uPaintPacked",
+                "type": "uint",
+                "offset": 7404
+              },
+              {
+                "name": "uPaintMaskRect",
+                "type": "vec4",
+                "offset": 7408
+              },
+              {
+                "name": "uPaintRects",
+                "type": "vec4",
+                "array": [
+                  48
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 7424,
+                "array_stride": 16
+              },
+              {
+                "name": "uPaintAdjust",
+                "type": "vec4",
+                "array": [
+                  16
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 8192,
+                "array_stride": 16
+              },
+              {
+                "name": "uPaintTint",
+                "type": "vec3",
+                "array": [
+                  16
+                ],
+                "array_size_is_literal": [
+                  true
+                ],
+                "offset": 8448,
+                "array_stride": 16
+              },
+              {
+                "name": "uPaintUVRegion",
+                "type": "vec4",
+                "offset": 8704
+              }
+            ]
+          }
+        },
+        "inputs": [
+          {
+            "type": "float",
+            "name": "vSculpt",
+            "location": 12
+          },
+          {
+            "type": "vec3",
+            "name": "vFlowPosition",
+            "location": 9
+          },
+          {
+            "type": "vec3",
+            "name": "vFlowAcross",
+            "location": 10
+          },
+          {
+            "type": "vec3",
+            "name": "vGrowth",
+            "location": 8
+          },
+          {
+            "type": "vec3",
+            "name": "vFlowAxis",
+            "location": 11
+          },
+          {
+            "type": "vec3",
+            "name": "vP",
+            "location": 0
+          },
+          {
+            "type": "vec4",
+            "name": "vMask0",
+            "location": 6
+          },
+          {
+            "type": "vec2",
+            "name": "vMask1",
+            "location": 7
+          },
+          {
+            "type": "vec2",
+            "name": "vSourceUV",
+            "location": 3
+          },
+          {
+            "type": "vec2",
+            "name": "vUV",
+            "location": 2
+          },
+          {
+            "type": "vec3",
+            "name": "vN",
+            "location": 1
+          },
+          {
+            "type": "float",
+            "name": "vAO",
+            "location": 5
+          },
+          {
+            "type": "vec4",
+            "name": "vT",
+            "location": 4
+          }
+        ],
+        "outputs": [
+          {
+            "type": "vec4",
+            "name": "outColor",
+            "location": 0
+          }
+        ],
+        "textures": [
+          {
+            "type": "sampler2D",
+            "name": "uMicroMap",
+            "set": 0,
+            "binding": 7
+          },
+          {
+            "type": "sampler2D",
+            "name": "uHeightMap",
+            "set": 0,
+            "binding": 4
+          },
+          {
+            "type": "sampler2D",
+            "name": "uNormalMap",
+            "set": 0,
+            "binding": 6
+          },
+          {
+            "type": "sampler2D",
+            "name": "uMaskMap1",
+            "set": 0,
+            "binding": 3
+          },
+          {
+            "type": "sampler2D",
+            "name": "uBakedORM",
+            "set": 0,
+            "binding": 10
+          },
+          {
+            "type": "sampler2D",
+            "name": "uMaskMap0",
+            "set": 0,
+            "binding": 2
+          },
+          {
+            "type": "sampler2D",
+            "name": "uMaskMap2",
+            "set": 0,
+            "binding": 11
+          },
+          {
+            "type": "sampler2D",
+            "name": "uMaskMap3",
+            "set": 0,
+            "binding": 12
+          },
+          {
+            "type": "sampler2D",
+            "name": "uRoughMap",
+            "set": 0,
+            "binding": 5
+          },
+          {
+            "type": "sampler2D",
+            "name": "uBark",
+            "set": 0,
+            "binding": 0
+          },
+          {
+            "type": "sampler2D",
+            "name": "uOriginal",
+            "set": 0,
+            "binding": 1
+          },
+          {
+            "type": "sampler2D",
+            "name": "uBakedColor",
+            "set": 0,
+            "binding": 8
+          },
+          {
+            "type": "sampler2D",
+            "name": "uBakedNormal",
+            "set": 0,
+            "binding": 9
+          }
+        ],
+        "ubos": [
+          {
+            "type": "_451",
+            "name": "PixelUniforms",
+            "block_size": 8720,
+            "set": 0,
+            "binding": 12
+          }
+        ]
+      }
+    },
+    "GUIDE_FRAGMENT": {
+      "file": "material/native/render/generated/GUIDE_FRAGMENT.hlsl",
+      "sha256": "364472d56adaae44d2661c7d3b1fb2459c6ec481cc02117aea2b079a9518ed18",
+      "binary": "GUIDE_FRAGMENT.cso",
+      "binarySHA256": "e5d7dc493434920fa0b9fbd599d958ef288ff778a40f18c83fbe5296ef31e0d0",
+      "profile": "ps_6_0",
+      "reflection": {
+        "entryPoints": [
+          {
+            "name": "main",
+            "mode": "frag"
+          }
+        ],
+        "types": {
+          "_10": {
+            "name": "PixelUniforms",
+            "members": [
+              {
+                "name": "uGuideColor",
+                "type": "vec4",
+                "offset": 0
+              }
+            ]
+          }
+        },
+        "outputs": [
+          {
+            "type": "vec4",
+            "name": "outColor",
+            "location": 0
+          }
+        ],
+        "ubos": [
+          {
+            "type": "_10",
+            "name": "PixelUniforms",
+            "block_size": 16,
+            "set": 0,
+            "binding": 12
+          }
+        ]
+      }
+    }
+  },
+  "sceneVariants": {
+    "legacy": {
+      "program": "tree-legacy",
+      "binary": "FRAGMENT_LEGACY.cso",
+      "binarySHA256": "a040c46d228ba0d9e8ad413f8742c7935677edf7c7905eb52106bad4b43139ed",
+      "file": "material/native/render/generated/FRAGMENT_LEGACY.hlsl",
+      "sha256": "130fe3631b042503206d5bca7bb588dcc6fafaca59574b0a834738e5cc655314",
+      "uniformLayoutExact": true
+    },
+    "stack": {
+      "program": "tree-stack",
+      "binary": "FRAGMENT_STACK.cso",
+      "binarySHA256": "2c7e53854546dc34750eb310fa17ad05cacb2d3c30d6ded0241f53c1f022809a",
+      "file": "material/native/render/generated/FRAGMENT_STACK.hlsl",
+      "sha256": "253a2b1a13150e5a243ce39db8bc3bc9d103fdb11d9964d8f1caea26d8816254",
+      "uniformLayoutExact": true
+    }
+  }
+}

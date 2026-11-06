@@ -1,0 +1,5 @@
+export class SurfaceSession{
+  constructor(){this.disposed=false;this.worker=new Worker('./surface-worker.js',{type:'module'});this.pending=new Map();this.serial=0;this.worker.onmessage=({data})=>{const p=this.pending.get(data.id);if(!p)return;this.pending.delete(data.id);if(data.error)p.reject(Error(data.error));else p.resolve(data);};this.worker.onerror=e=>this.dispose(Error(e.message||'表面分析失败。'));}
+  request({mesh,regions,actualHeightMeters,barkFlow,directionCorrections,flowTransition}){if(this.disposed)return Promise.reject(Object.assign(Error('表面会话已卸载。'),{name:'AbortError'}));const id=++this.serial;return new Promise((resolve,reject)=>{this.pending.set(id,{resolve,reject});this.worker.postMessage({id,...(mesh?{mesh:{pos:mesh.pos,normal:mesh.normal,indices:mesh.indices,min:mesh.min,height:mesh.height,sourceSHA256:mesh.sourceSHA256}}:{}),regions,actualHeightMeters,barkFlow,directionCorrections,flowTransition});});}
+  dispose(error=null){if(this.disposed)return;this.disposed=true;this.worker.terminate();const e=error||Object.assign(Error('任务已取消。'),{name:'AbortError'});for(const p of this.pending.values())p.reject(e);this.pending.clear();}
+}

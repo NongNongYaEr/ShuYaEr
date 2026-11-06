@@ -1,0 +1,95 @@
+body[data-workspace-stage=export] .tree-material-workbench{grid-template-columns:minmax(0,1fr);min-width:0;width:100%}
+body[data-workspace-stage=export] .workspace{grid-template-columns:minmax(0,1fr) 280px!important;min-width:0;max-width:100%;width:100%}
+body[data-workspace-stage=export] .workspace>.left-panel,body[data-workspace-stage=export] .workspace>.studio-splitter{display:none!important}
+body[data-workspace-stage=export] .workspace>.center-panel{grid-column:1;grid-row:1;display:grid!important;grid-template-rows:auto minmax(170px,.38fr) auto auto minmax(250px,.62fr);min-width:0;min-height:0}
+body[data-workspace-stage=export] .workspace>.right-panel{grid-column:2;grid-row:1;min-width:0}
+body[data-workspace-stage=export] .editing-context,body[data-workspace-stage=export] .right-panel>.panel-heading,body[data-workspace-stage=export] .right-panel>.scroll-controls{display:none!important}
+body[data-workspace-stage=export] .viewport-toolbar{grid-row:1;padding:6px 10px;min-height:38px;gap:8px;flex-wrap:wrap}
+body[data-workspace-stage=export] #dropZone{grid-row:2;min-height:0;width:100%;height:100%}
+body[data-workspace-stage=export] .baked-inspection-row{grid-row:3;min-height:28px;padding:3px 10px;gap:8px;font-size:10px;overflow:hidden}
+body[data-workspace-stage=export] .maps-heading{grid-row:4;padding:6px 10px;min-height:30px;height:auto!important;gap:10px;flex-wrap:nowrap;background:var(--surface);font-size:12px}
+body[data-workspace-stage=export] .maps-heading span{font-size:10px}
+body[data-workspace-stage=export] .maps-heading>label{display:flex;align-items:center;gap:5px;width:auto;margin:0;font-size:11px;white-space:nowrap}
+body[data-workspace-stage=export] .maps-heading select{width:120px;height:28px;margin:0;padding:3px 6px;font-size:11px}
+body[data-workspace-stage=export] .map-cards{grid-row:5;height:auto!important;min-height:0;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));padding:0 10px 10px;gap:8px;background:var(--surface)}
+body[data-workspace-stage=export] .map-card{min-width:0;min-height:0;border-color:var(--line);cursor:zoom-in}
+body[data-workspace-stage=export] .map-card canvas{height:0;flex:1;max-height:none!important;min-height:0;width:100%;object-fit:contain}
+body[data-workspace-stage=export] .map-card>div{flex:none;padding:8px 10px;display:flex;justify-content:space-between;align-items:center;background:var(--surface-2,var(--surface))}
+body[data-workspace-stage=export] .map-card b{font-size:12px}body[data-workspace-stage=export] .map-card span{font-size:10px}
+.export-view-modes{display:flex;gap:3px;margin-left:auto}.export-view-modes button{padding:5px 10px;font-size:11px}.export-view-modes .active{border-color:var(--yellow);color:var(--yellow);background:var(--brand-soft)}
+body[data-workspace-stage=export][data-export-view=model] .workspace>.center-panel{grid-template-rows:auto minmax(0,1fr) auto}
+body[data-workspace-stage=export][data-export-view=model] .maps-heading,body[data-workspace-stage=export][data-export-view=model] .map-cards{display:none!important}
+body[data-workspace-stage=export][data-export-view=maps] .workspace>.center-panel{grid-template-rows:auto auto minmax(0,1fr)}
+body[data-workspace-stage=export][data-export-view=maps] #dropZone,body[data-workspace-stage=export][data-export-view=maps] .baked-inspection-row{display:none!important}
+body[data-workspace-stage=export][data-export-view=maps] .maps-heading{grid-row:2}body[data-workspace-stage=export][data-export-view=maps] .map-cards{grid-row:3}
+body[data-workspace-stage=export].blender-properties-hidden .workspace{grid-template-columns:minmax(0,1fr)!important}body[data-workspace-stage=export].blender-properties-hidden .workspace>.right-panel{display:none!important}
+.export-workspace-settings{display:flex;flex-direction:column;gap:12px;padding:14px;overflow:auto;min-height:0;flex:1;color:var(--text);font-size:12px}
+.export-workspace-settings[hidden],.export-view-modes[hidden]{display:none!important}
+.export-target-title{display:flex;align-items:center;gap:9px;font-size:16px;font-weight:600;margin:0}.export-target-title span{font-size:10px;border:1px solid var(--yellow);padding:2px 5px;border-radius:3px;color:var(--yellow)}
+.export-model-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0;color:var(--muted);font-size:11px}.export-model-info{font-size:11px;color:var(--muted);margin:0}
+.export-checks{display:grid;gap:7px;padding:11px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.export-check{display:flex;justify-content:space-between;gap:10px;font-size:11px}.export-check b{font-weight:500;color:var(--text)}.export-check[data-error=true] b{color:#e5ab83}
+.export-workspace-settings .control-section{padding:0;border:0}.export-workspace-settings h2{font-size:12px;margin:0 0 8px}.export-workspace-settings h2.export-target-title{font-size:16px;margin:0}.export-workspace-settings .control-section h2>span{display:none}.export-workspace-settings .inline-options{margin-top:0;gap:8px}.export-workspace-settings .inline-options label{font-size:11px}.export-workspace-settings .inline-options select{font-size:12px;margin-top:5px;padding:7px 5px}
+.export-workspace-settings .export-tags{margin:8px 0;gap:5px}.export-workspace-settings .export-tags span{font-size:10px}.export-workspace-settings .control-note{font-size:11px;line-height:1.6;margin:6px 0;color:var(--muted)}
+.export-workspace-settings details{border:1px solid var(--line);border-radius:5px;padding:9px}.export-workspace-settings summary{font-size:12px;cursor:pointer}.export-workspace-settings details .control-section{padding-top:12px}.export-workspace-settings .slider-label{font-size:11px;margin-top:9px}.export-workspace-settings .secondary{font-size:11px;margin-top:8px}.export-workspace-settings #exportModelOption{font-size:11px;margin:0}.export-workspace-settings #nearQualitySources{overflow-wrap:anywhere}
+.export-output-info{font-size:11px;color:var(--muted);line-height:1.65;margin:0}.export-output-info[data-fresh=true]{color:var(--text)}.export-workspace-settings .export-return{margin:0;font-size:11px}
+body[data-workspace-stage=export] .export-footer{padding:12px;display:flex;flex-direction:column;gap:8px;flex:none;background:var(--surface)}
+body[data-workspace-stage=export] .export-footer .primary{min-height:40px;font-size:13px;padding:10px 12px;justify-content:center}
+body[data-workspace-stage=export] .export-footer #exportBottom{min-height:36px;padding:8px 10px;font-size:12px}
+.export-glb-link{display:block;text-align:center;border-radius:5px;padding:10px 7px;background:var(--yellow);color:#232418;text-decoration:none;font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body[data-workspace-stage=export] .export-footer .secondary,body[data-workspace-stage=export] .export-footer .download-link{margin:0;font-size:11px;padding:6px}
+.export-maps-status{margin-left:auto!important}.export-map-refresh{font-size:11px;padding:4px 8px}
+.texture-inspector{width:min(1500px,94vw);height:90vh;max-width:96vw;max-height:94vh;padding:0;background:var(--surface,#25282b);color:var(--text,#eee);border:1px solid var(--line,#555);border-radius:8px;overflow:hidden}
+.texture-inspector[open]{display:flex;flex-direction:column}.texture-inspector::backdrop{background:#07110bd9}.texture-inspector header,.texture-inspector footer{display:flex;gap:9px;align-items:center;padding:10px 12px;flex:none;font-size:12px}.texture-inspector header strong{font-size:14px}.texture-inspector-size{color:var(--muted);margin-right:auto}.texture-inspector-area{position:relative;flex:1;min-height:0;background:repeating-conic-gradient(#292e30 0 25%,#23282a 0 50%) 0/20px 20px;overflow:hidden}.texture-inspector-area canvas{width:100%;height:100%;display:block;cursor:grab;touch-action:none}.texture-inspector-area p{position:absolute;top:8px;left:12px;pointer-events:none;font-size:12px;padding:5px 8px;background:#1c2522e8}.texture-inspector footer>div{display:flex;gap:6px}.texture-inspector footer>span{margin-left:auto;color:var(--muted)}.texture-inspector .active{color:var(--yellow);border-color:var(--yellow)}.texture-inspector output{min-width:48px;text-align:right}
+@media(min-width:1900px){body[data-workspace-stage=export] .workspace{grid-template-columns:minmax(0,1fr) 300px!important}}
+@media(max-height:850px){.export-workspace-settings{padding:10px;gap:9px}.export-target-title{font-size:14px}.export-checks{gap:5px;padding:8px 0}body[data-workspace-stage=export] .export-footer{padding:10px;gap:5px}}
+/* Overview keeps the complete tree tall and stacks the three maps to its right. */
+body[data-workspace-stage=export] .workspace{grid-template-columns:minmax(0,1fr)!important}
+body[data-workspace-stage=export] .workspace>.right-panel{display:none!important}
+body[data-workspace-stage=export] .workspace>.center-panel{--export-map-width:clamp(250px,calc((100vh - 230px)/3 + 32px),440px);grid-template-columns:minmax(0,1fr) var(--export-map-width);grid-template-rows:auto auto minmax(0,1fr) auto;overflow:hidden}
+body[data-workspace-stage=export] .export-workspace-settings{grid-column:1/-1;grid-row:1;display:grid;grid-template-columns:minmax(180px,1fr) 220px 210px auto;align-items:center;gap:12px;padding:8px 10px;overflow:visible;border-bottom:1px solid var(--line);background:var(--surface);position:relative;z-index:18;flex:none}
+body[data-workspace-stage=export] .export-workspace-settings[hidden]{display:none!important}
+body[data-workspace-stage=export] .export-model-summary{min-width:0;display:grid;gap:3px}
+body[data-workspace-stage=export] .export-workspace-settings h2.export-target-title{font-size:14px}
+body[data-workspace-stage=export] .export-model-name,body[data-workspace-stage=export] .export-model-info{font-size:10px}
+body[data-workspace-stage=export] .export-main-settings h2,body[data-workspace-stage=export] .export-main-settings .export-tags,body[data-workspace-stage=export] .export-main-settings .control-note{display:none}
+body[data-workspace-stage=export] .export-main-settings .inline-options{display:grid;grid-template-columns:minmax(0,1fr) 78px;gap:6px}
+body[data-workspace-stage=export] .export-main-settings .inline-options label{font-size:10px;min-width:0}
+body[data-workspace-stage=export] .export-main-settings select{height:29px;margin-top:3px;padding:4px;font-size:11px}
+body[data-workspace-stage=export] .export-checks{padding:0;border:0;gap:3px}
+body[data-workspace-stage=export] .export-check{font-size:10px;gap:6px;line-height:15px}
+body[data-workspace-stage=export] .export-check b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body[data-workspace-stage=export] .export-action-group{display:flex;align-items:center;justify-content:flex-end;gap:6px;min-width:0}
+body[data-workspace-stage=export] .export-footer{display:flex;flex-direction:row;align-items:center;gap:6px;padding:0;border:0;background:transparent}
+body[data-workspace-stage=export] .export-footer .full-width{width:auto!important}
+body[data-workspace-stage=export] .export-footer #exportBottom{min-width:115px;min-height:36px;margin:0;padding:8px 10px;font-size:12px;white-space:nowrap}
+body[data-workspace-stage=export] .export-glb-link{min-width:124px;padding:10px;font-size:12px;white-space:nowrap}
+body[data-workspace-stage=export] .export-workspace-settings .export-advanced{position:relative;flex:none;padding:0;border:0}
+body[data-workspace-stage=export] .export-advanced>summary{padding:8px 9px;min-height:32px;border:1px solid var(--line);border-radius:4px;font-size:11px;background:var(--surface)}
+body[data-workspace-stage=export] .export-advanced-content{display:none;position:absolute;right:0;top:calc(100% + 9px);width:340px;max-height:calc(100vh - 230px);overflow:auto;padding:13px;border:1px solid var(--line);border-radius:6px;background:var(--surface);box-shadow:0 12px 35px #0008;z-index:25}
+body[data-workspace-stage=export] .export-advanced[open]>.export-advanced-content{display:block}
+body[data-workspace-stage=export] .export-advanced-content>.control-section{padding-bottom:14px;margin-bottom:10px;border-bottom:1px solid var(--line)}
+body[data-workspace-stage=export] .export-advanced-content>#openOutput,body[data-workspace-stage=export] .export-advanced-content>#downloadResult{display:block;margin-top:8px;font-size:11px}
+body[data-workspace-stage=export] .export-output-info{display:none;grid-column:1/-1;margin:0;font-size:11px}
+body[data-workspace-stage=export] .export-output-info[data-warning=true]{display:block;color:#d7be8d}
+body[data-workspace-stage=export] .export-return{grid-column:1/-1;justify-self:start}
+body[data-workspace-stage=export] .viewport-toolbar{grid-column:1;grid-row:2;flex-wrap:wrap;align-content:center}
+body[data-workspace-stage=export] #dropZone{grid-column:1;grid-row:3}
+body[data-workspace-stage=export] .baked-inspection-row{grid-column:1;grid-row:4;white-space:nowrap}
+body[data-workspace-stage=export] .maps-heading{grid-column:2;grid-row:2;display:grid;grid-template-columns:auto minmax(80px,1fr) auto;align-content:center;align-items:center;gap:3px 6px;padding:6px 8px;min-width:0}
+body[data-workspace-stage=export] .maps-heading>b{grid-column:1;grid-row:1;font-size:11px}
+body[data-workspace-stage=export] .maps-heading>label{grid-column:2;grid-row:1;font-size:0;display:block;min-width:0}
+body[data-workspace-stage=export] .maps-heading select{width:100%;height:25px;font-size:10px}
+body[data-workspace-stage=export] .maps-heading .export-map-refresh{grid-column:3;grid-row:1;padding:4px 6px;font-size:10px}
+body[data-workspace-stage=export] .maps-heading .export-maps-status{grid-column:1/-1;grid-row:2;font-size:9px;margin:0!important;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body[data-workspace-stage=export] .map-cards{grid-column:2;grid-row:3/5;display:grid!important;grid-template-columns:minmax(0,1fr);grid-template-rows:repeat(3,minmax(0,1fr));gap:8px;padding:0 8px 8px;border-left:1px solid var(--line)}
+body[data-workspace-stage=export] .map-card>div{padding:6px 7px;gap:4px}
+body[data-workspace-stage=export] .map-card span{font-size:9px}
+body[data-workspace-stage=export].blender-properties-hidden .export-workspace-settings{display:none!important}
+body[data-workspace-stage=export][data-export-view=model] .workspace>.center-panel{grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto minmax(0,1fr) auto}
+body[data-workspace-stage=export][data-export-view=model] .viewport-toolbar,body[data-workspace-stage=export][data-export-view=model] #dropZone,body[data-workspace-stage=export][data-export-view=model] .baked-inspection-row{grid-column:1}
+body[data-workspace-stage=export][data-export-view=maps] .workspace>.center-panel{grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto auto minmax(0,1fr)}
+body[data-workspace-stage=export][data-export-view=maps] .viewport-toolbar{grid-column:1;grid-row:2}
+body[data-workspace-stage=export][data-export-view=maps] .maps-heading{grid-column:1;grid-row:3;display:flex;flex-wrap:nowrap;gap:8px}
+body[data-workspace-stage=export][data-export-view=maps] .maps-heading>label{font-size:10px;width:auto;margin-left:auto}
+body[data-workspace-stage=export][data-export-view=maps] .maps-heading select{width:120px}
+body[data-workspace-stage=export][data-export-view=maps] .map-cards{grid-column:1;grid-row:4;grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:minmax(0,1fr);padding:0 10px 10px;border:0}

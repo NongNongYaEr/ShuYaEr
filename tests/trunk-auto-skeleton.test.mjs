@@ -1,6 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import * as T from '../web/vendor/three.module.min.js';
 import {identifyTrunkSkeleton,isSimpleSkeletonPoint,createTrunkAnalysisInput} from '../web/trunk-auto-skeleton.js';
+import {measureRootCollar} from '../web/trunk-medial-skeleton.js';
 import {validateTrunkGuides,pointOnTrunkGuide} from '../web/imported-trunk-data.js';
 function hollowGroovedTrunk(){
  const position=[],index=[],sides=48,rings=42,height=1.4;
@@ -17,6 +18,50 @@ function hollowGroovedTrunk(){
  return {primitives:[{position,index},{position:Array.from(g.attributes.position.array),index:Array.from(g.index.array)}]};
 }
 function fork(){const primitives=[];for(const [a,b,r]of [[[0,0,0],[0,0,.8],.09],[[0,0,.55],[.4,0,1.15],.045],[[0,0,.6],[-.35,0,1.05],.04]]){const start=new T.Vector3(...a),end=new T.Vector3(...b),g=new T.CylinderGeometry(r*.6,r,start.distanceTo(end),12,1),matrix=new T.Matrix4().compose(start.clone().add(end).multiplyScalar(.5),new T.Quaternion().setFromUnitVectors(new T.Vector3(0,1,0),end.clone().sub(start).normalize()),new T.Vector3(1,1,1));g.applyMatrix4(matrix);primitives.push({position:Array.from(g.attributes.position.array),index:Array.from(g.index.array)});}return {primitives};}
+function trunkWithRootPlate(){
+ const tubes=[[[0,0,0],[0,0,2],.19,.115],[[0,0,.19],[.41,.17,.24],.075,.064],
+  [[.41,.17,.22],[.63,.17,.88],.064,.043],
+  [[0,0,1.2],[-.58,0,1.82],.08,.032]];
+ for(let i=0;i<7;i++){
+  const angle=i/7*Math.PI*2;
+  tubes.push([[0,0,.29],[.83*Math.cos(angle),.83*Math.sin(angle),.13],.075,.04]);
+ }
+ return {primitives:tubes.map(([a,b,startRadius,endRadius])=>{
+  const start=new T.Vector3(...a),end=new T.Vector3(...b);
+  const geometry=new T.CylinderGeometry(endRadius,startRadius,start.distanceTo(end),16,1);
+  geometry.applyQuaternion(new T.Quaternion().setFromUnitVectors(new T.Vector3(0,1,0),end.clone().sub(start).normalize()));
+  geometry.translate(...start.add(end).multiplyScalar(.5).toArray());
+  const result={position:Array.from(geometry.attributes.position.array),index:Array.from(geometry.index.array)};
+  geometry.dispose();
+  return result;
+ })};
+}
+test('wide braided roots keep their collar across the small changes in a reduced mesh',()=>{
+ const sections=spread=>spread.map((value,i)=>({level:i/64,spread:value}));
+ const braided=[NaN,.83,.93,.94,.93,.9,.89,.81,.73,.60,.45,.27,.20,.25,.26,.28,.26,.26,.24,.26,.27,.21,.17,.20,.22,.23,.19,.11];
+ assert.deepEqual(measureRootCollar(sections(braided)),{index:22,method:'gradual'});
+ const altered=braided.map((value,i)=>i<21?value:value+.02);
+ assert.deepEqual(measureRootCollar(sections(altered)),{index:22,method:'gradual'});
+ const shallowFork=braided.map((value,i)=>i<=7?.56:value);
+ assert.equal(measureRootCollar(sections(shallowFork)),null);
+ const upperFork=braided.map((value,i)=>i<=7?.19:value);
+ assert.equal(measureRootCollar(sections(upperFork)),null);
+ const compact=braided.map((value,i)=>i>=24?.16:value);
+ assert.deepEqual(measureRootCollar(sections(compact)),{index:25,method:'compact'});
+});
+test('root collar protection removes basal fan tips but keeps a branch rising from below the collar',()=>{
+ const input=trunkWithRootPlate();
+ const old=identifyTrunkSkeleton(input,{quality:'standard'});
+ const result=identifyTrunkSkeleton(input,{quality:'standard',baseMode:'auto'});
+ validateTrunkGuides(result.guides);
+ const collar=result.summary.root_collar;
+ assert(collar&&collar.top>.16&&collar.top<.47,JSON.stringify(result.summary));
+ assert(result.guides.length<old.guides.length,JSON.stringify({old:old.summary,result:result.summary}));
+ assert(result.guides.slice(1).every(g=>g.points.at(-1)[2]>=collar.top-1e-8));
+ assert(result.guides.some(g=>g.points[0][2]<collar.top&&g.points.at(-1)[0]>.5&&g.points.at(-1)[2]>.7));
+ const upright=fork();
+ assert.deepEqual(identifyTrunkSkeleton(upright,{quality:'fast',baseMode:'auto'}).guides,identifyTrunkSkeleton(upright,{quality:'fast'}).guides);
+});
 test('topology predicate preserves endpoints and rejects a bridge joining disconnected neighbours',()=>{assert.equal(isSimpleSkeletonPoint(0),false);assert.equal(isSimpleSkeletonPoint(1),false);const n=[];for(let z=-1;z<=1;z++)for(let y=-1;y<=1;y++)for(let x=-1;x<=1;x++)if(x||y||z)n.push([x,y,z]);const bit=p=>1<<n.findIndex(v=>v.every((x,k)=>x===p[k]));assert.equal(isSimpleSkeletonPoint(bit([-1,0,0])|bit([1,0,0])),false);assert.equal(isSimpleSkeletonPoint(bit([-1,0,0])|bit([-1,1,0])),true);});
 test('a closed fork becomes one rooted, continuous editable hierarchy without modifying source arrays',()=>{const input=fork(),before=JSON.stringify(input),phases=[],result=identifyTrunkSkeleton(input,{quality:'fast'},p=>phases.push(p));validateTrunkGuides(result.guides);assert(result.guides.length>=3);assert(result.guides.some(g=>g.points.some(p=>p[0]>.28)));assert(result.guides.some(g=>g.points.some(p=>p[0]<-.25)));for(const guide of result.guides.filter(g=>g.parent)){const parent=result.guides.find(g=>g.id===guide.parent);assert(pointOnTrunkGuide(parent.points,guide.attach).position.distanceTo(new T.Vector3(...guide.points[0]))<1e-8);}assert.equal(JSON.stringify(input),before);assert.equal(phases.at(-1).progress,1);assert(phases.every((p,i)=>!i||p.progress>=phases[i-1].progress));const again=identifyTrunkSkeleton(input,{quality:'fast'});assert.deepEqual(again.guides,result.guides);});
 test('analysis input contains only mesh positions, indices and a copied calibration matrix',()=>{const model={primitives:fork().primitives.map(geometry=>({geometry})),images:['private image'],source:{glb_base64:'not needed'}},m=new T.Matrix4().makeTranslation(2,3,4),input=createTrunkAnalysisInput(model,m);assert.deepEqual(Object.keys(input).sort(),['matrix','primitives']);assert.deepEqual(input.matrix,m.elements);assert.notEqual(input.matrix,m.elements);assert(!JSON.stringify(input).includes('private'));});

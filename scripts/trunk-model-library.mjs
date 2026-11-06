@@ -6,7 +6,9 @@ function validate(model){
  validateImportedTrunk(model);validateTrunkGuides(model.guides);trunkCalibrationMatrix(model.calibration);
  if(!TRUNK_ID.test(model.id)||typeof model.name!=='string'||!model.name.trim()||model.name.length>80)throw Error('树干素材名称或身份无效');
  const source=model.source;if(!source||!HASH.test(source.sha256)||typeof source.glb_base64!=='string'||source.glb_base64.length>358000000||!/^[A-Za-z0-9+/]+={0,2}$/.test(source.glb_base64))throw Error('树干缺少内嵌的原始 GLB');
- const bytes=Buffer.from(source.glb_base64,'base64');if(bytes.length!==source.bytes||bytes.length<20||bytes.readUInt32LE(0)!==0x46546c67||sha(bytes)!==source.sha256)throw Error('树干原始 GLB 校验失败');return model;
+ const bytes=Buffer.from(source.glb_base64,'base64');if(bytes.length!==source.bytes||bytes.length<20||bytes.readUInt32LE(0)!==0x46546c67||sha(bytes)!==source.sha256)throw Error('树干原始 GLB 校验失败');
+ if(model.material_editable){const m=model.material_editable;if(m.version!==1||!HASH.test(m.sha256)||typeof m.base64!=='string'||m.base64.length>266666668||!Number.isSafeInteger(m.bytes)||m.bytes<12||m.bytes>200000000)throw Error('材质编辑包无效');const b=Buffer.from(m.base64,'base64');if(b.length!==m.bytes||sha(b)!==m.sha256||b.subarray(0,8).toString()!=='TMLPROJ1')throw Error('材质编辑包校验失败');}
+ return model;
 }
 const indexFile=root=>path.join(root,'catalog.json');
 export function trunkCatalog(root){return fs.existsSync(indexFile(root))?readJSON(indexFile(root)):{version:1,items:[]};}

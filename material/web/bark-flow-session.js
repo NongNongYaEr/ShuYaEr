@@ -1,0 +1,4 @@
+export function runBarkFlowWorker(mesh,options,{setCancel=()=>{},onProgress=()=>{},workerFactory=()=>new Worker('./bark-flow-worker.js',{type:'module'})}={}){
+ const worker=workerFactory();
+ return new Promise((resolve,reject)=>{let ended=false;const finish=(error,result)=>{if(ended)return;ended=true;worker.terminate();error?reject(error):resolve(result);};setCancel(()=>finish(Object.assign(Error('枝干流向计算已取消。'),{name:'AbortError'})));worker.onmessage=({data})=>{if(ended)return;if(data.error)finish(Error(data.error));else if(data.done)finish(null,data);else onProgress(data);};worker.onerror=e=>finish(Error(e.message||'枝干流向计算失败。'));if(ended)return;worker.postMessage({mesh:{pos:mesh.pos,normal:mesh.normal,indices:mesh.indices,min:mesh.min,height:mesh.height,sourceSHA256:mesh.sourceSHA256},...options});});
+}

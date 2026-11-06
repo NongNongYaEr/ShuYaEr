@@ -1,0 +1,39 @@
+/* One authoring workspace: layers / viewport / contextual inspector. */
+body.surface-studio[data-workspace-stage=material] .left-panel>:not(#surfaceOutline),
+body.surface-studio[data-workspace-stage=material] .scroll-controls>:not(#surfaceInspector):not(#baseMaterialProperties):not(#overlayMaterialProperties){display:none!important}
+body.surface-studio .viewport-toolbar .view-tabs{display:none!important}
+body.surface-studio .studio-view-selector{display:flex!important;align-items:center;gap:8px;margin:0;flex:0 1 205px;min-width:120px;white-space:nowrap}
+.studio-view-selector select{width:150px;min-width:0;max-width:100%;flex:1}
+body.surface-studio .viewport-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;padding:7px 10px;min-height:46px;overflow:visible;z-index:10}
+body.surface-studio .viewport-toolbar .view-options{display:flex;align-items:center;gap:5px;flex:0 1 auto;min-width:0;max-width:100%;margin-left:auto;white-space:nowrap}
+.studio-display-settings{position:relative;flex:none;margin:0;padding:0;border:0}
+.studio-display-settings>summary{list-style:none;border:1px solid var(--line,#414649);border-radius:5px;padding:7px 9px;cursor:pointer;font-size:12px}
+.studio-display-settings>summary::-webkit-details-marker{display:none}
+.studio-display-settings[open]>summary{border-color:var(--yellow,#dec25f)}
+.studio-display-fields{position:absolute;right:0;top:calc(100% + 8px);width:255px;padding:14px;background:var(--surface,#272b2d);border:1px solid var(--line,#414649);border-radius:6px;box-shadow:0 8px 28px #0008;z-index:20}
+.studio-display-fields label{display:flex;align-items:center;gap:12px;justify-content:space-between;margin:0 0 12px;font-size:13px}.studio-display-fields label:last-child{margin:0}
+body.surface-studio .view-options .studio-display-fields select{width:146px;max-width:146px;min-width:0}
+#studioMaterialReturn{font-size:12px;color:var(--yellow,#dec25f);padding:6px 9px;margin-right:auto}
+#studioMaterialReturn[hidden],#surfaceReturn[hidden]{display:none!important}
+#surfaceReturn:not([hidden]){display:block;font-size:12px}
+.surface-context{top:70px;left:12px;padding:5px 8px;font-size:12px;max-width:calc(100% - 145px);z-index:3}
+.surface-layer-caption{color:var(--muted,#a5aaa4);line-height:1.5}
+.studio-property-tabs button{font-weight:600}.studio-inspector-header{padding-top:12px}
+.studio-quick-actions{display:flex;gap:7px;margin-top:16px}.studio-quick-actions button{flex:1;padding:8px 5px;font-size:12px}
+.surface-inspector .generation-panel{padding:0;border:0;margin:8px 0 14px}
+.generation-heading{display:flex;flex-direction:column;gap:5px;margin:0 0 12px}.generation-heading strong{font-size:14px}.generation-heading small{color:var(--muted,#a5aaa4);font-size:12px;line-height:1.55}
+.surface-inspector .generation-form{margin:0;padding:0;border:0}.generation-form:not([open])>summary{padding:9px;border:1px solid var(--line,#414649);border-radius:5px;cursor:pointer}
+.generation-panel:not(.is-painting) .generation-form>summary{display:none}
+.generation-modes{margin-bottom:12px}.generation-modes button{min-height:36px}
+.generation-panel .surface-field{margin:12px 0}.generation-panel .surface-field>span{min-width:88px}.generation-panel .surface-field select{width:160px;max-width:60%}
+.surface-inspector .generation-fine{padding:0;border:0;margin:14px 0}.generation-fine>summary{font-size:12px;color:var(--muted,#a5aaa4);cursor:pointer;padding:8px 0;border-top:1px solid var(--line,#414649)}
+.generation-status{margin:8px 0 12px;line-height:1.55;color:var(--muted,#a5aaa4)}
+.generation-footer{position:sticky;bottom:0;z-index:4;background:var(--surface,#272b2d);padding:8px 0 12px;border-bottom:1px solid var(--line,#414649)}
+.generation-actions{display:grid;grid-template-columns:1fr auto;margin:0;gap:7px}.generation-actions .generation-primary{grid-column:1/-1;min-height:38px;font-weight:600}.generation-actions button{min-height:32px;padding:6px 10px;font-size:12px}.generation-actions [hidden]{display:none!important}.generation-actions [data-generation-action=preview]{grid-column:2}
+.generation-advanced{font-size:12px}.generation-advanced>summary{padding:9px 0}.generation-panel.is-painting .generation-footer{border-color:#8da86b}
+.studio-parts-workspace{padding-top:14px}.studio-parts-workspace h3{font-size:16px!important}.studio-parts-workspace .surface-note{margin:10px 0 14px}
+.studio-parts-actions{display:flex;flex-direction:column;gap:7px;margin:14px 0}.studio-parts-actions button{min-height:36px}.studio-parts-actions button:first-child{border-color:var(--yellow,#dec25f);background:#dec25f18}
+.studio-parts-controls>label{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:14px 0;font-size:13px}.studio-parts-controls input:not([type=checkbox]),.studio-parts-controls select{min-width:0;width:155px;max-width:58%;min-height:32px}.studio-parts-controls .uv-buttons{display:flex;gap:6px;margin:9px 0}.studio-parts-controls .uv-buttons button{flex:1;font-size:12px}.studio-parts-controls>button{width:100%;min-height:36px}.studio-parts-workspace canvas{display:block;width:100%;height:auto;margin-top:10px}.studio-parts-workspace details>summary{cursor:pointer;font-size:13px}.studio-parts-workspace .part-material-panel label{font-size:13px}
+@media(max-width:1420px){body.surface-studio .studio-view-selector{flex-basis:170px}.studio-view-selector select{width:125px}body.surface-studio .viewport-toolbar .view-options button{padding:6px;font-size:11px}#studioMaterialReturn{font-size:11px;padding:6px}.studio-display-settings>summary{padding:6px;font-size:11px}}
+
+.studio-asset-settings{margin:10px 0;border:1px solid var(--line,#414649);border-radius:6px;padding:0}.studio-asset-settings>summary{padding:11px 12px;font-size:13px;cursor:pointer}.studio-asset-settings>.control-section{border:0;margin:0;padding:0 12px 12px}.studio-asset-settings>.control-section>h2{display:none}

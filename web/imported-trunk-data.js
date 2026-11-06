@@ -1,4 +1,5 @@
 import {createTrunkGuideIndex} from './trunk-guide-index.js';
+import {trunkWeightRepairs} from './trunk-weight-data.js';
 const guideIndices=new WeakMap();
 import * as THREE from './vendor/three.module.min.js';
 
@@ -9,6 +10,7 @@ export function validateImportedTrunk(asset){
  let vertices=0,triangles=0;const ids=new Set();
  for(const p of asset.primitives){const g=p.geometry;assert(p.id&&!ids.has(p.id),'网格身份重复');ids.add(p.id);assert(Number.isInteger(p.material)&&asset.materials[p.material],'网格材质缺失');assert(g&&Array.isArray(g.position)&&g.position.length>0&&g.position.length%3===0,'顶点数据无效');const count=g.position.length/3;vertices+=count;assert(vertices<=6000000,'顶点超出制作预算');for(const [key,size]of [['normal',3],['uv',2],['tangent',4]])assert(Array.isArray(g[key])&&g[key].length===count*size&&g[key].every(Number.isFinite),'属性无效：'+key);assert(g.position.every(Number.isFinite),'位置含非有限数');assert(Array.isArray(g.index)&&g.index.length>0&&g.index.length%3===0&&g.index.every(i=>Number.isInteger(i)&&i>=0&&i<count),'三角面越界');triangles+=g.index.length/3;assert(triangles<=2000000,'三角面超出制作预算');if(g.color)assert([count*3,count*4].includes(g.color.length)&&g.color.every(Number.isFinite),'顶点颜色无效');}
  for(const m of asset.materials){assert(Array.isArray(m.color)&&m.color.length===4&&m.color.every(v=>Number.isFinite(v)&&v>=0&&v<=1),'材质颜色无效');assert(Number.isFinite(m.roughness)&&m.roughness>=0&&m.roughness<=1&&Number.isFinite(m.metalness)&&m.metalness>=0&&m.metalness<=1,'PBR 参数无效');for(const key of ['baseColor','normal','metallicRoughness','occlusion','emissive'])if(m[key]){const t=m[key];assert(Number.isInteger(t.image)&&asset.images?.[t.image]&&/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(asset.images[t.image].data),'材质贴图缺失或引用外部文件');assert(Array.isArray(t.offset)&&t.offset.length===2&&t.offset.every(Number.isFinite)&&Array.isArray(t.scale)&&t.scale.length===2&&t.scale.every(Number.isFinite)&&Number.isFinite(t.rotation),'贴图变换无效');}}
+ trunkWeightRepairs(asset);
  return asset;
 }
 export function trunkBounds(asset,matrix=new THREE.Matrix4()){

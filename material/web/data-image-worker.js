@@ -1,0 +1,2 @@
+import {decodeDataPNG,heightMipmaps} from './png-data.js';
+self.onmessage=async({data})=>{try{const result=await decodeDataPNG(data.bytes,data.channel,{onProgress:progress=>self.postMessage({progress:progress*.9})});if(result.format==='r32f')result.mipmaps=heightMipmaps(result);self.postMessage({progress:1});self.postMessage({done:true,result},[...new Set([result.data.buffer,...(result.mipmaps||[]).map(m=>m.data.buffer)])]);}catch(error){self.postMessage({error:error.message});}};

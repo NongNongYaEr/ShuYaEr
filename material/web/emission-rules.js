@@ -1,0 +1,5 @@
+// Emission is linear light, independently baked from BaseColor. No bloom claim.
+export const defaultEmission=()=>({version:1,enabled:false,color:'#59d9ef',strength:2,pattern:'bark-cavity',threshold:.38,softness:.06});
+export function validateEmission(raw){if(raw==null)return null;const d={...defaultEmission(),...raw};if(!raw||typeof raw!=='object'||Array.isArray(raw)||d.version!==1||typeof d.enabled!=='boolean'||!/^#[a-f0-9]{6}$/i.test(d.color)||!Number.isFinite(d.strength)||d.strength<0||d.strength>20||!['solid','bark-cavity'].includes(d.pattern)||!Number.isFinite(d.threshold)||d.threshold<0||d.threshold>1||!Number.isFinite(d.softness)||d.softness<.001||d.softness>.5)throw Error('发光材质参数无效。');return {version:1,enabled:d.enabled,color:d.color,strength:d.strength,pattern:d.pattern,threshold:d.threshold,softness:d.softness};}
+// Surface must be flattened first so ancestor enable/opacity is included.
+export function emissionMaximum(surface){if(!surface?.active)return 0;return surface.effects.reduce((sum,e)=>sum+(e.enabled&&e.emission?.enabled&&e.channels.color&&e.opacity>0?e.emission.strength*e.opacity:0),0);}

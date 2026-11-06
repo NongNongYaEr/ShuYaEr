@@ -1,0 +1,2 @@
+import {generateMicrodetailTile,microdetailContentBytes} from './microdetail-tile.js';import {digest} from './model.js';
+self.onmessage=async({data})=>{try{const result=generateMicrodetailTile(data.options,{onProgress:progress=>self.postMessage({progress})});result.contentSHA256=await digest(microdetailContentBytes(result));const transfer=[result.packed16.buffer,result.height16.buffer,...result.levels.map(level=>level.data.buffer)];self.postMessage({done:true,result},transfer);}catch(error){self.postMessage({error:error.message});}};

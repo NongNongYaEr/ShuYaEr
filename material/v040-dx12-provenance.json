@@ -1,0 +1,29 @@
+{
+  "framework": "ShuYaEr V040 native DX12 + C# / WebView2 shared buffers",
+  "upstream": "植物软件V040/02_精简公开源码",
+  "files": [
+    {
+      "path": "native/render/EditorViewport.cpp",
+      "sha256": "a032b906173a0ec059e3579e3c7f70a4de187f7a3d8d90542f07007d78d1509b"
+    },
+    {
+      "path": "native/render/EditorViewport.hlsl",
+      "sha256": "361667dac22c84aaf389571d6a70abe36ecb2d76f05bc9dc8c6ef0bd8ff1b00a"
+    },
+    {
+      "path": "native/BranchGeneratorDesktop.cs",
+      "sha256": "ed050034886978901c73f5b96150c4bcfebda19d957ef2003fde5a5590eb8acb"
+    },
+    {
+      "path": "web/native-viewport.js",
+      "sha256": "220e0f57992d81d564ae4f306646a229c58d2429d50a0c8b1ecda24b6b4a1f40"
+    },
+    {
+      "path": "native/vendor/nlohmann/json.hpp",
+      "sha256": "9226d749fb21c06d3f7cc47ad1b86753e56e6c6e17d29cc7069489855af99b75"
+    }
+  ],
+  "reuse": "D3D12 resources, fence ownership, background render thread, separate CPU/GPU descriptor heaps and shared-buffer presentation boundary; TreeMaterialLab material pipelines and packet ABI are adapted to its existing material data. No changes to upstream V040.",
+  "upstreamLicense": "licenses/ShuYaEr-source-LICENSE.txt",
+  "modification": "TreeMaterialLab-specific native material viewport and UV-space bake path; no Streamline/DLSS dependency required."
+}

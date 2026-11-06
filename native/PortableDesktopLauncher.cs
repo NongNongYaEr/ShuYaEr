@@ -60,7 +60,7 @@ namespace TreeDuckPortable
                         throw new InvalidDataException("程序包尾部校验失败，请重新下载。");
                     long offset = input.Length - 24 - length;
                     input.Position = offset;
-                    progress(2, "正在检查内置程序和样本…");
+                    progress(2, "正在检查内置程序和资源…");
                     using (SHA256 hash = SHA256.Create())
                     {
                         byte[] buffer = new byte[1048576]; long remaining = length;
@@ -135,9 +135,10 @@ namespace TreeDuckPortable
     {
         internal static int RunApplication(string directory)
         {
-            ProcessStartInfo start = new ProcessStartInfo(Path.Combine(directory, "树鸭儿.exe"));
+            ProcessStartInfo start = new ProcessStartInfo(Path.Combine(directory, PackageConfig.Entry));
             start.WorkingDirectory = directory; start.UseShellExecute = false;
             start.EnvironmentVariables["BRANCHFORGE_APP_ROOT"] = directory;
+            if(Environment.GetEnvironmentVariable("BRANCHFORGE_PORTABLE_TEST_QUIET")=="1" && !String.IsNullOrEmpty(Environment.GetEnvironmentVariable("BRANCHFORGE_PORTABLE_CACHE_ROOT")))start.Arguments="--verify-release";
             using (Process child = Process.Start(start)) { child.WaitForExit(); return child.ExitCode; }
         }
         [STAThread]

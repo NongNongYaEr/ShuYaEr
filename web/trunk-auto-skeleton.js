@@ -32,10 +32,12 @@ export function identifyTrunkSkeleton(input,options={},progress=()=>{}){
  function edt(start,step,n){let positive=false;for(let q=0;q<n;q++){values[q]=distance[start+q*step];positive||=values[q]>0;}if(!positive)return;let k=0;sites[0]=0;cuts[0]=-Infinity;cuts[1]=Infinity;for(let q=1;q<n;q++){let split;do{const v=sites[k];split=((values[q]+q*q)-(values[v]+v*v))/(2*(q-v));if(split<=cuts[k])k--;else break;}while(k>=0);k++;sites[k]=q;cuts[k]=split;cuts[k+1]=Infinity;}k=0;for(let q=0;q<n;q++){while(cuts[k+1]<q)k++;const v=sites[k];result[q]=(q-v)*(q-v)+values[v];}for(let q=0;q<n;q++)distance[start+q*step]=result[q];}
  for(let z=0;z<nz;z++)for(let y=0;y<ny;y++)edt(z*stride+y*nx,1,nx);for(let z=0;z<nz;z++)for(let x=0;x<nx;x++)edt(z*stride+x,nx,ny);for(let y=0;y<ny;y++)for(let x=0;x<nx;x++)edt(y*nx+x,stride,nz);
  notify('提取中心骨架',.38);
- const traced=traceTrunkMedialTree({grid,shape,origin,pitch,bounds,distance,solid:best,minRatio,toleranceFactor,includeRoots:!!options.includeRoots,notify});
+ const protectBase=options.baseMode==='auto';
+ const traced=traceTrunkMedialTree({grid,shape,origin,pitch,bounds,distance,solid:best,minRatio,toleranceFactor,includeRoots:!!options.includeRoots,protectBase,notify});
  const guides=traced.guides,warnings=[];
  if(components>1)warnings.push('检测到 '+components+' 个独立部分，本次仅识别最大的树干部分；请检查其他网格。');
  if(pitch>Math.max(...extent)/requested*1.01)warnings.push('已按模型大小调整分析精度，以保持内存可控。');
+ if(traced.rootCollar)warnings.push('已识别根盘，根区内的末端不单独生成控制枝；通向上部的枝干仍可在根区连接。');
  warnings.push('已过滤树皮沟槽与短凸起；请检查真实分叉并在应用后试弯曲，候选骨架仍可手动调整。');notify('候选骨架已生成',1);
- return {version:1,guides,summary:{algorithm:'volume-medial-paths-v2',quality,detail,density,requested_resolution:requested,pitch_m:pitch,grid:shape,source_triangles:triangles,solid_voxels:best.length,filled_section_voxels:filledSectionVoxels,skeleton_voxels:traced.selected,iterations:traced.paths,visited_voxels:traced.processed,pruned_spurs:traced.pruned,ignored_components:components-1,control_branches:guides.length,control_points:guides.reduce((n,g)=>n+g.points.length,0),suggested_root:traced.root,seconds:(performance.now()-started)/1000},warnings};
+ return {version:1,guides,summary:{algorithm:protectBase?'volume-medial-paths-v4':'volume-medial-paths-v2',quality,detail,density,requested_resolution:requested,pitch_m:pitch,grid:shape,source_triangles:triangles,solid_voxels:best.length,filled_section_voxels:filledSectionVoxels,skeleton_voxels:traced.selected,iterations:traced.paths,visited_voxels:traced.processed,pruned_spurs:traced.pruned,ignored_components:components-1,control_branches:guides.length,control_points:guides.reduce((n,g)=>n+g.points.length,0),suggested_root:traced.root,...(traced.rootCollar?{root_collar:traced.rootCollar}:{}),seconds:(performance.now()-started)/1000},warnings};
 }

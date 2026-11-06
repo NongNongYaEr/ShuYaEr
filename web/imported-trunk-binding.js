@@ -4,6 +4,7 @@ import {isImmutableJson} from './immutable-json.js';
 import {trunkSurfaceTangents} from './trunk-surface-tangents.js';
 import {axisTimes,sampleAxis} from './branch-axis.js';
 import {branchMountAt} from './branch-mount-frame.js';
+import {FIXED_TRUNK_ROOT,trunkWeightRepairs} from './trunk-weight-data.js';
 
 const sourceCache = new WeakMap(), up = new T.Vector3(0,0,1);
 const fail = message => {throw Error('树干绑定：'+message);};
@@ -32,7 +33,7 @@ function regionGuides(asset,primitiveId) {
   if(!Array.isArray(ids)||!ids.length||ids.some(id=>!asset.guides.some(g=>g.id===id)))fail('网格控制区域引用了不存在的骨架');
   return asset.guides.filter(g=>ids.includes(g.id));
 }
-function sourceBinding(asset) {
+export function trunkSourceBinding(asset) {
   if(isImmutableJson(asset)&&sourceCache.has(asset))return sourceCache.get(asset);
   validateTrunkGuides(asset.guides);
   const calibration=trunkCalibrationMatrix(asset.calibration),normalMatrix=new T.Matrix3().getNormalMatrix(calibration);
@@ -40,20 +41,23 @@ function sourceBinding(asset) {
     const a=axis(g.points),first=pointOnTrunkGuide(g.points,0).tangent;
     const x=new T.Vector3(1,0,0).applyQuaternion(new T.Quaternion().setFromUnitVectors(up,first));
     return {...g,...a,frames:frames(a.points,x)};
-  }),byId=new Map(guides.map(g=>[g.id,g]));
+  }),byId=new Map(guides.map(g=>[g.id,g])),guideIndex=new Map(guides.map((g,i)=>[g.id,i]));
+  const repairs=trunkWeightRepairs(asset),individual=new Map(asset.guides.map(g=>[g.id,Object.freeze([g])]));
   const primitives=asset.primitives.map(primitive=>{
     const src=primitive.geometry,count=src.position.length/3,g={...src,position:[],normal:[],tangent:[]},guideIndices=new Uint16Array(count),nodes=new Uint16Array(count),factors=new Float64Array(count),tangents=trunkSurfaceTangents(src.normal,src.tangent);
-    const candidates=Object.freeze(regionGuides(asset,primitive.id));
+    const candidates=Object.freeze(regionGuides(asset,primitive.id)),overrides=repairs.get(primitive.id);
     for(let i=0;i<count;i++){
       const p=new T.Vector3().fromArray(src.position,i*3).applyMatrix4(calibration);
       g.position.push(...p.toArray());g.normal.push(...new T.Vector3().fromArray(src.normal,i*3).applyMatrix3(normalMatrix).normalize().toArray());
       g.tangent.push(...new T.Vector3().fromArray(tangents,i*4).transformDirection(calibration).toArray(),tangents[i*4+3]);
-      const hit=closestTrunkGuide(p,candidates),guide=byId.get(hit.id);
+      const target=overrides?.get(i);
+      if(target===FIXED_TRUNK_ROOT)continue;
+      const hit=closestTrunkGuide(p,target?individual.get(target):candidates);
       // The same source position always receives the same binding, including
       // duplicated material/UV seam vertices. Face ownership never drives skin.
-      guideIndices[i]=guides.indexOf(guide);nodes[i]=hit.index;factors[i]=hit.u;
+      guideIndices[i]=guideIndex.get(hit.id);nodes[i]=hit.index;factors[i]=hit.u;
     }
-    return {id:primitive.id,geometry:g,guideIndices,nodes,factors};
+    return {id:primitive.id,geometry:g,guideIndices,nodes,factors,overrides};
   });
   const result={guides,byId,primitives};if(isImmutableJson(asset))sourceCache.set(asset,result);return result;
 }
@@ -67,7 +71,7 @@ function initialRotation(current,rest) {
   return explicit.premultiply(new T.Quaternion().setFromUnitVectors(before,after));
 }
 export function createTrunkPose(asset,mount,branches) {
-  const source=sourceBinding(asset),byStable=new Map(branches.map(b=>[b.stableId,b])),bones=new Map();
+  const source=trunkSourceBinding(asset),byStable=new Map(branches.map(b=>[b.stableId,b])),bones=new Map();
   for(const rest of source.guides){
     const current=byStable.get(mount.guide_map[rest.id]);if(!current)fail('控制枝丢失：'+rest.id);
     const posed=axis(current.points),q=initialRotation(current,rest),x=new T.Vector3().setFromMatrixColumn(rest.frames[0],0).applyQuaternion(q);
@@ -87,6 +91,21 @@ export function createTrunkPose(asset,mount,branches) {
   if(mount.binding!=='FLEX')fail('未知绑定模式');
   return {source,bones,rigid:null};
 }
+
+export function createTrunkJointPose(source,{guide,index},rotation){
+  const selected=source.byId.get(guide),pivot=selected?.points[index];
+  if(!pivot||index>=selected.points.length-1)fail('请选择有效的骨架段');
+  const turn=new T.Matrix4().makeRotationFromQuaternion(rotation);
+  turn.setPosition(pivot.clone().sub(pivot.clone().applyMatrix4(turn)));
+  const identity=new T.Matrix4(),bones=new Map(),descendants=new Set();
+  for(const branch of source.guides){
+    const follows=descendants.has(branch.parent)||branch.parent===guide&&branch.attach>=selected.times[index]-1e-8;
+    if(follows)descendants.add(branch.id);
+    bones.set(branch.id,branch.points.map((_,i)=>follows||branch.id===guide&&i>=index?turn:identity));
+  }
+  return {source,bones,rigid:null};
+}
+
 export function deformTrunkPrimitive(pose,primitiveId) {
   const primitive=pose.source.primitives.find(p=>p.id===primitiveId);if(!primitive)fail('网格不存在');
   const src=primitive.geometry,g={...src,position:new Array(src.position.length),normal:new Array(src.normal.length),tangent:new Array(src.tangent.length)},normalMatrices=new Map();

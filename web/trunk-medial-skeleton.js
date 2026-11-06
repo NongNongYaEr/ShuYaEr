@@ -34,10 +34,80 @@ function simplify(points,tolerance){
  return max<=tolerance?[a,b]:[...simplify(points.slice(0,at+1),tolerance).slice(0,-1),...simplify(points.slice(at),tolerance)];
 }
 
-export function traceTrunkMedialTree({grid,shape,origin,pitch,bounds,distance,solid,minRatio,toleranceFactor,includeRoots=false,notify=()=>{}}){
+// A root plate has several broad sections near the base followed by a
+// sustained return to a compact shaft. Use the same solid volume and local
+// medial radius as the path tracer so this test is independent of units.
+function findRootCollar({shape,origin,pitch,bounds,distance,solid}){
+ const [nx,ny,nz]=shape,stride=nx*ny;
+ const bottom=bounds.min[2],height=bounds.max[2]-bottom;
+ const first=Math.max(1,Math.ceil((bottom-origin[2])/pitch-1e-8));
+ const last=Math.min(nz-2,Math.floor((bottom+height*.43-origin[2])/pitch));
+ const step=Math.max(1,Math.round(height*.015/pitch));
+ const slots=new Int32Array(nz).fill(-1),slices=[];
+ for(let z=first;z<=last;z+=step){
+  slots[z]=slices.length;
+  slices.push({z,center:-1,radiusSquared:0,count:0,outside:0});
+ }
+ for(const voxel of solid){
+  const slice=slices[slots[Math.floor(voxel/stride)]];
+  if(!slice)continue;
+  slice.count++;
+  if(distance[voxel]>slice.radiusSquared){
+   slice.center=voxel;
+   slice.radiusSquared=distance[voxel];
+  }
+ }
+ for(const slice of slices){
+  slice.x=slice.center%nx;
+  slice.y=Math.floor(slice.center/nx)%ny;
+  slice.limitSquared=(1.8*Math.sqrt(slice.radiusSquared)+1)**2;
+ }
+ for(const voxel of solid){
+  const slice=slices[slots[Math.floor(voxel/stride)]];
+  if(!slice)continue;
+  const dx=voxel%nx-slice.x,dy=Math.floor(voxel/nx)%ny-slice.y;
+  if(dx*dx+dy*dy>slice.limitSquared)slice.outside++;
+ }
+ const sections=slices.map(slice=>({
+  level:(origin[2]+slice.z*pitch-bottom)/height,
+  spread:slice.count>=12&&slice.radiusSquared>=1?slice.outside/slice.count:NaN
+ }));
+ const transition=measureRootCollar(sections);
+ if(!transition)return null;
+ return {bottom,top:origin[2]+slices[transition.index].z*pitch,method:transition.method};
+}
+
+export function measureRootCollar(sections){
+ let broadRun=0,wideRun=0,broadBase=false,wideBase=false,gradual=null;
+ for(let i=0;i<sections.length;i++){
+  const {level,spread}=sections[i];
+  if(level<=.12){
+   broadRun=spread>=.48?broadRun+1:0;
+   wideRun=spread>=.70?wideRun+1:0;
+   broadBase||=broadRun>=3;
+   wideBase||=wideRun>=3;
+  }
+  if(!broadBase||i<2)continue;
+  const a=sections[i-2].spread,b=sections[i-1].spread,c=spread;
+  const widest=Math.max(a,b,c);
+  // The middle sample avoids truncating a sloping root at the first compact
+  // slice. Keep the strict transition when the profile has a clear one.
+  if(widest<=.18)return {index:i-1,method:'compact'};
+  // Braided trunks can retain a secondary lobe in one slice. Require a
+  // confirmed wide base and a sustained contraction across three slices.
+  const compactSlices=Number(a<=.22)+Number(b<=.22)+Number(c<=.22);
+  if(wideBase&&!gradual&&widest<=.26&&compactSlices>=2){
+   gradual={index:i-1,method:'gradual'};
+  }
+ }
+ return gradual;
+}
+
+export function traceTrunkMedialTree({grid,shape,origin,pitch,bounds,distance,solid,minRatio,toleranceFactor,includeRoots=false,protectBase=false,notify=()=>{}}){
  const [nx,ny,nz]=shape,stride=nx*ny,total=grid.length,height=bounds.max[2]-bounds.min[2],offsets=neighbours.map(([x,y,z])=>x+y*nx+z*stride);
  const voxel=i=>[i%nx,Math.floor(i/nx)%ny,Math.floor(i/stride)];
  const world=i=>voxel(i).map((v,k)=>origin[k]+v*pitch);
+ const rootCollar=protectBase&&!includeRoots?findRootCollar({shape,origin,pitch,bounds,distance,solid}):null;
  let root=-1,maxRadius=-1,maxDistance=0;
  for(const i of solid){maxDistance=Math.max(maxDistance,distance[i]);const z=world(i)[2];if(z>=bounds.min[2]+height*.04&&z<=bounds.min[2]+height*.15&&distance[i]>maxRadius){root=i;maxRadius=distance[i];}}
  if(root<0)root=solid.reduce((a,b)=>world(a)[2]<world(b)[2]?a:b);
@@ -49,7 +119,10 @@ export function traceTrunkMedialTree({grid,shape,origin,pitch,bounds,distance,so
   for(let n=0;n<offsets.length;n++){const j=i+offsets[n];if(!grid[j]||Math.floor(j/stride)<floor)continue;const step=neighbours[n][3],next=c+step*(weight[i]+weight[j])*.5;if(next<cost[j]){cost[j]=next;parent[j]=i;arc[j]=arc[i]+step;heap.push(j,next);}}
   if(processed%16384===0)notify('沿木干中心追踪',.4+.3*processed/solid.length);
  }
- const candidates=solid.filter(i=>Number.isFinite(cost[i])).sort((a,b)=>arc[b]-arc[a]||distance[b]-distance[a]||a-b),covered=new Uint8Array(total),chosen=new Uint8Array(total),minimum=height*minRatio/pitch;
+ // Limit endpoints only. Paths feeding real branches can still pass through
+ // and attach below the collar, even on a bent or leaning trunk.
+ const endpointFloor=rootCollar?Math.ceil((rootCollar.top-origin[2])/pitch-1e-8):floor;
+ const candidates=solid.filter(i=>Number.isFinite(cost[i])&&Math.floor(i/stride)>=endpointFloor).sort((a,b)=>arc[b]-arc[a]||distance[b]-distance[a]||a-b),covered=new Uint8Array(total),chosen=new Uint8Array(total),minimum=height*minRatio/pitch;
  let pruned=0,paths=0;chosen[root]=1;
  function cover(i){
   const [x,y,z]=voxel(i),r=Math.sqrt(distance[i])*1.6+2,rr=r*r,limit=Math.ceil(r);
@@ -91,5 +164,5 @@ export function traceTrunkMedialTree({grid,shape,origin,pitch,bounds,distance,so
   for(const args of pending)build(...args);
  }
  build(root);
- return {guides,root:rootPosition,selected:selected.length,pruned,paths,processed};
+ return {guides,root:rootPosition,selected:selected.length,pruned,paths,processed,rootCollar};
 }

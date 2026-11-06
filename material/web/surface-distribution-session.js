@@ -1,0 +1,8 @@
+const abort=()=>Object.assign(Error('表面分布已取消或被较新结果替换。'),{name:'AbortError'});
+export class SurfaceDistributionSession{
+ constructor(source,working,{workerFactory=()=>new Worker('./surface-distribution-worker.js',{type:'module'})}={}){this.source=source;this.working=working;this.worker=workerFactory();this.initial=true;this.serial=0;this.disposed=false;this.worker.onmessage=({data})=>{if(!this.active||data.id!==this.active.id)return;const task=this.active;this.active=null;if(data.error){const e=Error(data.error);e.missing=data.missing;task.reject(e);}else task.resolve(data);this.flush();};this.worker.onerror=e=>this.dispose(Error(e.message||'表面分布计算失败。'));}
+ request(options){if(this.disposed)return Promise.reject(abort());this.queued?.reject(abort());return new Promise((resolve,reject)=>{this.queued={id:++this.serial,options:structuredClone(options),resolve,reject};this.flush();});}
+ retarget(working){if(this.disposed)throw abort();this.working=working;}
+ flush(){if(this.disposed||this.active||!this.queued)return;this.active=this.queued;this.queued=null;const{id,options}=this.active,working=this.working;this.worker.postMessage({id,...options,...(this.initial?{source:{pos:this.source.pos,normal:this.source.normal,indices:this.source.indices,min:this.source.min,height:this.source.height,sourceSHA256:this.source.sourceSHA256}}:{}),...(this.sentWorking!==working?{working:{pos:working.pos,uv:working.uv,indices:working.indices}}:{})});this.sentWorking=working;this.initial=false;}
+ dispose(error=abort()){if(this.disposed)return;this.disposed=true;this.worker.terminate();this.active?.reject(error);this.queued?.reject(error);this.active=this.queued=null;}
+}

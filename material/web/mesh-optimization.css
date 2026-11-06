@@ -1,0 +1,8 @@
+#meshOptimizationPanel .mesh-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+#meshOptimizationPanel .mesh-grid label{display:flex;flex-direction:column;gap:4px;min-width:0}
+#meshOptimizationPanel .mesh-grid input{width:100%;box-sizing:border-box}
+#meshOptimizationPanel button{min-height:30px}
+#meshOptimizationPanel #meshOptimizationSource{overflow-wrap:anywhere;margin:8px 0}
+#meshOptimizationPanel #meshOptimizationStatus{color:var(--accent,#e2cb73);font-size:12px;line-height:1.6;margin:10px 0}
+#meshOptimizationBadge{position:absolute;top:85px;left:16px;background:#26362bea;color:#f4dc85;padding:6px 9px;border:1px solid #84955c;border-radius:4px;font-size:12px;pointer-events:none;max-width:80%}
+body.mesh-optimization-active .editing-context{opacity:.4}

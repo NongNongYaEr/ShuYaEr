@@ -1,0 +1,29 @@
+import {scopeWeight} from './region-scope.js';
+// Surface-space tools deliberately use source triangle IDs, never a UV mask.
+class Heap{constructor(){this.a=[];}push(item){const a=this.a;let i=a.length;a.push(item);while(i){const p=(i-1)>>1;if(a[p][0]<=item[0])break;a[i]=a[p];i=p;}a[i]=item;}pop(){const a=this.a,result=a[0],last=a.pop();if(a.length){let i=0;for(;;){let c=i*2+1;if(c>=a.length)break;if(c+1<a.length&&a[c+1][0]<a[c][0])c++;if(a[c][0]>=last[0])break;a[i]=a[c];i=c;}a[i]=last;}return result;}get length(){return this.a.length;}}
+const norm=v=>{const l=Math.hypot(...v)||1;return v.map(x=>x/l);},cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+export function buildSurfaceGraph(mesh){
+  const {pos,indices}=mesh,n=pos.length/3,mapping=new Uint32Array(n),unique=new Map(),points=[];let minY=Infinity,maxY=-Infinity;for(const i of indices){minY=Math.min(minY,pos[i*3+1]);maxY=Math.max(maxY,pos[i*3+1]);}const height=Math.max(maxY-minY,1e-8);
+  for(let i=0;i<n;i++){const p=Array.from(pos.subarray(i*3,i*3+3)),key=p.join(',');let id=unique.get(key);if(id==null){id=points.length;unique.set(key,id);points.push(p);}mapping[i]=id;}
+  const adjacency=points.map(()=>new Map());for(let i=0;i<indices.length;i+=3)for(let c=0;c<3;c++){const a=mapping[indices[i+c]],b=mapping[indices[i+(c+1)%3]];if(a===b)continue;const d=Math.hypot(...points[a].map((x,k)=>x-points[b][k]));adjacency[a].set(b,d);adjacency[b].set(a,d);}
+  return {mesh,mapping,points,adjacency,height,minY,maxY};
+}
+export function distances(graph,seeds,maxDistance=Infinity){const result=new Float64Array(graph.points.length).fill(Infinity),heap=new Heap();for(const [id,d]of seeds)if(d<result[id]){result[id]=d;heap.push([d,id]);}while(heap.length){const [d,i]=heap.pop();if(d!==result[i]||d>maxDistance)continue;for(const [j,edge]of graph.adjacency[i]){const next=d+edge;if(next<result[j]&&next<=maxDistance){result[j]=next;heap.push([next,j]);}}}return result;}
+export function growthDirections(graph){
+  const {mesh,mapping,points,adjacency,height,minY}=graph,seen=new Uint8Array(points.length),seeds=[];
+  // Every disconnected wood component receives its own lowest root ring.
+  for(let start=0;start<points.length;start++)if(!seen[start]){const stack=[start],component=[];seen[start]=1;let bottom=Infinity;while(stack.length){const i=stack.pop();component.push(i);bottom=Math.min(bottom,points[i][1]);for(const j of adjacency[i].keys())if(!seen[j]){seen[j]=1;stack.push(j);}}for(const i of component)if(points[i][1]<=bottom+height*.002)seeds.push([i,0]);}
+  const d=distances(graph,seeds),acc=points.map(()=>[0,0,0]);
+  for(let f=0;f<mesh.indices.length;f+=3){const ids=[mesh.indices[f],mesh.indices[f+1],mesh.indices[f+2]].map(i=>mapping[i]),[p,q,r]=ids.map(i=>points[i]),e=q.map((x,k)=>x-p[k]),g=r.map((x,k)=>x-p[k]),ee=dot(e,e),gg=dot(g,g),eg=dot(e,g),det=ee*gg-eg*eg;if(det<height**4*1e-20)continue;const a=((d[ids[1]]-d[ids[0]])*gg-(d[ids[2]]-d[ids[0]])*eg)/det,b=((d[ids[2]]-d[ids[0]])*ee-(d[ids[1]]-d[ids[0]])*eg)/det,weight=Math.sqrt(det);for(const id of ids)for(let k=0;k<3;k++)acc[id][k]+=(a*e[k]+b*g[k])*weight;}
+  let axes=acc.map(norm);for(let pass=0;pass<3;pass++){const next=axes.map((a,i)=>{const sum=a.map(x=>x*3);for(const j of adjacency[i].keys())for(let c=0;c<3;c++)sum[c]+=axes[j][c];return norm(sum);});axes=next;}
+  const result=new Float32Array(mesh.pos.length);for(let i=0;i<mapping.length;i++){const normal=Array.from(mesh.normal.subarray(i*3,i*3+3)),a=axes[mapping[i]],along=dot(a,normal);let t=a.map((x,c)=>x-normal[c]*along);if(Math.hypot(...t)<1e-6){const up=[0,1,0],ny=normal[1];t=up.map((x,c)=>x-normal[c]*ny);if(Math.hypot(...t)<1e-6)t=cross(normal,[1,0,0]);}result.set(norm(t),i*3);}return result;
+}
+export const REGION_LAYERS=['moss','paint','lichen','dirt','wet','aging'];
+export function evaluateRegions(graph,regions=[],actualHeightMeters=10){
+  const n=graph.points.length,masks=new Map(REGION_LAYERS.map(id=>[id,new Float32Array(n).fill(1)]));
+  for(const region of regions){if(!masks.has(region.layer))continue;const values=masks.get(region.layer);values.fill(region.mode==='painted'?0:1);
+    for(const stroke of region.strokes||[]){if(stroke.operation==='smooth')throw Error('平滑笔触需要像素遮罩模式。');const face=stroke.face;if(!Number.isInteger(face)||face<0||face*3+2>=graph.mesh.indices.length)throw Error('遮罩笔触的源三角面无效。');const bary=stroke.bary;if(bary.length!==3||bary.some(x=>!Number.isFinite(x)||x<0||x>1)||Math.abs(bary.reduce((s,x)=>s+x,0)-1)>1e-4)throw Error('遮罩重心坐标无效。');const ids=[0,1,2].map(c=>graph.mapping[graph.mesh.indices[face*3+c]]),hit=[0,1,2].map(k=>ids.reduce((s,id,c)=>s+graph.points[id][k]*bary[c],0)),radius=stroke.radiusMeters/actualHeightMeters*graph.height;if(!(radius>0))throw Error('笔刷半径无效。');const d=distances(graph,ids.map(id=>[id,Math.hypot(...hit.map((x,k)=>x-graph.points[id][k]))]),radius),hardness=Math.max(0,Math.min(.99,stroke.hardness??.5)),strength=Math.max(0,Math.min(1,stroke.strength??1)),target=stroke.value===0?0:1;for(let i=0;i<n;i++){const q=d[i]/radius;if(q>1)continue;let falloff=Math.max(0,Math.min(1,(1-q)/(1-hardness)));falloff=falloff*falloff*(3-2*falloff);values[i]+=(target-values[i])*falloff*strength;}}
+  }
+  const scopes=REGION_LAYERS.map(id=>regions.find(r=>r.layer===id)?.scope),result=new Float32Array(graph.mapping.length*6);for(let i=0;i<graph.mapping.length;i++)for(let c=0;c<6;c++)result[i*6+c]=masks.get(REGION_LAYERS[c])[graph.mapping[i]]*scopeWeight(scopes[c],(graph.mesh.pos[i*3+1]-graph.minY)/graph.height);return result;
+}
+export function remapSurfaceData(source,working,components){const result=new Float32Array(working.sourceIndices.length*components);for(let i=0;i<working.sourceIndices.length;i++)for(let c=0;c<components;c++)result[i*components+c]=source[working.sourceIndices[i]*components+c];return result;}

@@ -1,0 +1,10 @@
+export const MICRODETAIL_DEFAULTS=Object.freeze({version:1,enabled:false,locked:false,size:512,seed:31,tileWidthMeters:.12,grainMeters:.002,heightMm:.08,strength:1,roughnessAmount:.04});
+export const MICRODETAIL_ALGORITHM='periodic-d4-gradient-roughness-v1';
+export function mergeRecipeMicrodetail(current,incoming){const before=validateMicrodetail(current);return before.locked||incoming==null?before:validateMicrodetail(incoming);}
+export function validateMicrodetail(raw){
+ raw=raw??MICRODETAIL_DEFAULTS;if(raw.version!==1||typeof raw.enabled!=='boolean'||typeof raw.locked!=='boolean'||![512,1024].includes(raw.size)||!Number.isInteger(raw.seed)||raw.seed<0||raw.seed>10000)throw Error('近景细节配置无效。');const next={version:1,enabled:raw.enabled,locked:raw.locked,size:raw.size,seed:raw.seed};
+ for(const [key,min,max]of [['tileWidthMeters',.025,.5],['grainMeters',.00025,.025],['heightMm',.001,.5],['strength',0,2],['roughnessAmount',0,.3]]){const value=raw[key];if(!Number.isFinite(value)||value<min||value>max)throw Error('近景细节参数无效：'+key);next[key]=value;}
+ const cells=Math.round(next.tileWidthMeters/next.grainMeters);if(cells<4||cells>Math.floor(next.size/6))throw Error('当前粒度超出这张细节图的采样范围，请增大颗粒、缩小单次宽度或提高细节分辨率。');return next;
+}
+export function microdetailGenerationKey(raw){const options=validateMicrodetail(raw);return JSON.stringify({algorithm:MICRODETAIL_ALGORITHM,size:options.size,seed:options.seed,cells:Math.round(options.tileWidthMeters/options.grainMeters)});}
+export function microdetailSampling(raw){const options=validateMicrodetail(raw),cells=Math.round(options.tileWidthMeters/options.grainMeters);return{algorithm:MICRODETAIL_ALGORITHM,cells,effectiveGrainMeters:options.tileWidthMeters/cells,gradientRange:cells*4,heightMeters:options.heightMm*options.strength*.001,normalBlend:'surface-gradient-addition-v1',projection:'object-local-meters-triplanar-power4',symmetry:'signed-axis-permutation-invariant',mipPolicy:'average decoded gradients and signed roughness; manual trilinear preview'};}

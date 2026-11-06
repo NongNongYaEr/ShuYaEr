@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$Config,
-    [string]$Engine = 'Z:/UEEngine/UE_5.8/Engine/Binaries/Win64/UnrealEditor-Cmd.exe',
-    [string]$BridgePlugins = 'Z:/UEproject/Day30Man/Plugins'
+    [Parameter(Mandatory=$true)][string]$Engine,
+    [Parameter(Mandatory=$true)][string]$BridgePlugins
 )
 $ErrorActionPreference = 'Stop'
 $toolRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
