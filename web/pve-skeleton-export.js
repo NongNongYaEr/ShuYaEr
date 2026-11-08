@@ -115,12 +115,19 @@ export function createPVESkeleton(asset, leafSources = []) {
 export function validatePVESkeleton(skeleton) {
   const errors = [], warnings = [];
   if (skeleton?.format !== 'BranchForgePVESkeleton' || ![1, 2, 3].includes(skeleton.version)) errors.push('格式或版本不受支持');
-  if(skeleton.version===3&&(!skeleton.required_capabilities?.includes('imported_trunk_materials_v1')||skeleton.imported_trunks?.version!==1))errors.push('外部树干能力声明缺失');
+  const hasMeshUnits = skeleton?.foliage_sources?.some?.(source => source?.mesh_unit === true);
+  const meshCapability = skeleton?.required_capabilities?.includes?.('native_mesh_units_v1');
+  if (hasMeshUnits && (skeleton.version !== 3 || !meshCapability)) errors.push('完整网格装配能力声明缺失');
   if(skeleton.version===3){
-    if(!Array.isArray(skeleton.required_capabilities)||skeleton.required_capabilities.some(c=>!['imported_trunk_materials_v1','imported_trunk_skin_v1'].includes(c)))errors.push('PVE 入口需要当前桥接尚不支持的能力');
+    const caps = skeleton.required_capabilities;
+    if(!Array.isArray(caps)||caps.some(c=>!['imported_trunk_materials_v1','imported_trunk_skin_v1','native_mesh_units_v1'].includes(c)))errors.push('PVE 入口需要当前桥接尚不支持的能力');
     const imported=skeleton.imported_trunks,sources=imported?.sources,mounts=imported?.mounts;
+    if (!imported && (!hasMeshUnits || !meshCapability || caps?.length !== 1)) errors.push('V3 入口缺少完整网格装配或外部树干');
+    if (imported) {
+    if (!caps?.includes?.('imported_trunk_materials_v1') || !caps?.includes?.('imported_trunk_skin_v1') || imported.version !== 1) errors.push('外部树干能力声明缺失');
     if(!Array.isArray(sources)||!sources.length||!Array.isArray(mounts)||!mounts.length)errors.push('外部树干来源或实例清单缺失');
     else{const ids=new Set(),mounted=new Set(),branches=new Set((skeleton.branches||[]).map(b=>b.id));for(const s of sources){if(typeof s.id!=='string'||ids.has(s.id)||!Number.isInteger(s.revision)||s.revision<1||!/^[a-f0-9]{64}$/i.test(s.source_sha256||''))errors.push('外部树干来源身份或哈希无效');ids.add(s.id);}for(const m of mounts){if(typeof m.id!=='string'||mounted.has(m.id)||!sources.some(s=>s.id===m.asset_id&&s.revision===m.revision)||!m.guide_map||!Object.values(m.guide_map).length||Object.values(m.guide_map).some(id=>!branches.has(id)))errors.push('外部树干实例或控制枝引用无效');mounted.add(m.id);}}
+    }
   }
   if (skeleton?.coordinate_system?.up !== 'Z' || skeleton?.coordinate_system?.unit !== 'meter'
     || skeleton?.coordinate_system?.handedness !== 'right') errors.push('坐标或单位不受支持');

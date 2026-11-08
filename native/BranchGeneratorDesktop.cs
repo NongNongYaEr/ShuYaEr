@@ -39,7 +39,8 @@ namespace BranchGeneratorFBXTool
     {
         private readonly WebView2 webView;
         private readonly StartupPanel loadingLabel;
-        private Process serverProcess;
+        private PlantServerProcess serverProcess;
+        private Task serverPipeReads;
         private string serverUrl;
         private readonly StringBuilder serverErrors = new StringBuilder();
         private bool closing;
@@ -62,6 +63,9 @@ namespace BranchGeneratorFBXTool
         private readonly string appDir;
         private readonly string testDirectory;
         private readonly string nativeDirectory;
+        private readonly string graphicsMode;
+        private bool nativeCompatibility;
+        private Task nativeCompatibilityRelease = Task.FromResult(false);
 
         [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
         private static extern IntPtr LoadLibraryEx(string path, IntPtr file, uint flags);
@@ -81,11 +85,14 @@ namespace BranchGeneratorFBXTool
         private static extern void BFViewportCapture(IntPtr view, string path);
 
         public MainForm() : this(null) {}
-        public MainForm(string directory)
+        public MainForm(string directory) : this(directory, null) {}
+        internal MainForm(string directory, string launchGraphicsMode)
         {
             appDir = directory ?? AppDomain.CurrentDomain.BaseDirectory;
             string overrideRoot = Environment.GetEnvironmentVariable("BRANCHFORGE_APP_ROOT");
             if (directory == null && !string.IsNullOrEmpty(overrideRoot) && File.Exists(Path.Combine(overrideRoot,"server.ps1")) && Directory.Exists(Path.Combine(overrideRoot,"web"))) appDir=Path.GetFullPath(overrideRoot);
+            graphicsMode = ShuYaErV050.GraphicsPreference.IsMode(launchGraphicsMode)
+                ? launchGraphicsMode : ShuYaErV050.GraphicsPreference.Read(appDir);
             testDirectory = Environment.GetEnvironmentVariable("BRANCHFORGE_DESKTOP_TEST_DIR");
             if (!string.IsNullOrEmpty(testDirectory)) {
                 testDirectory=Path.GetFullPath(testDirectory);
@@ -162,6 +169,7 @@ namespace BranchGeneratorFBXTool
                 await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
                     "window.__treeDuckDesktopStartup = true;" +
                     "window.__branchForgeNativeRequired = true;" +
+                    "window.__shuyaerGraphicsMode = " + nativeJson.Serialize(graphicsMode) + ";" +
                     "window.__branchForgeDesktopBuild = " + nativeJson.Serialize(System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString()) + ";" +
                     "window.__branchForgeNativeHost = "+(File.Exists(Path.Combine(nativeDirectory,"BranchForgeViewport.dll"))?"true;":"false;")+
                     "window.addEventListener('error', function(e) { if (e.message) window.chrome.webview.postMessage('tree-duck:startup-error:' + e.message); });");
@@ -195,18 +203,21 @@ namespace BranchGeneratorFBXTool
         }
         private void NativeMessage(object value) { if(!closing&&webView.CoreWebView2!=null)webView.CoreWebView2.PostWebMessageAsJson(nativeJson.Serialize(value)); }
         private void OnNativeMessage(object sender,CoreWebView2WebMessageReceivedEventArgs args) {
-            if(closing||!TrustedMessage(args))return;
+            if(closing||nativeCompatibility||graphicsMode==ShuYaErV050.GraphicsPreference.Compatibility||!TrustedMessage(args))return;
+            string action=null;
             try {
                 string text=args.TryGetWebMessageAsString();if(text==null||text.Length>8192||!text.StartsWith("{"))return;
                 var data=nativeJson.Deserialize<Dictionary<string,object>>(text);if(!data.ContainsKey("topic")||(string)data["topic"]!="branchforge-native")return;
-                string action=(string)data["action"];
+                action=(string)data["action"];
                 if(action!="initialize"&&!string.IsNullOrEmpty(nativeTransportSession)){
                     string requested=data.ContainsKey("transportSession")?Convert.ToString(data["transportSession"]):"";
                     // Untagged diagnostics are available only in an isolated
                     // test profile. Tagged packets from old mappings never run.
                     if(requested!=nativeTransportSession&&(data.ContainsKey("transportSession")||string.IsNullOrEmpty(testDirectory)))return;
                 }
-                if(action=="initialize") {
+                if(action=="use-compatibility"&&graphicsMode==ShuYaErV050.GraphicsPreference.Auto){
+                    DisableNativeViewport();
+                } else if(action=="initialize") {
                     nativeTransportSession=data.ContainsKey("transportSession")?Convert.ToString(data["transportSession"]):"";
                     if(data.ContainsKey("restart")&&Convert.ToBoolean(data["restart"])&&nativeView!=IntPtr.Zero){nativeTimer.Stop();BFViewportDestroy(nativeView);nativeView=IntPtr.Zero;nativePanel.Visible=false;nativeVisible=false;nativePanel.ResetSurface();}
                     if(nativeView==IntPtr.Zero) {
@@ -248,7 +259,17 @@ namespace BranchGeneratorFBXTool
                 else if(action=="fail-test-transport"&&!string.IsNullOrEmpty(testDirectory)&&nativeView!=IntPtr.Zero){byte[] header=Encoding.UTF8.GetBytes("{\"version\":999}");Marshal.WriteInt32(sharedBuffer.Buffer,header.Length);Marshal.Copy(header,0,IntPtr.Add(sharedBuffer.Buffer,4),header.Length);BFViewportSubmit(nativeView,sharedBuffer.Buffer,(uint)(header.Length+4));}
                 else if(action=="replay-test-transport"&&!string.IsNullOrEmpty(testDirectory)){NativeMessage(new {topic="branchforge-native",action="status",transportSession=Convert.ToString(data["replayTransport"]),status=new {error="Stale transport test status",ready=false}});}
                 else if(action=="dispose") {nativePanel.Visible=false;nativeVisible=false;}
-            } catch(Exception error) { NativeMessage(new {topic="branchforge-native",action="error",message=error.Message,transportSession=nativeTransportSession}); }
+            } catch(Exception error) { NativeMessage(new {topic="branchforge-native",action="error",operation=action,message=error.Message,transportSession=nativeTransportSession}); }
+        }
+        private void DisableNativeViewport() {
+            nativeCompatibility=true;
+            nativeTimer.Stop();
+            nativePanel.Visible=false;
+            nativeVisible=false;
+            IntPtr handle=nativeView;
+            nativeView=IntPtr.Zero;
+            if(sharedBuffer!=null){sharedBuffer.Dispose();sharedBuffer=null;}
+            if(handle!=IntPtr.Zero)nativeCompatibilityRelease=Task.Run(()=>BFViewportDestroy(handle));
         }
         private void PollNative() {
             if(closing||nativeView==IntPtr.Zero)return;
@@ -333,37 +354,41 @@ namespace BranchGeneratorFBXTool
                 FileName = Path.Combine(Environment.SystemDirectory, @"WindowsPowerShell\v1.0\powershell.exe"),
                 Arguments = "-NoProfile -NonInteractive -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" + scriptPath + "\" -Port " + port + " -NoBrowser -Desktop",
                 WorkingDirectory = Path.GetDirectoryName(scriptPath),
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                WindowStyle = ProcessWindowStyle.Hidden,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
                 StandardOutputEncoding = Encoding.UTF8,
                 StandardErrorEncoding = Encoding.UTF8
             };
             if(!string.IsNullOrEmpty(testDirectory))info.EnvironmentVariables["BRANCHFORGE_SESSION_TEST_DIR"]=Path.Combine(Path.GetDirectoryName(testDirectory),"plant-session");
-            serverProcess = Process.Start(info);
-            if (serverProcess == null) throw new InvalidOperationException("无法启动树鸭儿本地服务。");
-            serverProcess.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e)
+            serverProcess = PlantServerProcess.Start(info);
+            Task stdout = ReadServerLinesAsync(serverProcess.StandardOutput, line =>
             {
-                if (e.Data == null || !e.Data.StartsWith(readyPrefix, StringComparison.Ordinal)) return;
+                if (!line.StartsWith(readyPrefix, StringComparison.Ordinal)) return;
                 int actualPort;
-                if (int.TryParse(e.Data.Substring(readyPrefix.Length), out actualPort)
+                if (int.TryParse(line.Substring(readyPrefix.Length), out actualPort)
                     && actualPort >= port && actualPort - port < 20 && IsBrowserPortAllowed(actualPort))
                     ready.TrySetResult(actualPort);
                 else ready.TrySetException(new InvalidOperationException("本机后台服务返回的端口无效。"));
-            };
-            serverProcess.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e)
+            });
+            Task stderr = ReadServerLinesAsync(serverProcess.StandardError, line =>
             {
-                if (String.IsNullOrWhiteSpace(e.Data)) return;
+                if (String.IsNullOrWhiteSpace(line)) return;
                 lock (serverErrors)
                 {
-                    if (serverErrors.Length < 8000) serverErrors.AppendLine(e.Data);
+                    if (serverErrors.Length < 8000) serverErrors.AppendLine(line);
                 }
-            };
-            serverProcess.BeginOutputReadLine();
-            serverProcess.BeginErrorReadLine();
+            });
+            serverPipeReads = Task.WhenAll(stdout, stderr);
             return ready.Task;
+        }
+
+        private static async Task ReadServerLinesAsync(StreamReader reader, Action<string> onLine)
+        {
+            try
+            {
+                string line;
+                while ((line = await reader.ReadLineAsync().ConfigureAwait(false)) != null) onLine(line);
+            }
+            catch (IOException) { }
+            catch (ObjectDisposedException) { }
         }
 
         private async Task WaitForServerAsync(Task<int> readyPort, int timeoutMs)
@@ -375,8 +400,10 @@ namespace BranchGeneratorFBXTool
                 if (closing) return;
                 if (serverProcess.HasExited)
                 {
-                    await Task.Delay(100); // Let redirected stderr reach the diagnostic buffer.
-                    throw new InvalidOperationException("本机后台服务已退出（代码 " + serverProcess.ExitCode + "）。");
+                    await Task.WhenAny(serverPipeReads, Task.Delay(200));
+                    if (closing) return;
+                    int code = serverProcess.ExitCode;
+                    throw new InvalidOperationException("本机后台服务已退出（代码 " + code + "，0x" + code.ToString("X8") + "）。");
                 }
                 if (!readyPort.IsCompleted)
                 {
@@ -456,14 +483,15 @@ namespace BranchGeneratorFBXTool
                 }
             }
             catch { }
+            PlantServerProcess process = serverProcess;
+            serverProcess = null;
+            if (process == null) return;
             try
             {
-                if (serverProcess != null && !serverProcess.HasExited)
-                {
-                    if (!serverProcess.WaitForExit(700)) serverProcess.Kill();
-                }
+                if (!process.WaitForExit(700)) process.Kill();
             }
             catch { }
+            finally { process.Dispose(); }
         }
     }
 

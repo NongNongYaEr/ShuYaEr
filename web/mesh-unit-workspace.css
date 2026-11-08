@@ -1,0 +1,42 @@
+@import './mesh-unit-thumbnail.css';
+
+.mesh-unit-placement-bar {
+  position: absolute;
+  z-index: 24;
+  left: 50%;
+  bottom: 54px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  color: #f0ead9;
+  background: #242a2d;
+  border: 1px solid #687477;
+  border-radius: 8px;
+}
+.mesh-unit-placement-bar[hidden], .mesh-unit-placed[hidden], .mesh-unit-batch[hidden] { display: none; }
+.mesh-unit-placement-bar label { white-space: nowrap; }
+.mesh-unit-placed { margin: 8px 0; }
+.mesh-unit-placed h3 { margin: 0 0 6px; }
+.mesh-unit-placed-row, .mesh-unit-placed-actions { display: flex; gap: 4px; margin: 4px 0; }
+.mesh-unit-placed-row button:first-child { flex: 1; text-align: left; }
+.mesh-unit-placed button[aria-pressed="true"] { border-color: #ffd879; }
+
+.mesh-unit-batch { margin: 8px 0; }
+.mesh-unit-batch h3 { margin: 0 0 6px; }
+.mesh-unit-batch-zone { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+.mesh-unit-batch-zone > strong, .mesh-unit-batch-zone > .wb-assembly-drop { grid-column: 1 / -1; }
+.mesh-unit-batch-zone > strong { display: flex; justify-content: space-between; align-items: center; }
+.mesh-unit-zone-selection { display: flex; gap: 4px; }
+.mesh-unit-batch-zone.drag-over { border-color: var(--yellow, #ffd879); }
+.mesh-unit-batch-card { min-width: 0; }
+.mesh-unit-batch-card > .mesh-unit-batch-name,
+#treeAssemblyOverview .mesh-unit-batch-card > .mesh-unit-batch-name {
+  position: static; display: grid; gap: 3px; width: 100%; min-width: 0; height: auto;
+  padding: 0; border: 0; border-radius: 5px; background: transparent; text-align: left;
+}
+.mesh-unit-batch-name > img { width: 100%; height: 74px; object-fit: contain; background: var(--preview-bg); border-radius: 5px; }
+.mesh-unit-batch-name > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.mesh-unit-batch-name:focus-visible { outline: 2px solid var(--yellow, #ffd879); outline-offset: 2px; }
+.mesh-unit-batch-card .wb-assembly-placeholder svg { width: 18px; height: 18px; }

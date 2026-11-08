@@ -1,26 +1,66 @@
 import {collectUvCharts} from './uv-charts.js';
 import {findOutlinePlacement} from './outline-collision.js';
 import {compactChartFrame,chartLocalUV} from './uv-chart-frame.js';
-function rasterTriangle(mask,w,h,points){const det=(points[1][0]-points[0][0])*(points[2][1]-points[0][1])-(points[1][1]-points[0][1])*(points[2][0]-points[0][0]),sign=det<0?-1:1,minX=Math.max(0,Math.floor(Math.min(...points.map(p=>p[0])))),maxX=Math.min(w-1,Math.floor(Math.max(...points.map(p=>p[0])))),minY=Math.max(0,Math.floor(Math.min(...points.map(p=>p[1])))),maxY=Math.min(h-1,Math.floor(Math.max(...points.map(p=>p[1])))),edges=points.map((a,i)=>{const b=points[(i+1)%3],dx=b[0]-a[0],dy=b[1]-a[1];return[-dy*sign,dx*sign,(dy*a[0]-dx*a[1])*sign];});for(let y=minY;y<=maxY;y++)for(let x=minX;x<=maxX;x++){let inside=true;for(const [a,b,c]of edges)if(a*(a>=0?x+1:x)+b*(b>=0?y+1:y)+c< -1e-8){inside=false;break;}if(inside)mask[y*w+x]=1;}}
-function dilate(raw,w,h,radius){if(!radius)return raw;const horizontal=new Uint8Array(raw.length),result=new Uint8Array(raw.length);for(let y=0;y<h;y++){let sum=0;for(let x=0;x<=radius&&x<w;x++)sum+=raw[y*w+x];for(let x=0;x<w;x++){horizontal[y*w+x]=sum>0;if(x-radius>=0)sum-=raw[y*w+x-radius];if(x+radius+1<w)sum+=raw[y*w+x+radius+1];}}for(let x=0;x<w;x++){let sum=0;for(let y=0;y<=radius&&y<h;y++)sum+=horizontal[y*w+x];for(let y=0;y<h;y++){result[y*w+x]=sum>0;if(y-radius>=0)sum-=horizontal[(y-radius)*w+x];if(y+radius+1<h)sum+=horizontal[(y+radius+1)*w+x];}}return result;}
+import {clearanceAtResolution,measureUvClearance} from './uv-clearance.js';
+export function rasterTriangle(mask,w,h,points){const det=(points[1][0]-points[0][0])*(points[2][1]-points[0][1])-(points[1][1]-points[0][1])*(points[2][0]-points[0][0]),sign=det<0?-1:1,minX=Math.max(0,Math.floor(Math.min(...points.map(p=>p[0])))),maxX=Math.min(w-1,Math.floor(Math.max(...points.map(p=>p[0])))),minY=Math.max(0,Math.floor(Math.min(...points.map(p=>p[1])))),maxY=Math.min(h-1,Math.floor(Math.max(...points.map(p=>p[1])))),edges=points.map((a,i)=>{const b=points[(i+1)%3],dx=b[0]-a[0],dy=b[1]-a[1];return[-dy*sign,dx*sign,(dy*a[0]-dx*a[1])*sign];});for(let y=minY;y<=maxY;y++)for(let x=minX;x<=maxX;x++){let inside=true;for(const [a,b,c]of edges)if(a*(a>=0?x+1:x)+b*(b>=0?y+1:y)+c< -1e-8){inside=false;break;}if(inside)mask[y*w+x]=1;}}
+export function dilate(raw,w,h,radius){if(!radius)return raw;const horizontal=new Uint8Array(raw.length),result=new Uint8Array(raw.length);for(let y=0;y<h;y++){let sum=0;for(let x=0;x<=radius&&x<w;x++)sum+=raw[y*w+x];for(let x=0;x<w;x++){horizontal[y*w+x]=sum>0;if(x-radius>=0)sum-=raw[y*w+x-radius];if(x+radius+1<w)sum+=raw[y*w+x+radius+1];}}for(let x=0;x<w;x++){let sum=0;for(let y=0;y<=radius&&y<h;y++)sum+=horizontal[y*w+x];for(let y=0;y<h;y++){result[y*w+x]=sum>0;if(y-radius>=0)sum-=horizontal[(y-radius)*w+x];if(y+radius+1<h)sum+=horizontal[(y+radius+1)*w+x];}}return result;}
 const popcount=x=>{x-=x>>>1&0x55555555;x=(x&0x33333333)+(x>>>2&0x33333333);return((x+(x>>>4)&0x0f0f0f0f)*0x01010101)>>>24;};
 function pattern(bitmap,w,h,stride){const rows=new Map();for(let y=0;y<h;y++)for(let x=0;x<w;x++)if(bitmap[y*w+x]){const offset=y*stride+(x>>5);rows.set(offset,(rows.get(offset)||0)|(1<<(x&31)));}const sorted=[...rows].sort((a,b)=>popcount(b[1])-popcount(a[1])||a[0]-b[0]),entries=new Uint32Array(sorted.length*2);for(let i=0;i<sorted.length;i++){entries[i*2]=sorted[i][0];entries[i*2+1]=sorted[i][1];}return{w,h,entries};}
 function rotate(bitmap,w,h){const out=new Uint8Array(bitmap.length);for(let y=0;y<h;y++)for(let x=0;x<w;x++)out[(w-1-x)*h+y]=bitmap[y*w+x];return out;}
-function packOutlineVariant(mesh,{resolution=2048,padding=12,pins=[],weights={},faceCharts=null,allowOutOfRange=false,quarterTurns=false,onProgress=()=>{},gridLimit=1024,refineFrom=null,compact=false,order='area',deadline=Infinity,pixelScale=1,singleTrial=false}={}){
+function packOutlineVariant(mesh,{resolution=2048,padding=12,pins=[],weights={},faceCharts=null,allowOutOfRange=false,quarterTurns=false,onProgress=()=>{},gridLimit=1024,refineFrom=null,compact=false,order='area',deadline=Infinity,pixelScale=1,singleTrial=false,orderTries=1}={}){
   if(!Number.isInteger(resolution)||resolution<256||resolution>4096||!Number.isInteger(padding)||padding<0||padding>48)throw Error('轮廓重排参数无效。');const {charts,faceIslands}=collectUvCharts(mesh,{faceCharts,allowOutOfRange}),locked=new Set(pins);for(const id of locked){if(!charts[id])throw Error('锁定规则与当前UV布局不一致，请清空规则。');const c=charts[id];if(c.min.some(v=>v<0)||c.max.some(v=>v>1))throw Error('锁定岛需保留在0–1 UV内。');}for(const [id,v]of Object.entries(weights))if(!charts[Number(id)]||!Number.isFinite(v)||v<.5||v>4)throw Error('UV密度规则无效。');
   const grid=Math.min(gridLimit,resolution*pixelScale),stride=Math.ceil(grid/32),margin=Math.ceil((padding+.5)/resolution*grid),baseBitmap=new Uint8Array(grid*grid);for(const c of charts)if(locked.has(c.id))for(const f of c.faces)rasterTriangle(baseBitmap,grid,grid,[0,1,2].map(k=>{const i=mesh.indices[f*3+k];return[mesh.uv[i*2]*grid,mesh.uv[i*2+1]*grid];}));const fixed=dilate(baseBitmap,grid,grid,margin),fixedPattern=pattern(fixed,grid,grid,stride),initial=new Uint32Array(grid*stride);for(let i=0;i<fixedPattern.entries.length;i+=2)initial[fixedPattern.entries[i]]=fixedPattern.entries[i+1];
   if(compact)for(const c of charts)if(!locked.has(c.id))c.frame=compactChartFrame(mesh,c);
-  const dimensions=c=>c.frame?[c.frame.width,c.frame.height]:[c.max[0]-c.min[0],c.max[1]-c.min[1]],score=c=>{const [w,h]=dimensions(c),weight=weights[c.id]||1;return order==='length'?Math.max(w,h)*weight:w*h*weight*weight;};
-  const moving=charts.filter(c=>!locked.has(c.id)).sort((a,b)=>score(b)-score(a)||a.id-b.id);let searchTimedOut=false;
+  const dimensions=c=>c.frame?[c.frame.width,c.frame.height]:[c.max[0]-c.min[0],c.max[1]-c.min[1]];
+  function score(c){
+   const [w,h]=dimensions(c),weight=weights[c.id]||1;
+   if(order==='length')return Math.max(w,h)*weight;
+   if(order==='perimeter')return (w+h)*weight;
+   if(order==='surface'){
+    let area=0;
+    for(const f of c.faces){
+     const a=mesh.indices[f*3]*2,b=mesh.indices[f*3+1]*2,d=mesh.indices[f*3+2]*2,t=mesh.uv;
+     area+=Math.abs((t[b]-t[a])*(t[d+1]-t[a+1])-(t[b+1]-t[a+1])*(t[d]-t[a]));
+    }
+    return area*.5*weight*weight;
+   }
+   return w*h*weight*weight;
+  }
+  const moving=charts.filter(c=>!locked.has(c.id)).map(chart=>({chart,score:score(chart)}))
+   .sort((a,b)=>b.score-a.score||a.chart.id-b.chart.id).map(item=>item.chart);
+  let searchTimedOut=false;
   function make(c,factor){const [cw,ch]=dimensions(c),w=Math.ceil(cw*grid*factor)+margin*2+2,h=Math.ceil(ch*grid*factor)+margin*2+2;if(w>grid||h>grid)return null;const raw=new Uint8Array(w*h);for(const face of c.faces)rasterTriangle(raw,w,h,[0,1,2].map(k=>{const [u,v]=chartLocalUV(mesh,c,mesh.indices[face*3+k]);return[margin+u*grid*factor,margin+v*grid*factor];}));const bitmap=dilate(raw,w,h,margin);const one=rotate(bitmap,w,h),result=[pattern(bitmap,w,h,stride),pattern(one,h,w,stride)];if(quarterTurns){const two=rotate(one,h,w);result.push(pattern(two,w,h,stride),pattern(rotate(two,w,h),h,w,stride));}return result;}
-  function fit(scale){const occupied=initial.slice(),placed=new Map(),anchors=new Map([['0,0',[0,0]]]);
+  let blockedIndex=-1;
+  function fitOrder(scale,sequence,cache){const occupied=initial.slice(),placed=new Map(),anchors=new Map([['0,0',[0,0]]]);
     function collision(mask,x,y){if(x<0||y<0||x+mask.w>grid||y+mask.h>grid)return true;const base=y*stride+(x>>5),shift=x&31,entries=mask.entries;for(let i=0;i<entries.length;i+=2){const at=base+entries[i],bits=entries[i+1];if(occupied[at]&(bits<<shift))return true;if(shift&&occupied[at+1]&(bits>>>(32-shift)))return true;}return false;}
     function stamp(mask,x,y){const base=y*stride+(x>>5),shift=x&31,e=mask.entries;for(let i=0;i<e.length;i+=2){const at=base+e[i],bits=e[i+1];occupied[at]|=bits<<shift;if(shift)occupied[at+1]|=bits>>>(32-shift);}}
-    for(const chart of moving){if(Date.now()>deadline){searchTimedOut=true;return null;}const factor=scale*(weights[chart.id]||1),masks=make(chart,factor);if(!masks)return null;let choice=null;const candidates=[...anchors.values()].sort((a,b)=>a[1]-b[1]||a[0]-b[0]);for(const [x,y]of candidates){for(let r=0;r<masks.length;r++)if(!collision(masks[r],x,y)){choice={x,y,rotated:!!r,rotation:r,mask:masks[r]};break;}if(choice)break;}
+    for(const [index,chart] of sequence.entries()){if(Date.now()>deadline){searchTimedOut=true;return null;}const factor=scale*(weights[chart.id]||1),masks=cache?.get(chart.id)||make(chart,factor);if(!masks)return null;cache?.set(chart.id,masks);let choice=null;const candidates=[...anchors.values()].sort((a,b)=>a[1]-b[1]||a[0]-b[0]);for(const [x,y]of candidates){for(let r=0;r<masks.length;r++)if(!collision(masks[r],x,y)){choice={x,y,rotated:!!r,rotation:r,mask:masks[r]};break;}if(choice)break;}
       if(compact&&choice?.y>0)choice=findOutlinePlacement(occupied,masks,grid,stride,2,{maxRow:choice.y-1})||choice;
       if(!choice)choice=findOutlinePlacement(occupied,masks,grid,stride,grid>=1024?2:1);
-      if(!choice)return null;stamp(choice.mask,choice.x,choice.y);placed.set(chart.id,{x:choice.x,y:choice.y,rotated:choice.rotated,rotation:choice.rotation,factor,baseWidth:masks[0].w,baseHeight:masks[0].h});const right=choice.x+choice.mask.w,bottom=choice.y+choice.mask.h;for(const p of [[right,choice.y],[choice.x,bottom],[right,bottom],[0,bottom],[right,0]])if(p[0]<grid&&p[1]<grid)anchors.set(p.join(','),p);
+      if(!choice){blockedIndex=index;return null;}stamp(choice.mask,choice.x,choice.y);placed.set(chart.id,{x:choice.x,y:choice.y,rotated:choice.rotated,rotation:choice.rotation,factor,baseWidth:masks[0].w,baseHeight:masks[0].h});const right=choice.x+choice.mask.w,bottom=choice.y+choice.mask.h;for(const p of [[right,choice.y],[choice.x,bottom],[right,bottom],[0,bottom],[right,0]])if(p[0]<grid&&p[1]<grid)anchors.set(p.join(','),p);
     }placed.footprint=occupied.reduce((sum,bits)=>sum+popcount(bits),0)/(grid*grid);return placed;
+  }
+  function fit(scale){
+    if(orderTries===1)return fitOrder(scale,moving);
+    const sequence=moving.slice(),cache=new Map(),seen=new Set();
+    const promotions=[.55,.72,.35,.83,.2];
+    let best=sequence.slice(),deepest=-1;
+    for(let attempt=0;attempt<orderTries;attempt++){
+      blockedIndex=-1;
+      const fit=fitOrder(scale,sequence,cache);
+      if(fit||blockedIndex<1)return fit;
+      if(blockedIndex>deepest){deepest=blockedIndex;best=sequence.slice();}
+      const [blocked]=sequence.splice(blockedIndex,1);
+      sequence.splice(Math.floor(blockedIndex*promotions[attempt%promotions.length]),0,blocked);
+      const key=sequence.slice(0,deepest+3).map(chart=>chart.id).join(',');
+      if(seen.has(key)||attempt%6===5){
+        sequence.splice(0,sequence.length,...best);
+        const [blocker]=sequence.splice(deepest,1);
+        sequence.splice(Math.floor(deepest*(attempt%7+1)/8),0,blocker);
+      }
+      seen.add(key);
+    }
+    return null;
   }
   let scale=1,placements=new Map(),refinementFits=0;
   if(moving.length){
@@ -70,4 +110,30 @@ export function packOutlineCharts(mesh,options={}){
  if(result!==prior){result.packing.orientationSearch={...prior.packing.orientationSearch,scope:'baseline-before-compaction'};result.packing.precisionSearch={...prior.packing.precisionSearch,scope:'baseline-before-compaction'};}
  result.packing.compactionSearch={algorithm:'rigid-hull-contour-nesting-v1',eligible:compactEligible,pixelPrecisionEligible:pixelEligible,selected:result!==prior,baselineScale:prior.packing.scale,selectedScale:result.packing.scale,alignedCharts:result.packing.alignedCharts||0,trials,maxExtraFits:pixelEligible?11:10,budgetMs:pixelEligible?20000:12000,elapsedMs:Date.now()-started};
  onProgress(1);return result;
+}
+
+// A changed chart layout may be skipped if it cannot match the current atlas
+// density. Try that scale directly on a fine grid before doing any full search.
+export function packOutlineAtScale(mesh,{scale,resolution,padding,faceCharts,onProgress=()=>{}}){
+ const deadline=Date.now()+30000;
+ const trials=[[1536,'perimeter'],[4096,'area'],[2048,'surface'],[4096,'surface'],
+  [2048,'area'],[2048,'length'],[4096,'perimeter'],[4096,'length']];
+ for(const [index,[gridLimit,order]] of trials.entries()){
+  if(Date.now()>=deadline)break;
+  const result=packOutlineVariant(mesh,{resolution,padding,faceCharts,allowOutOfRange:true,
+   compact:true,order,gridLimit,pixelScale:gridLimit>1536&&resolution<=2048?2:1,
+   quarterTurns:true,refineFrom:scale,singleTrial:true,deadline});
+  onProgress((index+1)/trials.length);
+  if(result&&clearanceAtResolution(measureUvClearance(result),{resolution,padding}).safe)return result;
+ }
+ return null;
+}
+
+// Hold the larger outlines while fitting the remaining islands at their
+// existing scale. The caller validates the complete provisional atlas.
+export function fitAroundIslands(mesh,{resolution,padding,faceCharts,pins,deadline,weights={},
+ gridLimit=4096,pixelScale=2,orderTries=8}){
+ return packOutlineVariant(mesh,{resolution,padding,faceCharts,pins,deadline,weights,
+  allowOutOfRange:true,compact:true,quarterTurns:true,gridLimit,pixelScale,
+  refineFrom:1,singleTrial:true,orderTries});
 }

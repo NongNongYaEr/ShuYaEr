@@ -51,6 +51,8 @@ namespace TreeMaterialLab {
     }
     sealed partial class MainForm:Form {
         readonly string root;
+        readonly string graphicsMode;
+        string activeRenderer;
         readonly string token=Guid.NewGuid().ToString("N");
         readonly JavaScriptSerializer json=new JavaScriptSerializer();
         readonly WebView2 view;NativeDX12Host nativeViewport;
@@ -67,9 +69,12 @@ namespace TreeMaterialLab {
 
         readonly Control presentationRoot;readonly bool embeddedComponent;
         public MainForm(string directory):this(directory,null){}
-        public MainForm(string directory,Control mount){
+        public MainForm(string directory,Control mount):this(directory,mount,null){}
+        internal MainForm(string directory,Control mount,string launchGraphicsMode){
             presentationRoot=mount??this;embeddedComponent=mount!=null;
             root=directory;Text="树鸭儿 · 树材质工作台 "+typeof(MainForm).Assembly.GetName().Version.ToString(2);
+            graphicsMode=ShuYaErV050.GraphicsPreference.IsMode(launchGraphicsMode)
+                ?launchGraphicsMode:ShuYaErV050.GraphicsPreference.Read(root);
             BackColor=Color.FromArgb(29,36,32);MinimumSize=new Size(1024,720);Size=new Size(1440,960);StartPosition=FormStartPosition.CenterScreen;WindowState=FormWindowState.Maximized;
             loading=new Label{Dock=DockStyle.Fill,Text="树材质工坊\r\n\r\n正在准备材质工作台…",TextAlign=ContentAlignment.MiddleCenter,ForeColor=Color.FromArgb(199,219,168),BackColor=BackColor,Font=new Font("Microsoft YaHei UI",13)};
             string iconPath=Path.Combine(root,"web","brand","tree-duck-v5.ico");if(File.Exists(iconPath))Icon=new Icon(iconPath);view=new WebView2{Dock=DockStyle.Fill,Visible=false,DefaultBackgroundColor=Color.Transparent};presentationRoot.Controls.Add(view);presentationRoot.Controls.Add(loading);
@@ -90,23 +95,46 @@ namespace TreeMaterialLab {
             if(closing)return;if(!online)throw new Exception("材质服务启动超时。");
             var environment=await CoreWebView2Environment.CreateAsync(null,Path.Combine(runtime,"WebView2"));if(closing)return;await view.EnsureCoreWebView2Async(environment);if(closing)return;
             var settings=view.CoreWebView2.Settings;settings.AreDevToolsEnabled=false;settings.AreDefaultContextMenusEnabled=false;settings.IsStatusBarEnabled=false;settings.IsZoomControlEnabled=false;settings.AreBrowserAcceleratorKeysEnabled=false;
-            await view.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync("window.__treeMaterialHostConfig={desktop:true,embedded:true,componentMount:"+(embeddedComponent?"true":"false")+",apiBase:'/api',hostVersion:'"+typeof(MainForm).Assembly.GetName().Version.ToString(3)+"',hostFamily:'shuyaer-v040',renderer:'v040-dx12'};window.addEventListener('error',function(e){window.chrome.webview.postMessage(JSON.stringify({topic:'tree-material-lab',action:'startup-error',message:e.message||'界面模块或资源载入失败'}));});window.addEventListener('unhandledrejection',function(e){window.chrome.webview.postMessage(JSON.stringify({topic:'tree-material-lab',action:'startup-error',message:String(e.reason&&e.reason.message||e.reason)}));});");
+            bool useCompatibility=graphicsMode==ShuYaErV050.GraphicsPreference.Compatibility;
+            var hostConfig=new {desktop=true,embedded=true,componentMount=embeddedComponent,apiBase="/api",
+                hostVersion=typeof(MainForm).Assembly.GetName().Version.ToString(3),hostFamily="shuyaer-v040",
+                renderer=useCompatibility?"webgl2":"v040-dx12"};
+            await view.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
+                "window.__shuyaerGraphicsMode="+json.Serialize(graphicsMode)+";window.__treeMaterialHostConfig="+json.Serialize(hostConfig)+
+                ";window.addEventListener('error',function(e){window.chrome.webview.postMessage(JSON.stringify({topic:'tree-material-lab',action:'startup-error',message:e.message||'界面模块或资源载入失败'}));});"+
+                "window.addEventListener('unhandledrejection',function(e){window.chrome.webview.postMessage(JSON.stringify({topic:'tree-material-lab',action:'startup-error',message:String(e.reason&&e.reason.message||e.reason)}));});");
             if(closing)return;
-            InstallIntegration();nativeViewport=new NativeDX12Host(presentationRoot,view,root,Log);view.CoreWebView2.WebMessageReceived+=Message;
+            InstallIntegration();
+            if(!useCompatibility)nativeViewport=new NativeDX12Host(presentationRoot,view,root,Log);
+            view.CoreWebView2.WebMessageReceived+=Message;
             view.CoreWebView2.DownloadStarting+=delegate(object sender,CoreWebView2DownloadStartingEventArgs args){var operation=args.DownloadOperation;if(operation.State==CoreWebView2DownloadState.InProgress)downloads.Add(operation);operation.StateChanged+=delegate{if(operation.State!=CoreWebView2DownloadState.InProgress)downloads.Remove(operation);};};
             view.CoreWebView2.NavigationStarting+=delegate(object s,CoreWebView2NavigationStartingEventArgs e){Uri target;if(!Uri.TryCreate(e.Uri,UriKind.Absolute,out target)||target.GetLeftPart(UriPartial.Authority)!=new Uri(url).GetLeftPart(UriPartial.Authority))e.Cancel=true;};
             view.CoreWebView2.NewWindowRequested+=delegate(object s,CoreWebView2NewWindowRequestedEventArgs e){e.Handled=true;};
             view.CoreWebView2.NavigationCompleted+=delegate(object s,CoreWebView2NavigationCompletedEventArgs e){if(!e.IsSuccess&&!closing)Fail("界面加载失败："+e.WebErrorStatus);};
             view.Visible=true;loading.BringToFront();view.Source=new Uri(url);
             WriteStatus("loading");
-            await Task.Delay(60000);if(!ready&&!closing)Fail("工作台初始化超时。DX12或界面初始化未完成，请查看.runtime/desktop.log中的具体错误。");
+            await Task.Delay(60000);if(!ready&&!closing)Fail("工作台初始化超时。请查看.runtime/desktop.log中的具体错误。");
         }catch(WebView2RuntimeNotFoundException){Fail("系统缺少Microsoft Edge WebView2 Runtime。请安装微软官方运行时后重开。");}catch(Exception e){Fail(e.Message);}}
         readonly object logLock=new object();
         void Log(string text){try{lock(logLock){File.AppendAllText(Path.Combine(root,".runtime","desktop.log"),DateTime.Now.ToString("s")+" "+text+Environment.NewLine,new UTF8Encoding(false));}}catch{}}
-        void WriteStatus(string state){try{File.WriteAllText(Path.Combine(root,".runtime","desktop-session.json"),json.Serialize(new {state=state,pid=Process.GetCurrentProcess().Id,serverPid=server==null?0:server.Id,url=url,root=root,webView2=view.CoreWebView2==null?null:view.CoreWebView2.Environment.BrowserVersionString}),new UTF8Encoding(false));}catch{}}
-        void Message(object sender,CoreWebView2WebMessageReceivedEventArgs e){if(closing)return;Uri source;if(!Uri.TryCreate(e.Source,UriKind.Absolute,out source)||source.GetLeftPart(UriPartial.Authority)!=new Uri(url).GetLeftPart(UriPartial.Authority)||source.AbsolutePath!="/")return;try{string text=e.TryGetWebMessageAsString();if(text==null||text.Length>8192)return;var data=json.Deserialize<Dictionary<string,object>>(text);if(data.ContainsKey("topic")&&Convert.ToString(data["topic"])=="tree-material-dx12"){nativeViewport.Handle(data);return;}if(!data.ContainsKey("topic")||Convert.ToString(data["topic"])!="tree-material-lab")return;string action=data.ContainsKey("action")?Convert.ToString(data["action"]):"";
+        void WriteStatus(string state){try{File.WriteAllText(Path.Combine(root,".runtime","desktop-session.json"),json.Serialize(new {state=state,pid=Process.GetCurrentProcess().Id,serverPid=server==null?0:server.Id,url=url,root=root,graphicsMode=graphicsMode,renderer=activeRenderer,webView2=view.CoreWebView2==null?null:view.CoreWebView2.Environment.BrowserVersionString}),new UTF8Encoding(false));}catch{}}
+        void Message(object sender,CoreWebView2WebMessageReceivedEventArgs e){if(closing)return;Uri source;if(!Uri.TryCreate(e.Source,UriKind.Absolute,out source)||source.GetLeftPart(UriPartial.Authority)!=new Uri(url).GetLeftPart(UriPartial.Authority)||source.AbsolutePath!="/")return;try{string text=e.TryGetWebMessageAsString();if(text==null||text.Length>8192)return;var data=json.Deserialize<Dictionary<string,object>>(text);if(data.ContainsKey("topic")&&Convert.ToString(data["topic"])=="tree-material-dx12"){if(nativeViewport!=null)nativeViewport.Handle(data);return;}if(!data.ContainsKey("topic")||Convert.ToString(data["topic"])!="tree-material-lab")return;string action=data.ContainsKey("action")?Convert.ToString(data["action"]):"";
             if(action=="close-ready"){var reply=CloseProtocol.Parse(data);if(reply!=null&&closeGate.State=="waiting"&&reply.RequestId==closeGate.RequestId&&closeReply!=null)closeReply.TrySetResult(reply);return;}
-            if(action=="startup-error"){string detail=data.ContainsKey("message")?Convert.ToString(data["message"]):"未知初始化错误";Log(detail);if(!ready)Fail(detail);return;}if(action=="ready"){ready=true;loading.Visible=false;view.BringToFront();WriteStatus("ready");}
+            if(action=="startup-progress"&&!ready&&data.ContainsKey("message")){
+                string detail=Convert.ToString(data["message"]);
+                if(!String.IsNullOrWhiteSpace(detail)&&detail.Length<=300){
+                    loading.Text="树材质工坊\r\n\r\n"+detail;
+                    Log(detail);
+                }
+                return;
+            }
+            if(action=="startup-error"){string detail=data.ContainsKey("message")?Convert.ToString(data["message"]):"未知初始化错误";Log(detail);if(!ready)Fail(detail);return;}
+            if(action=="ready"){
+                activeRenderer=data.ContainsKey("renderer")?Convert.ToString(data["renderer"]):null;
+                string fallbackReason=data.ContainsKey("fallbackReason")?Convert.ToString(data["fallbackReason"]):null;
+                Log("图形模式 "+graphicsMode+" · "+activeRenderer+(String.IsNullOrEmpty(fallbackReason)?"":" · "+fallbackReason));
+                ready=true;loading.Visible=false;view.BringToFront();WriteStatus("ready");
+            }
             if(action=="open-output"&&data.ContainsKey("folder")){string folder=Path.GetFullPath(Convert.ToString(data["folder"])),boundary=Path.GetFullPath(Path.Combine(root,"exports"))+Path.DirectorySeparatorChar;if(folder.StartsWith(boundary,StringComparison.OrdinalIgnoreCase)&&Directory.Exists(folder))Process.Start("explorer.exe",Quote(folder));}
         }catch(Exception error){Log(error.Message);}}
         void Fail(string message){if(closing)return;loading.Text="树材质工坊启动未完成\r\n\r\n"+message;loading.Visible=true;loading.BringToFront();Log(message);WriteStatus("error");}

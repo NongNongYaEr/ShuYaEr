@@ -1,5 +1,5 @@
 const fs=require('fs'),path=require('path'),assert=require('node:assert/strict'),crypto=require('crypto');
-const {chromium}=require(process.env.BRANCHFORGE_PLAYWRIGHT||'C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {chromium}=require(process.env.BRANCHFORGE_PLAYWRIGHT||'playwright');
 (async()=>{
  const out=path.resolve('.runtime/project-thumbnails');fs.mkdirSync(out,{recursive:true});const report={checks:[],errors:[]};
  const source=path.resolve('导出/香樟_斜坡_M_A01.branch.json'),name='验收_工程缩略图_'+crypto.randomUUID().slice(0,8),file=path.resolve('导出',name+'.branch.json');

@@ -65,6 +65,8 @@ def _plan(json_path, reference_path, target_root, *, allow_custom=False):
     reference = unreal.load_asset(reference_path)
     graph, bridge = _bridge_for_asset(reference)
     previous = read_contract(_old_path(bridge))
+    if contract.get('mesh_unit_ids') or previous.get('mesh_unit_ids'):
+        raise ContractError('含完整网格的包请使用“新建：完整包自动导入”，保留网格的原材质。')
     preview = _preview(graph)
     if not preview.get_editor_property('use_resolved_assembly'):
         raise ContractError('复用来源需要启用软件实际装配，才能按原软件验证新造型')

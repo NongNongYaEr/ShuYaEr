@@ -22,7 +22,7 @@ def export_static_mesh(asset_path, *, output_folder=None, open_result=True):
         source = Path(bridge.get_editor_property("skeleton_file").get_editor_property("file_path"))
         if not source.is_absolute():
             source = Path(unreal.Paths.project_dir()).resolve() / source
-        if source.is_file() and json.loads(source.read_text(encoding="utf-8-sig")).get("version") == 3:
+        if source.is_file() and json.loads(source.read_text(encoding="utf-8-sig")).get("imported_trunks"):
             from branchforge_pve_trunk import start_export
             return start_export(asset_path, output_folder)
     nodes = [n for n in graph.nodes if n.get_settings().get_class().get_name() == "PVExportSettings"]

@@ -30,10 +30,10 @@ def check_complete_package(json_path, target_root):
     if contract.get("imported_trunk"):
         from branchforge_pve_trunk import check_package
         return check_package(json_path, target_root, contract)
-    from branchforge_pve_importer import _glb_bark_signature, TEMPLATE
+    from branchforge_pve_importer import _glb_bark_signature, check_mesh_unit_bridge, TEMPLATE
+    check_mesh_unit_bridge(contract)
     target_root = target_root.rstrip('/')
     _empty_root(target_root)
-    contract = read_contract(json_path)
     if not contract['manifest'] or not contract['resolved_files']:
         raise ValueError('请选择包含清单、GLB、图集和实际装配附件的完整枝包')
     if not unreal.EditorAssetLibrary.does_asset_exist(TEMPLATE):
@@ -49,14 +49,16 @@ def check_complete_package(json_path, target_root):
             raise ValueError('枝类 ID 需要英文、数字或下划线：' + item['id'])
         if hashlib.sha256(path.read_bytes()).hexdigest().upper() != item['glb_sha256'].upper():
             raise ValueError('GLB 校验失败：' + item['id'])
-        signatures.add(_glb_bark_signature(path))
+        if not item.get('mesh_unit'):
+            signatures.add(_glb_bark_signature(path))
         files.append(path)
-    if len(signatures) != 1:
+    if len(signatures) > 1:
         raise ValueError('枝类树皮材质不一致，请使用已有网格的手动配置方式')
     atlas = bundle / 'leaf_atlas_color.png'
-    if not atlas.is_file() or atlas.read_bytes()[:8] != b'\x89PNG\r\n\x1a\n':
+    if (signatures or atlas.exists()) and (not atlas.is_file() or atlas.read_bytes()[:8] != b'\x89PNG\r\n\x1a\n'):
         raise ValueError('缺少有效的 leaf_atlas_color.png')
-    files.append(atlas)
+    if atlas.is_file():
+        files.append(atlas)
     validation = bundle / 'validation.json'
     warnings = []
     if validation.exists():
@@ -113,8 +115,9 @@ def create_from_package(json_path, target_root, *, open_editor=True):
             _stamp(mesh, {'id': item['id'], 'sha256': item['glb_sha256'].upper()}, stage / item['glb'])
             _save(mesh)
         texture = unreal.load_asset(target_root + '/Materials/T_' + asset_name.removeprefix('PVE_') + '_Atlas')
-        _stamp(texture, {'sha256': _hash(stage / 'leaf_atlas_color.png')}, stage / 'leaf_atlas_color.png')
-        _save(texture)
+        if texture:
+            _stamp(texture, {'sha256': _hash(stage / 'leaf_atlas_color.png')}, stage / 'leaf_atlas_color.png')
+            _save(texture)
         unreal.EditorAssetLibrary.make_directory(target_root + '/Meshes')
         report.update(result)
         report['status'] = 'complete'
@@ -175,7 +178,8 @@ def prepare_package(json_path, target_root, asset_name):
     if not manifest:
         raise ValueError("缺少完整枝清单")
     atlas = bundle / "leaf_atlas_color.png"
-    if not atlas.is_file():
+    legacy_units = [unit for unit in manifest["units"] if not unit.get("mesh_unit")]
+    if legacy_units and not atlas.is_file():
         raise ValueError("缺少叶果图集")
     config_path = bundle / "pve_import.json"
     if config_path.exists():
@@ -212,6 +216,18 @@ def prepare_package(json_path, target_root, asset_name):
     if set(meshes) != set(contract["source_ids"]):
         raise RuntimeError("导入的完整枝网格与清单不一致")
     token = asset_name.removeprefix("PVE_")
+    if contract.get('mesh_unit_ids') and not legacy_units:
+        # The resolved procedural carrier still needs defaults. Every installed
+        # mesh unit keeps the actual materials supplied by its GLB.
+        from branchforge_pve_trunk import _material
+        bark = _material(material_folder, "M_" + token + "_Bark")
+        leaf = _material(material_folder, "M_" + token + "_Foliage")
+        config = {"format": "BranchForgePVEImportConfig", "version": 1,
+                  "asset_name": asset_name, "target_folder": target_root + "/PVE",
+                  "mesh_folder": mesh_folder, "mesh_bindings": {i: meshes[i].get_path_name() for i in contract["source_ids"]},
+                  "bark_material": bark.get_path_name(), "leaf_material": leaf.get_path_name()}
+        config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+        return config
     texture_name = "T_" + token + "_Atlas"
     task = unreal.AssetImportTask()
     task.filename = str(atlas)
@@ -249,9 +265,9 @@ def prepare_package(json_path, target_root, asset_name):
     assert unreal.EditorAssetLibrary.save_loaded_asset(leaf)
 
     from branchforge_pve_importer import _slot, _glb_bark_signature
-    if len({_glb_bark_signature(path) for path in unit_paths}) != 1:
+    if len({_glb_bark_signature(bundle / unit['glb']) for unit in legacy_units}) != 1:
         raise ValueError("枝类树皮材质不一致，请在工作台手动配置")
-    bark_source = _slot(meshes[contract["source_ids"][0]], "bark")[1]
+    bark_source = _slot(meshes[legacy_units[0]["id"]], "bark")[1]
     bark = unreal.EditorAssetLibrary.duplicate_asset(bark_source.get_path_name(), material_folder + "/M_" + token + "_Bark")
     assert bark and unreal.EditorAssetLibrary.save_loaded_asset(bark)
     config = {"format": "BranchForgePVEImportConfig", "version": 1,

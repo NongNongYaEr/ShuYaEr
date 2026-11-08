@@ -1,5 +1,5 @@
 const fs=require('fs'),path=require('path'),assert=require('node:assert/strict');
-const {chromium}=require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {chromium}=require('playwright');
 (async()=>{
  const out=path.resolve('.runtime/unit-workbench'),report={checks:[],errors:[]};fs.mkdirSync(out,{recursive:true});
  const saved=JSON.parse(fs.readFileSync(path.join(out,'叶花果精修保存.branch.json'))),folder=path.resolve('次枝资产/全植物次枝成品V1/朴树'),file=fs.readdirSync(folder).find(n=>n.includes('短弯细梢')&&n.includes('混合')&&n.endsWith('.branchasset.json'));

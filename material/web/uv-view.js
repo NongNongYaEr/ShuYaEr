@@ -12,8 +12,28 @@ export function installUVNavigation(canvas,{signal}={}){let drag=null;canvas.tab
 function drawUVRaw(canvas,mesh,diagnostic,{highlight=false,selectedIsland=-1,lockedIslands=[],protectedFaces=[],seamMarks=[],selectedFaces=[],clearance=null}={}){
   const ctx=canvas.getContext('2d'),size=canvas.width;ctx.fillStyle='#151c20';ctx.fillRect(0,0,size,size);ctx.strokeStyle='#34423d';ctx.lineWidth=1;
   for(let i=0;i<=8;i++){const x=i*size/8;ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,size);ctx.moveTo(0,x);ctx.lineTo(size,x);ctx.stroke();}
-  const {uv,indices}=mesh;ctx.lineWidth=.45;ctx.strokeStyle=highlight?'#d8cb92':'#a0ba84';ctx.globalAlpha=.65;
-  const locked=new Set(lockedIslands),protectedSet=new Set(protectedFaces),selection=new Set(selectedFaces);for(let i=0;i<indices.length;i+=3){const island=diagnostic?.faceIslands?.[i/3];ctx.strokeStyle=island===selectedIsland?'#ffd27e':locked.has(island)?'#65ccd0':highlight?'#d8cb92':'#a0ba84';ctx.lineWidth=island===selectedIsland?1.2:.45;ctx.beginPath();for(let c=0;c<3;c++){const j=indices[i+c]*2,x=uv[j]*size,y=uv[j+1]*size;if(c)ctx.lineTo(x,y);else ctx.moveTo(x,y);}ctx.closePath();if(selection.has(i/3)){ctx.fillStyle='#ba64ffb0';ctx.fill();}else if(protectedSet.has(i/3)){ctx.fillStyle='#53c6cc38';ctx.fill();}ctx.stroke();}ctx.globalAlpha=1;
+  const {uv,indices}=mesh,packing=diagnostic?.packingSummary;
+  const smart=!!(packing?.smartUnwrap||packing?.outlineNesting||packing?.boundaryGrowth);
+  const locked=new Set(lockedIslands),protectedSet=new Set(protectedFaces),selection=new Set(selectedFaces);
+  for(let i=0;i<indices.length;i+=3){
+    const face=i/3,island=diagnostic?.faceIslands?.[face],chosen=island===selectedIsland;
+    ctx.strokeStyle=chosen?'#ffd27e':locked.has(island)?'#65ccd0':smart?'#646e76':highlight?'#d8cb92':'#a0ba84';
+    ctx.lineWidth=chosen ? 1.2 : smart ? .26 : .45;
+    ctx.beginPath();
+    for(let c=0;c<3;c++){
+      const j=indices[i+c]*2,x=uv[j]*size,y=uv[j+1]*size;
+      if(c)ctx.lineTo(x,y);else ctx.moveTo(x,y);
+    }
+    ctx.closePath();
+    if(selection.has(face)||protectedSet.has(face)||smart){
+      ctx.globalAlpha=smart ? 1 : .65;
+      ctx.fillStyle=selection.has(face)?'#ba64ffb0':protectedSet.has(face)?'#53c6cc38':'#dbe1e3';
+      ctx.fill();
+    }
+    ctx.globalAlpha=smart ? .7 : .65;
+    ctx.stroke();
+    ctx.globalAlpha=1;
+  }
   ctx.strokeStyle='#ffb35d';ctx.lineWidth=2;for(const mark of seamMarks){if(mark.face*3+2>=indices.length)continue;const a=indices[mark.face*3+mark.edge]*2,b=indices[mark.face*3+(mark.edge+1)%3]*2;ctx.beginPath();ctx.moveTo(uv[a]*size,uv[a+1]*size);ctx.lineTo(uv[b]*size,uv[b+1]*size);ctx.stroke();}
   if(clearance?.status==='measured')for(const [witness,color]of [[clearance.gapWitness,'#ff7171'],[clearance.borderWitness,'#ffcc6a']]){if(!witness)continue;ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(witness.a[0]*size,witness.a[1]*size);ctx.lineTo(witness.b[0]*size,witness.b[1]*size);ctx.stroke();for(const p of [witness.a,witness.b])ctx.fillRect(p[0]*size-2,p[1]*size-2,4,4);}
   if(clearance?.overlaps?.witnesses.length){ctx.strokeStyle='#ff516b';ctx.lineWidth=2;for(const face of clearance.overlaps.witnesses[0].faces){ctx.beginPath();for(let c=0;c<3;c++){const i=indices[face*3+c];const x=uv[i*2]*size,y=uv[i*2+1]*size;if(c)ctx.lineTo(x,y);else ctx.moveTo(x,y);}ctx.closePath();ctx.stroke();}}

@@ -63,6 +63,10 @@ function Invoke-ProjectSessionRoute($Context, [string]$Path) {
         Send-Json $Context @{success=$true};return $true
     }
     if ($Path -eq '/api/project-session/document' -and $method -eq 'POST') {
+        if ($Context.Request.ContentLength64 -gt 209715200) {
+            Send-Json $Context @{success=$false;message='恢复草稿超过 200 MiB，请另存为本地工程文件。'} 413
+            return $true
+        }
         $body=Read-ProjectSavePayload $Context.Request 'document' 209715200
         $id=[string]$body.id;$file=Get-SessionFile $id '.branch.json'
         $doc=$body.document | ConvertFrom-Json

@@ -5,7 +5,8 @@ import {createEffectLibrary} from './core/effect-library.mjs';
 import {readMaterialLibrary} from './core/material-library.mjs';
 import fs from 'node:fs';import path from 'node:path';import http from 'node:http';import {fileURLToPath} from 'node:url';import {createHash} from 'node:crypto';
 import {exportTextures,parseBakePayload} from './core/texture-export.mjs';
-import {createUvJobs} from './core/uv-service.mjs';import {createProjectStore} from './core/project-store.mjs';import {parseGLB} from './model.js';import {restoreWorkingMesh} from './working-mesh.js';import {decodeUvResult} from './mesh-codec.js';
+import {createUvJobs} from './core/uv-service.mjs';import {createProjectStore} from './core/project-store.mjs';
+import {loadExportMesh} from './core/export-mesh.mjs';
 import {createExportJobs} from './core/export-jobs.mjs';
 import {writeBatchReport} from './core/batch-report.mjs';
 import {listenDesktop} from './core/browser-port.mjs';
@@ -65,9 +66,8 @@ export function createMaterialServer({root=path.dirname(fileURLToPath(import.met
     const uvRoute=route.match(/^\/api\/uv\/jobs\/([a-f0-9-]{36})(\/(result|cancel))?$/);
     if(uvRoute){if(req.method==='GET'&&!uvRoute[2])return json(res,uv.info(uvRoute[1]));if(req.method==='GET'&&uvRoute[3]==='result')return send(res,200,'application/octet-stream',uv.result(uvRoute[1]));if(req.method==='POST'&&uvRoute[3]==='cancel')return json(res,uv.cancel(uvRoute[1]));}
     if(req.method==='POST'&&route==='/api/export'){
-      const payload=await bytes(req);activeSession(req);const {meta}=parseBakePayload(payload);let mesh=null;
-      if(meta.resources?.source&&meta.resources?.working){const b=store.get(meta.resources.source),source=await parseGLB(b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength),meta.modelName);mesh=await restoreWorkingMesh(source,decodeUvResult(store.get(meta.resources.working)),{mode:meta.uvMode,revision:meta.uvRevision});if(mesh.sourceSHA256!==meta.sourceSHA256||mesh.uvSHA256!==meta.uvSHA256)throw Error('烘焙版本与工程模型不一致，请重新烘焙。');}
-      return json(res,exportTextures(payload,{root,mesh}));
+      const payload=await bytes(req);activeSession(req);const {meta}=parseBakePayload(payload),{mesh,source}=await loadExportMesh(meta,store);
+      return json(res,exportTextures(payload,{root,mesh,source}));
     }
     if(req.method!=='GET')return json(res,{error:'Not found'},404);
     if(route.includes('\\')||route.split('/').includes('..'))return json(res,{error:'Forbidden'},403);

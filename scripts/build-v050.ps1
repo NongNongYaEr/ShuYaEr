@@ -18,7 +18,7 @@ $versionSource=@"
 [assembly: System.Reflection.AssemblyFileVersion("$assemblyVersion")]
 "@
 [IO.File]::WriteAllText($vVersion,$versionSource,[Text.UTF8Encoding]::new($true))
-$vFiles=@('native/BranchGeneratorDesktop.cs','native/PlantIntegration.cs','native/MaterialIntegration.cs','native/V050Integration.cs','native/V050PageCall.cs','native/V050Probe.cs','native/V050ReleaseProbe.cs','material/native/NativeDX12Host.cs','material/native/CloseProtocol.cs','material/native/LocalServiceProtocol.cs','material/native/OwnedProcessJob.cs')|ForEach-Object {Join-Path $vRoot $_}
+$vFiles=@('native/BranchGeneratorDesktop.cs','native/PlantServerProcess.cs','native/PlantIntegration.cs','native/MaterialIntegration.cs','native/GraphicsPreference.cs','native/V050Integration.cs','native/V050PageCall.cs','native/V050Probe.cs','native/V050ReleaseProbe.cs','material/native/NativeDX12Host.cs','material/native/CloseProtocol.cs','material/native/LocalServiceProtocol.cs','material/native/OwnedProcessJob.cs')|ForEach-Object {Join-Path $vRoot $_}
 $vOutput=Join-Path $vRoot $OutputName
 & $vCsc /nologo /target:winexe /platform:x64 /main:ShuYaErV050.Program /win32icon:"$vRoot/web/brand/tree-duck-v5.ico" /out:"$vOutput" /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Web.Extensions.dll /reference:"$vRoot/Microsoft.Web.WebView2.Core.dll" /reference:"$vRoot/Microsoft.Web.WebView2.WinForms.dll" $vFiles $vGenerated $vVersion
 if($LASTEXITCODE -ne 0){throw 'V050 desktop build failed'}
@@ -29,6 +29,7 @@ if($OutputName -eq $release.entry){
  $manifest.product_version=$release.version
  $manifest.entry=$release.entry
  $manifest.entry_sha256=$digest
+ $manifest.failure_policy='retain-document-and-fallback-webgl2'
  [IO.File]::WriteAllText($manifestPath,($manifest|ConvertTo-Json -Depth 20)+"`n",[Text.UTF8Encoding]::new($false))
 }
 [pscustomobject]@{version=$release.version;entry=$vOutput;launched=$false;sha256=$digest}|ConvertTo-Json

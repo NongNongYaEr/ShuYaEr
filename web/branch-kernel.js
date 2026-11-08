@@ -21,6 +21,7 @@ import { resolveSampleMaterial, sampleMaterialId } from './sample-materials.js';
 import { completeInstanceMatrix } from './branch-instance-matrix.js';
 import { branchMountAt,transportMountFrames } from './branch-mount-frame.js';
 import { transformBranchShape, sampleTangent, resolveInstanceShape, resolveInstanceAsset } from './branch-workbench-data.js';
+import {packMeshUnitImages} from './mesh-unit-state.js';
 import { sampleFoliagePlacements, localSampleBranches, mountSamplePlacement, sampleInstanceUnitEditing } from './sample-foliage.js';
 import { sectionAt, branchRadiusAt, branchSampleTs } from './branch-shaping.js';
 import { applySkeletonThickness, skeletonBranches } from './skeleton-thickness.js';
@@ -1727,6 +1728,41 @@ function addJunctionCollars(group, branches, settings, material) {
   return records;
 }
 
+function hasDegenerateArea(a,b,c) {
+  b.sub(a); c.sub(a);
+  // Relative area keeps valid, uniformly small flowers valid.
+  const edgeProduct = b.lengthSq() * c.lengthSq();
+  return b.cross(c).lengthSq() <= Math.max(1e-24, edgeProduct * 1e-12);
+}
+
+// The dedicated export build owns these imported primitives. Keep the vertex
+// buffer and source-vertex mapping intact for texture coordinates and skinning.
+export function removeDegenerateImportedFaces(group) {
+  let removed = 0;
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  group.traverse(object=>{
+    if(!object.isMesh || !object.userData.imported_trunk)return;
+    const geometry = object.geometry, index = geometry.index, position = geometry.getAttribute('position');
+    if(!index || geometry.groups.length || !position)return;
+    const retained = new index.array.constructor(index.count);
+    let length = 0;
+    for(let i=0;i<index.count;i+=3){
+      const ia=index.getX(i),ib=index.getX(i+1),ic=index.getX(i+2);
+      a.fromBufferAttribute(position,ia);
+      b.fromBufferAttribute(position,ib);
+      c.fromBufferAttribute(position,ic);
+      if(hasDegenerateArea(a,b,c))continue;
+      retained[length++]=ia;
+      retained[length++]=ib;
+      retained[length++]=ic;
+    }
+    if(!length || length===index.count)return;
+    geometry.setIndex(new THREE.BufferAttribute(retained.slice(0,length),1));
+    removed += (index.count-length)/3;
+  });
+  return removed;
+}
+
 export function analyzeGroup(group, settings = DEFAULT_SETTINGS, geometryCache = null) {
   return finishBuildSteps(analyzeGroupSteps(group,settings,geometryCache));
 }
@@ -1776,10 +1812,7 @@ export function* analyzeGroupSteps(group, settings = DEFAULT_SETTINGS, geometryC
         a.fromBufferAttribute(position, read(face * 3));
         b.fromBufferAttribute(position, read(face * 3 + 1));
         c.fromBufferAttribute(position, read(face * 3 + 2));
-        b.sub(a); c.sub(a);
-        // Relative area keeps valid, uniformly small flowers valid.
-        const edgeProduct = b.lengthSq() * c.lengthSq();
-        if (b.cross(c).lengthSq() <= Math.max(1e-24, edgeProduct * 1e-12)) quality.degenerate += 1;
+        if (hasDegenerateArea(a,b,c)) quality.degenerate += 1;
       }
       geometryCache?.set(geometry, quality);
     }
@@ -2274,7 +2307,7 @@ function* disposeBranchAssetSteps(asset) {
     yield {stage:'dispose-meshes'};
   }
   // Tint variants are owned by this asset but are absent from its base palette.
-  for (const m of meshMaterials) if (!baseMaterials.has(m) && !unitMaterials.has(m) && !compiledMaterials.has(m) && !vegetationMaterials.has(m) && (asset?.ownsMaterials || m.sampleLeafMaterial)) {
+  for (const m of meshMaterials) if (!baseMaterials.has(m) && !unitMaterials.has(m) && !compiledMaterials.has(m) && !vegetationMaterials.has(m) && (asset?.ownsMaterials || m.sampleLeafMaterial || m.userData?.meshUnit)) {
     if(m.sampleLeafMaterial)for(const key of ['map','normalMap'])if(m[key]?.userData?.branchforge_export)m[key].dispose();
     m.dispose();
   }
@@ -2328,13 +2361,15 @@ export function createProjectDocument(asset, leafGeometry = null, rawAuthoring =
       calibration: item.calibration || { scale: 1, rotation: 0, flip: false }, geometry: serializeGeometry(item.geometry),
     }))
     : leafGeometry ? [{ id: 'LEAF_1', name: leafGeometry.userData.sourceName || '导入叶片', weight: 1, geometry: serializeGeometry(leafGeometry) }] : [];
+  let authoring = normalizeAuthoring(rawAuthoring || asset.authoring || DEFAULT_AUTHORING, asset.settings.seed);
+  if(authoring.mesh_units)authoring={...authoring,mesh_units:packMeshUnitImages(authoring.mesh_units)};
   return {
     format: PROJECT_FORMAT,
     version: 4,
     generator_version: GENERATOR_VERSION,
     saved_at: new Date().toISOString(),
     settings: asset.settings,
-    authoring: normalizeAuthoring(rawAuthoring || asset.authoring || DEFAULT_AUTHORING, asset.settings.seed),
+    authoring,
     leaf_meshes: leafMeshes,
     leaf_mesh: null,
     summary: {

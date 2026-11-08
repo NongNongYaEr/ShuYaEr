@@ -16,3 +16,21 @@ test('画面等待超时不制造永久渲染错误，重试可用已保存模�
 test('真实设备错误和来源切换不会被当作新模型首帧',async()=>{
  const bad=await waitForNativePresentation({read:()=>({...ready(),lastError:'device error'}),current:()=>true,asset:'tree',session:'session'});assert.equal(bad.presentationReady,false);assert.equal(bad.lastError,'device error');const stale=await waitForNativePresentation({read:()=>ready(),current:()=>false,asset:'tree',session:'session'});assert(stale.presentationSuperseded);assert.equal(stale.presentationReady,false);
 });
+test('兼容切换后等待实际绘制的新 WebGL 帧，忽略旧模型和旧 DX12 首帧',async()=>{
+ let now=0,steps=0,state=ready(42);
+ const options={read:()=>state,current:()=>true,asset:'tree',session:'session',revision:43,webglRevision:3,now:()=>now,
+  sleep:async ms=>{
+   now+=ms;steps++;
+   state={...ready(99),backend:'webgl',presentation:'compatibility-webgl',wanted:false,presentationAllowed:false,
+    webgl:steps===1?{assetIdentity:'tree',frame:2}:steps===2?{assetIdentity:'old-tree',frame:3}:{assetIdentity:'tree',frame:4}};
+  }};
+ const result=await waitForNativePresentation(options);
+ assert.equal(steps,3);assert.equal(result.presentationReady,true);
+ assert.equal(result.backend,'webgl');assert.equal(result.presentationTargetRevision,3);
+});
+test('兼容视口上下文丢失仍报告失败',async()=>{
+ const state={...ready(),backend:'webgl',presentation:'compatibility-webgl',wanted:false,
+  lastError:'WebGL2 图形上下文已中断。',webgl:{assetIdentity:'tree',frame:3}};
+ const result=await waitForNativePresentation({read:()=>state,current:()=>true,asset:'tree',session:'session',webglRevision:3});
+ assert.equal(result.presentationReady,false);assert.equal(result.presentationReason,'blocked');assert.equal(result.lastError,state.lastError);
+});

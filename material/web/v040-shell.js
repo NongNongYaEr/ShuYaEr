@@ -4,7 +4,15 @@ export function setupV040Shell({renderer,root=document}={}){
  const events=new AbortController(),palette=root.getElementById('materialPalette'),valid=['graphite','cream','forest'];let value='graphite';try{value=localStorage.getItem('tree-duck-palette')||value;}catch{}if(!valid.includes(value))value='graphite';root.documentElement.dataset.palette=value;palette.value=value;
  palette.onchange=()=>{if(!valid.includes(palette.value))return;root.documentElement.dataset.palette=palette.value;try{localStorage.setItem('tree-duck-palette',palette.value);}catch{}};
  const home=root.getElementById('materialHome');home.onclick=()=>root.querySelector('[data-stage-button="model"]')?.click();
- const backend=root.getElementById('renderBackend');backend.textContent=renderer.gl.nativeBackend?'DX12 · V040':'WebGL · 诊断';backend.title=window.__treeMaterialNativeStatus?.adapter||'材质视口';
+ const backend=root.getElementById('renderBackend');
+ if(renderer.gl.nativeBackend){
+  backend.textContent='DX12 · V040';backend.title=window.__treeMaterialNativeStatus?.adapter||'材质视口';
+ }else{
+  backend.textContent='兼容模式 · WebGL2';
+  const detail=renderer.graphicsMaterialProfile==='basic'?
+   '基础材质预览和贴图导出。高级图层、分区材质、贴花和近景细节需 DX12 完整显示与导出。':'材质视口 · WebGL2';
+  backend.title=renderer.graphicsFallbackReason?'DX12 启动失败，已切换兼容模式。'+renderer.graphicsFallbackReason+'。'+detail:detail;
+ }
  window.lucide?.createIcons();root.body.classList.add('v040-material-shell');
  window.addEventListener('tree-material:render-error',event=>{const toast=root.getElementById('toast');if(!toast)return;toast.textContent=event.detail;toast.classList.add('error');toast.classList.remove('hidden');},{signal:events.signal});
  return()=>{events.abort();palette.onchange=null;home.onclick=null;};

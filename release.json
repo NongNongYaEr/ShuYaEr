@@ -1,13 +1,13 @@
 {
   "product": "树鸭儿",
-  "version": "0.5.2",
+  "version": "0.7.1",
   "channel": "professional",
   "edition": "professional",
-  "entry": "树鸭儿V052.exe",
+  "entry": "树鸭儿V071.exe",
   "viewport": "DX12",
   "viewport_abi": 1,
   "projectFormatVersion": 4,
-  "delivery": "V052",
+  "delivery": "V071",
   "variant": "02_精简公开源码",
   "sampleClasses": [
     {

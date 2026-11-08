@@ -39,9 +39,16 @@ export function partitionCutFaces(topology,active,seamIds,weights){
   for(const e of candidates){let a=find(e.halves[0].face),b=find(e.halves[1].face);if(a===b||weights[a]!==weights[b]||blocked[a]?.has(b))continue;if(sizes[a]<sizes[b])[a,b]=[b,a];if(blocked[b])for(const old of blocked[b]){const other=find(old);if(other===a)throw Error('接缝分区约束发生冲突。');blocked[other]?.delete(b);(blocked[other]||=new Set()).add(a);(blocked[a]||=new Set()).add(other);}blocked[b]=null;parent[b]=a;sizes[a]+=sizes[b];}
   const labels=new Int32Array(n).fill(-1),roots=new Map();for(let f=0;f<n;f++)if(active[f]){const r=find(f);if(!roots.has(r))roots.set(r,roots.size);labels[f]=roots.get(r);}return{labels,count:roots.size};
 }
-export function guideLinePositions(topology,uvMesh,{seams=[],protectedFaces=[]}={}){
+export function guideLinePositions(topology,uvMesh,{seams=[],protectedFaces=[],autoSeams=false}={}){
   const marked=new Set(seams.map(m=>resolveCutEdge(topology,m).id)),protect=new Set(protectedFaces),protectedLines=[],seamLines=[];let min=[Infinity,Infinity,Infinity],maxY=-Infinity;for(const i of uvMesh.indices){for(let k=0;k<3;k++)min[k]=Math.min(min[k],uvMesh.pos[i*3+k]);maxY=Math.max(maxY,uvMesh.pos[i*3+1]);}const height=Math.max(maxY-min[1],1e-8);
   let omitted=0;function add(e,array){if(array===protectedLines&&protectedLines.length/6>=100000-marked.size){omitted++;return;}const h=e.halves[0];for(const i of [h.ia,h.ib])for(let k=0;k<3;k++)array.push((topology.mesh.pos[i*3+k]-min[k])/height+topology.mesh.normal[i*3+k]*.0001);}
   for(const e of topology.edges){if(marked.has(e.id))add(e,seamLines);else if(e.halves.some(h=>protect.has(h.face))&&!(e.manifold&&e.halves.every(h=>protect.has(h.face))&&uvEdgeContinuous(uvMesh,e)))add(e,protectedLines);}
-  return{positions:Float32Array.from([...protectedLines,...seamLines]),protectedVertices:protectedLines.length/3,omittedVisualEdges:omitted};
+  const automaticLines=[];
+  if(autoSeams)for(const edge of topology.edges){
+    if(!edge.manifold||marked.has(edge.id)||edge.halves.some(half=>protect.has(half.face))||uvEdgeContinuous(uvMesh,edge))continue;
+    if((automaticLines.length+protectedLines.length+seamLines.length)/6>=100000){omitted++;continue;}
+    add(edge,automaticLines);
+  }
+  return{positions:Float32Array.from([...protectedLines,...automaticLines,...seamLines]),
+    protectedVertices:protectedLines.length/3,autoVertices:automaticLines.length/3,omittedVisualEdges:omitted};
 }

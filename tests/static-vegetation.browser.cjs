@@ -1,5 +1,5 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),crypto=require('node:crypto');
-const {chromium}=require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {chromium}=require('playwright');
 const {fingerprintScene}=require('./pve-geometry-audit.cjs');
 (async()=>{
  const output=path.resolve('.runtime/static-vegetation-acceptance');fs.mkdirSync(output,{recursive:true});

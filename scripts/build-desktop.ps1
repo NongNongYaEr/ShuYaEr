@@ -22,5 +22,5 @@ $versionSource=@"
 [assembly: System.Reflection.AssemblyInformationalVersion("$($release.version)-$($release.channel)")]
 "@
 [IO.File]::WriteAllText($versionFile,$versionSource,[Text.UTF8Encoding]::new($false))
-& $csc /nologo /target:winexe /platform:x64 /win32icon:"$root\web\brand\tree-duck-v5.ico" /out:"$OutputPath" /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Web.Extensions.dll /reference:"$root\Microsoft.Web.WebView2.Core.dll" /reference:"$root\Microsoft.Web.WebView2.WinForms.dll" "$root\native\BranchGeneratorDesktop.cs" $versionFile
+& $csc /nologo /target:winexe /platform:x64 /win32icon:"$root\web\brand\tree-duck-v5.ico" /out:"$OutputPath" /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Web.Extensions.dll /reference:"$root\Microsoft.Web.WebView2.Core.dll" /reference:"$root\Microsoft.Web.WebView2.WinForms.dll" "$root\native\BranchGeneratorDesktop.cs" "$root\native\PlantServerProcess.cs" $versionFile
 if($LASTEXITCODE -ne 0){throw 'Desktop build failed'}

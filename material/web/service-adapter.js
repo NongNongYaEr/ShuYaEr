@@ -3,6 +3,7 @@
 const config=window.__treeMaterialHostConfig||{};
 export const desktopHost=!!config.desktop;
 export const endpoint=name=>(config.apiBase||'/api').replace(/\/$/,'')+'/'+name;
-export function notifyReady(){window.dispatchEvent(new CustomEvent('tree-material:ready'));if(window.chrome?.webview)window.chrome.webview.postMessage(JSON.stringify({topic:'tree-material-lab',action:'ready'}));}
+export function notifyReady(detail={}){window.dispatchEvent(new CustomEvent('tree-material:ready',{detail}));if(window.chrome?.webview)window.chrome.webview.postMessage(JSON.stringify({topic:'tree-material-lab',action:'ready',...detail}));}
+export function notifyStartupProgress(message){window.chrome?.webview?.postMessage(JSON.stringify({topic:'tree-material-lab',action:'startup-progress',message}));}
 export function notifyExport(result){window.dispatchEvent(new CustomEvent('tree-material:exported',{detail:result}));}
 export function openOutputFolder(folder){if(window.chrome?.webview)window.chrome.webview.postMessage(JSON.stringify({topic:'tree-material-lab',action:'open-output',folder}));}

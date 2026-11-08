@@ -76,10 +76,50 @@ float4 albedo(Varying i) {
   if(flags.w>0)c*=i.color;
   clip(c.a-surface.z);return c;
 }
+static const float2 studioShadowDisk[16] = {
+  float2(-.93,-.39), float2(.95,-.70), float2(-.10,-.93), float2(.33,.29),
+  float2(-.87,.46), float2(-.75,-.18), float2(-.38,.27), float2(.97,.75),
+  float2(.44,-.92), float2(.54,-.44), float2(-.24,-.41), float2(.79,.19),
+  float2(-.37,-.78), float2(-.08,.86), float2(.15,-.13), float2(.16,.65)
+};
+float2 shadowDepthGradient(float3 dx, float3 dy) {
+  float determinant = dx.x*dy.y - dx.y*dy.x;
+  if (abs(determinant) < 1e-8) return 0;
+  return float2(dy.y*dx.z - dx.y*dy.z, dx.x*dy.z - dy.x*dx.z) / determinant;
+}
+float studioShadow(float2 uv, float depth, float2 gradient, float maxRadius) {
+  const float texel = 1.0 / 2048.0;
+  float blockerDistance = 0;
+  float blockers = 0;
+  // Orthographic depths are linear. The blocker-to-receiver gap controls the
+  // penumbra, with a narrow contact edge and a wider edge under the crown.
+  [unroll] for (int i = 0; i < 16; i++) {
+    float2 offset = studioShadowDisk[i] * maxRadius * texel;
+    int2 coord = clamp(int2((uv + offset) * 2048.0), 0, 2047);
+    float delta = depth + clamp(dot(gradient,offset),-.015,.015) - shadowMap.Load(int3(coord,0));
+    if (delta > 0) { blockerDistance += delta; blockers++; }
+  }
+  float center = shadowMap.SampleCmpLevelZero(shadowSampler,uv,depth);
+  if (blockers == 0 && center >= .999) return 1;
+  float radius = lerp(1.1,maxRadius,saturate(blockerDistance / max(blockers,1) * 8.0));
+  float visibility = center * 2;
+  [unroll] for (int j = 0; j < 16; j++) {
+    float2 offset = studioShadowDisk[j] * radius * texel;
+    float referenceDepth = depth + clamp(dot(gradient,offset),-.015,.015);
+    visibility += shadowMap.SampleCmpLevelZero(shadowSampler,uv + offset,referenceDepth);
+  }
+  return visibility / 18.0;
+}
 float shadow(Varying i) {
   if(surface.w<.5)return 1;
   float3 p=i.light.xyz/i.light.w;float2 uv=float2(p.x*.5+.5,.5-p.y*.5);
+  float2 gradient = 0;
+  if (fogAndExposure.w > 0) {
+    float3 coordinate = float3(uv,p.z);
+    gradient = shadowDepthGradient(ddx(coordinate),ddy(coordinate));
+  }
   if(any(uv<0)||any(uv>1)||p.z<0||p.z>1)return 1;
+  if (fogAndExposure.w > 0) return studioShadow(uv,p.z-.00035,gradient,fogAndExposure.w);
   float s=0;[unroll]for(int y=-1;y<=1;y++)[unroll]for(int x=-1;x<=1;x++)s+=shadowMap.SampleCmpLevelZero(shadowSampler,uv+float2(x,y)/2048.,p.z-.0004);
   return s/9;
 }

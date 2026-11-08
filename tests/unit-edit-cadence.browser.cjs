@@ -1,5 +1,5 @@
 const fs=require('fs'),path=require('path'),assert=require('node:assert/strict'),crypto=require('crypto');
-const {chromium}=require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {chromium}=require('playwright');
 (async()=>{
  const url=process.argv[2]||'http://localhost:19841',profiling=process.argv.includes('--profile'),phase=profiling?'profile':process.argv.includes('--after')?'after':'before',out=path.resolve('.runtime/unit-edit-cadence');fs.mkdirSync(out,{recursive:true});
  const fixed=JSON.parse(fs.readFileSync('.runtime/unit-edit-performance/fixed-inputs.json','utf8')),input=path.resolve('初始样本/全植物新次枝装配V2/香樟/工程.branch.json'),hash=b=>crypto.createHash('sha256').update(b).digest('hex'),original=hash(fs.readFileSync(input));assert.equal(original,fixed.sourceHashes.dense);

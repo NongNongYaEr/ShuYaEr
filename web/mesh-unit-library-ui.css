@@ -1,0 +1,121 @@
+.mesh-unit-library {
+  margin: 0 0 8px;
+  padding: 8px;
+  border: 1px solid #414b49;
+  border-left: 3px solid var(--accent, #e7c552);
+  border-radius: 5px;
+  background: #20282a;
+}
+.mesh-unit-library[hidden] { display: none; }
+.mesh-unit-library h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 7px;
+  font-size: 13px;
+}
+.mesh-unit-library h2 svg { width: 16px; height: 16px; color: var(--accent, #e7c552); }
+.mesh-unit-library-tools { display: flex; align-items: center; justify-content: space-between; gap: 5px; }
+.mesh-unit-library-tools button { padding: 4px 6px; font-size: 11px; }
+.mesh-unit-pack-open {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 9px;
+  text-align: left;
+}
+.mesh-unit-pack-open svg { width: 17px; height: 17px; color: var(--accent-text); }
+.mesh-unit-pack-open :is(strong,small) { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mesh-unit-pack-open strong { font-size: 12px; }
+.mesh-unit-pack-open small { margin-top: 2px; color: var(--muted); font-size: 10px; }
+.mesh-unit-pack-open > span:last-child { font-size: 20px; line-height: 1; }
+.mesh-unit-library .vine-note { margin: 6px 0; }
+.mesh-unit-library .mesh-unit-error { color: #ffa992; }
+.mesh-unit-library .wb-library { max-height: min(44vh, 390px); }
+.mesh-unit-library .wb-library:empty { display: none; }
+.mesh-unit-library .wb-asset { cursor: grab; }
+.mesh-unit-library .wb-asset:active { cursor: grabbing; }
+.mesh-unit-card-preview {
+  display: grid;
+  aspect-ratio: 4 / 3;
+  place-items: center;
+  background: #17221e;
+  color: #879f93;
+  overflow: hidden;
+}
+.mesh-unit-card-preview img { display: block; }
+.mesh-unit-glb-tools { margin-top: 9px; padding-top: 6px; border-top: 1px solid #414b49; font-size: 11px; }
+.mesh-unit-thumbnail-host { position: fixed; left: -2400px; top: 0; width: 240px; height: 160px; visibility: hidden; pointer-events: none; }
+
+#meshUnitPackPicker {
+  box-sizing: border-box;
+  width: min(1100px, 94vw);
+  height: min(780px, 86dvh);
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+#meshUnitPackPicker[open] { display: flex; flex-direction: column; }
+#meshUnitPackPicker::backdrop { background: #000a; }
+.mesh-unit-picker-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--panel-header);
+}
+.mesh-unit-picker-header h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 21px; }
+.mesh-unit-picker-header svg { width: 22px; height: 22px; color: var(--accent-text); }
+.mesh-unit-picker-header p { margin: 5px 0 0; }
+.mesh-unit-picker-tools input {
+  min-width: 150px;
+  flex: 1;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--field);
+  color: var(--text);
+}
+#meshUnitPackPicker .mesh-unit-picker-body,
+#meshUnitPackPicker .mesh-unit-picker-body aside { border-color: var(--line-soft); }
+#meshUnitPackPicker .mesh-unit-picker-body p { margin: 8px 0; color: var(--muted); }
+#meshUnitPackPicker [data-status].mesh-unit-error { color: #ffa992; }
+.mesh-unit-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 145px), 1fr));
+  gap: 10px;
+}
+#meshUnitPackPicker .blm-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 8px;
+  min-width: 0;
+  background: var(--card);
+  border-color: var(--line-soft);
+  text-align: left;
+}
+#meshUnitPackPicker .blm-card[aria-pressed="true"] { border-color: var(--selected-line); background: var(--selected-bg); }
+#meshUnitPackPicker .mesh-unit-card-preview { border-radius: 6px; background: var(--preview-bg); }
+#meshUnitPackPicker .mesh-unit-card-preview svg { width: 30px; height: 30px; color: var(--muted); }
+#meshUnitPackPicker .mesh-unit-card-preview img { width: 100%; height: 100%; object-fit: contain; }
+#meshUnitPackPicker [data-use] {
+  align-self: stretch;
+  border-color: var(--yellow);
+  background: var(--yellow);
+  color: var(--brand-ink);
+}
+#meshUnitPackPicker[aria-busy="true"] .mesh-unit-picker-grid { pointer-events: none; }
+@media (max-width:760px) {
+  .mesh-unit-picker-header { padding: 12px; }
+  #meshUnitPackPicker .mesh-unit-picker-body aside { order: -1; }
+  #meshUnitPackPicker [data-preview] { display: none; }
+}

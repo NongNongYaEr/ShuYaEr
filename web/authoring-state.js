@@ -6,6 +6,7 @@ import {normalizeAxisTimes} from './branch-axis.js';
 import {DEFAULT_WIND_PROFILE} from './wind-profile-defaults.js';
 import { normalizeGenerator, normalizeLayers, normalizeProfile, profileValue } from './generator-data.js';
 import { copy, normalizeBranchShape, normalizeBranchLibrary, normalizeBranchInstances, resolveInstanceAsset } from './branch-workbench-data.js';
+import {normalizeMeshUnits} from './mesh-unit-state.js';
 import { normalizeSections, normalizeJunction } from './branch-shaping.js';
 import { normalizeSymmetryGroups } from './shape-operation-data.js';
 import { normalizeBranchArrays } from './branch-array-data.js';
@@ -195,6 +196,7 @@ export function normalizeAuthoring(raw = {}, fallbackSeed = 12037, previous = nu
     branch_shape: previous&&source.branch_shape===previous.branch_shape?source.branch_shape:normalizeBranchShape(source.branch_shape),
     branch_library: previous&&source.branch_library===previous.branch_library?source.branch_library:normalizeBranchLibrary(source.branch_library),
     branch_instances: previous&&source.branch_instances===previous.branch_instances?source.branch_instances:normalizeBranchInstances(source.branch_instances, previous?.branch_instances),
+    ...(source.mesh_units?{mesh_units:normalizeMeshUnits(source.mesh_units,previous?.mesh_units)}:{}),
     branch_arrays: normalizeBranchArrays(source.branch_arrays),
     ...(source.imported_trunks!=null?{imported_trunks:previous&&source.imported_trunks===previous.imported_trunks?source.imported_trunks:normalizeImportedTrunks(source.imported_trunks)}:{}),
     influence_regions: normalizeInfluenceRegions(source.influence_regions),

@@ -11,7 +11,8 @@ const flag=name=>{const n=process.argv.indexOf(name);return n>=0?process.argv[n+
 const root=path.resolve(flag('--source')||path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'));
 const {verifyNativeProvenance}=await import(pathToFileURL(path.join(root,'scripts/native-runtime-provenance.mjs')));
 const {packSampleResources}=await import(pathToFileURL(path.join(root,'scripts/sample-resource-pack.mjs')));
-const delivery=flag('--delivery')||'V030',shell=flag('--shell'),overlay=flag('--overlay'),originals=flag('--originals');const integratedRelease=['V050','V051','V052'].includes(delivery);
+const delivery=flag('--delivery')||'V030',shell=flag('--shell'),overlay=flag('--overlay'),originals=flag('--originals');
+const integratedRelease=fs.existsSync(path.join(root,'native/V050Integration.cs'));
 const destination=process.argv[2]&&path.resolve(process.argv[2]);
 const installedRoot=flag('--installed-root')?path.resolve(flag('--installed-root')):destination;
 const read=f=>JSON.parse(fs.readFileSync(f,'utf8').replace(/^\uFEFF/,''));
@@ -26,8 +27,8 @@ const sourceHashes=new Map(),externalSourceHashes=new Map();
 async function copyFile(from,dir,relative){const target=inside(dir,relative);fs.mkdirSync(path.dirname(target),{recursive:true});const original=await digest(from);if(fs.existsSync(target)){const actual=await digest(target);let generated=false;if(relative===release.entry&&shell)generated=actual===await digest(shell);if(relative==='runtime/native/manifest.json'){const old=read(from),next=read(target);generated=next.product_version===release.version&&next.entry_sha256===await digest(shell)&&JSON.stringify(old.files)===JSON.stringify(next.files);}if(actual!==original&&!generated)throw Error('Existing input differs: '+target);}else fs.copyFileSync(from,target,fs.constants.COPYFILE_EXCL);if(from.startsWith(root+path.sep)&&!sourceHashes.has(from))sourceHashes.set(from,original);else if(!from.startsWith(root+path.sep))externalSourceHashes.set(from,original);}
 async function copyRelative(dir,relative,filter=()=>true){const from=inside(root,relative);if(!fs.existsSync(from))throw Error('Missing build input: '+relative);const files=fs.statSync(from).isDirectory()?walk(from):[from];for(const f of files){const rel=slash(path.relative(root,f));if(filter(rel))await copyFile(f,dir,rel);}}
 const metas=relative=>fs.existsSync(inside(root,relative))?fs.readdirSync(inside(root,relative)).filter(n=>n.endsWith('.meta.json')).map(n=>({file:relative+'/'+n,meta:read(inside(root,relative+'/'+n))})):[];
-const sourceRelease=read(inside(root,'release-config.json')),release={...sourceRelease,version:flag('--version')||sourceRelease.version,channel:'professional'};
-if(!/^\d+\.\d+\.\d+$/.test(release.version)||!/^V\d{3}$/.test(delivery))throw Error('Invalid release identity');
+const sourceRelease=read(inside(root,'release-config.json')),release={...sourceRelease,version:flag('--version')||sourceRelease.version,entry:flag('--entry')||sourceRelease.entry,channel:'professional'};
+if(!/^\d+\.\d+\.\d+$/.test(release.version)||!/^V\d{3}$/.test(delivery)||!/^树鸭儿V\d+\.exe$/.test(release.entry))throw Error('Invalid release identity');
 const classes=[['TREE','CAMPHOR','香樟','tree-camphor-v1.json'],['SHRUB','AZALEA','杜鹃','tree-azalea-v1.json'],['POTTED','FIDDLE_FIG','琴叶榕','tree-fiddle_fig-v1.json'],['VINE','IVY','常春藤','ivy-v1.json'],['FLOWERING_VINE','BOUGAINVILLEA','三角梅','bougainvillea-v1.json'],['GRASS','SCENE_GRASS','草叶','scene-grass-v1.json'],['HERB','SCENE_BROADLEAF','大叶草本','scene-broadleaf-v1.json'],['FLOWER','SCENE_FLOWER','黄色小花','scene-flower-v1.json']].map(([category,species,name,file])=>({category,species,name,file}));
 const trees=metas('assets/tree-template-library'),branches=metas('assets/branch-asset-library'),units=metas('assets/plant-unit-library'),prefabs=metas('assets/branch-prefab-library');
 const selectedTrees=classes.map(c=>{const row=trees.find(v=>v.meta.species===c.species&&v.meta.batch==='ALL_PLANT_SAMPLE_V2');if(!row)throw Error('No representative template: '+c.species);return row;});
@@ -39,9 +40,9 @@ const embeddedOnly=[...requiredBranches].filter(id=>!selectedBranches.some(v=>v.
 for(const id of embeddedOnly){const asset=embedded.get(id);if(!asset?.shape?.branches?.length||!asset.sample)throw Error('Representative branch dependency is incomplete: '+id);}
 const selectedUnits=units.filter(v=>classes.some(c=>v.meta.id===c.species+'_FINISHED_V1'));
 if(selectedUnits.length!==classes.length)throw Error('Representative calibrated packs are missing');
-const qaUnit='prepared-aca902b0-b643-4bfb-9881-6eefd4d9621e';
+const localUnitIds=new Set(['prepared-aca902b0-b643-4bfb-9881-6eefd4d9621e','prepared-38f2336e-adcf-406d-a4a1-15bf5fd91dc1']);
 const variants=[{folder:'01_精简EXE',lite:true,source:false},{folder:'02_精简公开源码',lite:true,source:true,public:true},{folder:'03_全资产EXE',lite:false,source:false},{folder:'04_全资产开发',lite:false,source:true}];
-const selection={release,sourceRelease,delivery,classes,requiredBranches:[...requiredBranches],embeddedOnlyDependencies:embeddedOnly,counts:{lite:{trees:selectedTrees.length,branches:selectedBranches.length,units:selectedUnits.length,prefabs:prefabs.length},full:{trees:trees.length,branches:branches.length,units:units.filter(v=>v.meta.id!==qaUnit).length,prefabs:prefabs.length}},variants};
+const selection={release,sourceRelease,delivery,classes,requiredBranches:[...requiredBranches],embeddedOnlyDependencies:embeddedOnly,counts:{lite:{trees:selectedTrees.length,branches:selectedBranches.length,units:selectedUnits.length,prefabs:prefabs.length},full:{trees:trees.length,branches:branches.length,units:units.filter(v=>!localUnitIds.has(v.meta.id)).length,prefabs:prefabs.length}},variants};
 if(process.argv.includes('--plan-only')){console.log(JSON.stringify(selection,null,2));process.exit(0);}
 if(!destination||destination===root||destination.startsWith(root+path.sep))throw Error('Use a fresh sibling delivery directory');
 const resume=process.argv.includes('--resume');
@@ -51,9 +52,9 @@ const manifest=read(inside(root,'runtime/native/manifest.json'));
 const integrated=integratedRelease?verifyV050Inputs(root):null;
 if(!integratedRelease&&(manifest.product_version!==sourceRelease.version||manifest.entry_sha256!==await digest(inside(root,sourceRelease.entry))))throw Error('Verified source desktop does not match source release');
 if(!shell||!fs.existsSync(shell))throw Error('Supply the freshly built target-version desktop shell with --shell');
-if(integratedRelease){const candidate=flag('--candidate')&&read(path.resolve(flag('--candidate'))),shellSHA=await digest(shell);if(shellSHA!==await digest(inside(root,release.entry))&&(!candidate?.compiled||candidate.version!==release.version||candidate.sha256!==shellSHA))throw Error('Integrated shell must match the current entry or explicit compiled release candidate');}
+if(integratedRelease){const candidate=flag('--candidate')&&read(path.resolve(flag('--candidate'))),shellSHA=await digest(shell);if((release.version!==sourceRelease.version||shellSHA!==await digest(inside(root,sourceRelease.entry)))&&(!candidate?.compiled||candidate.version!==release.version||candidate.sha256!==shellSHA))throw Error('Integrated shell must match the current entry or explicit compiled release candidate');}
 fs.mkdirSync(destination,{recursive:true});json(destination,'交付计划.json',selection);
-const docs=path.join(overlay||root,'design',integratedRelease?'distribution-v050':'distribution-'+delivery.toLowerCase());
+const docs=flag('--docs')||path.join(overlay||root,'design',integratedRelease?'distribution-v050':'distribution-'+delivery.toLowerCase());
 const runtimeScripts=['unit-preparation-server.ps1','plant-unit-thumbnail-server.ps1','plant-pack-server.ps1','plant-pack-cli.mjs','plant-pack-library.mjs','plant-pack-container.mjs','branch-prefab-server.ps1','creative-library-server.ps1','project-files-server.ps1','project-library-server.ps1','project-session-server.ps1','project-template-current.ps1','trunk-section-preset-server.ps1','trunk-preset-server.ps1','trunk-preset-cli.mjs','pve-export-server.ps1','index-project-library.mjs','inspect-asset-references.mjs','export-pve-complete-units.mjs','export-pve-vine.mjs','export_branchforge_resolved_assembly.mjs','export-static-vegetation.mjs','pve-atlas.mjs','pve-atlas.ps1','pve-merged-atlas.mjs','pve-merged-atlas.ps1','pve-geometry-quality.mjs','pve-package.mjs','pve-final-package.mjs','pve-final-geometry.mjs','pve-unit-reuse.mjs','pve-bark-materials.mjs','pve-bark-setup.py','static-vegetation-package.mjs','static-texture-tint.ps1'];
 const rootFiles=['启动树鸭儿.bat','server.ps1','WEBVIEW2-LICENSE.txt','WEBVIEW2-NOTICE.txt','branch-cli.mjs','pve-leaf-sources-cli.mjs','pve-skeleton-cli.mjs','pve-unit-glb-cli.mjs','pve-whole-tree-cli.mjs','vendor-loader.mjs','release-config.json'];
 const legacyScript=/^(?:audit-release-v01|prepare-release-(?:lite-)?v01|prepare-v020-distributions|build-(?:release-v011|single-file-v01)|test-(?:release-v011-single|single-file-v01)|zip-release-v01|trunk-detail-release)/;
@@ -76,7 +77,7 @@ for(const variant of variants){
  await copyRelative(dir,'web/assets/plants',f=>!plantFiles||plantFiles.has(path.basename(f)));
  const catalog=read(inside(root,'web/assets/plant-unit-catalog.json')).filter(c=>!plantFiles||plantFiles.has(c.file)).map(c=>({...c,source:'随软件附带的植物样本，见 ASSETS_LICENSE.md'}));
  fs.writeFileSync(inside(dir,'web/assets/plant-unit-catalog.json'),JSON.stringify(catalog,null,2)+'\n');
- const chosenUnits=variant.lite?selectedUnits:units.filter(v=>v.meta.id!==qaUnit),unitIds=new Set(chosenUnits.map(v=>v.meta.id));
+ const chosenUnits=variant.lite?selectedUnits:units.filter(v=>!localUnitIds.has(v.meta.id)),unitIds=new Set(chosenUnits.map(v=>v.meta.id));
  const thumbCatalog=read(inside(root,'web/assets/plant-unit-thumbnails/catalog.json'));thumbCatalog.items=thumbCatalog.items.filter(v=>unitIds.has(v.id));
  json(dir,'web/assets/plant-unit-thumbnails/catalog.json',thumbCatalog);for(const item of thumbCatalog.items)await copyRelative(dir,'web/assets/plant-unit-thumbnails/'+item.file);
  for(const [rows,suffix]of [[variant.lite?selectedBranches:branches,'.branchasset.json'],[chosenUnits,'.plantunits.json'],[prefabs,'.prefab.json']])for(const row of rows){await copyRelative(dir,row.file);await copyRelative(dir,row.file.replace('.meta.json',suffix));}
@@ -87,7 +88,7 @@ for(const variant of variants){
  json(dir,'assets/project-library/catalog.json',{version:2,items:[],errors:[],scannedAt:null});
 for(const name of ['trunk-presets','trunk-section-presets','tree-recipe-library','plant-package-library',...(!variant.lite?['trunk-models']:[])])if(fs.existsSync(inside(root,'assets/'+name)))await copyRelative(dir,'assets/'+name);
  if(variant.lite){let distribution=fs.readFileSync(inside(dir,'web/distribution-config.js'),'utf8');distribution=distribution.replace("edition: 'full', treeSpecies: null", "edition: 'sample', treeSpecies: ['CAMPHOR','AZALEA','FIDDLE_FIG']");fs.writeFileSync(inside(dir,'web/distribution-config.js'),distribution);}
- if(!variant.public){for(const f of [release.entry,'Microsoft.Web.WebView2.Core.dll','Microsoft.Web.WebView2.WinForms.dll','WebView2Loader.dll','runtime'])await copyRelative(dir,f);fs.copyFileSync(shell,inside(dir,release.entry));const native=read(inside(dir,'runtime/native/manifest.json'));native.product_version=release.version;native.channel=release.channel;native.entry=release.entry;native.entry_sha256=await digest(shell);json(dir,'runtime/native/manifest.json',native);}
+ if(!variant.public){for(const f of ['Microsoft.Web.WebView2.Core.dll','Microsoft.Web.WebView2.WinForms.dll','WebView2Loader.dll','runtime'])await copyRelative(dir,f);fs.copyFileSync(shell,inside(dir,release.entry));const native=read(inside(dir,'runtime/native/manifest.json'));native.product_version=release.version;native.channel=release.channel;native.entry=release.entry;native.entry_sha256=await digest(shell);json(dir,'runtime/native/manifest.json',native);}
  else{for(const f of ['runtime/NOTICE.txt','runtime/NODE-LICENSE.txt'])await copyRelative(dir,f);for(const f of walk(inside(root,'runtime/native')).filter(f=>/license|notice/i.test(path.basename(f))))await copyFile(f,dir,slash(path.relative(root,f)));}
  if(variant.source&&!variant.public){
   for(const f of ['BlenderAsset','次枝资产','初始样本','植物图片素材库','测试树干']){const original=originals&&path.join(path.resolve(originals),f);if(integratedRelease&&original&&fs.existsSync(original)){for(const file of walk(original))await copyFile(file,dir,slash(path.relative(path.resolve(originals),file)));}else await copyRelative(dir,f);if(integratedRelease&&fs.existsSync(inside(root,f)))await copyRelative(dir,f);}
@@ -96,18 +97,23 @@ for(const name of ['trunk-presets','trunk-section-presets','tree-recipe-library'
   await copyRelative(dir,'AGENTS.md');if(integratedRelease){const file=inside(dir,'AGENTS.md'),history=fs.readFileSync(file,'utf8');fs.writeFileSync(file,'# '+delivery+' 正式全资产开发目录\n\n后续开发入口为 '+path.join(installedRoot,variant.folder)+'。下方旧路径仅作历史记录。先读 README_从这里开始.md。植物格式4、材质格式25、ABI1及13槽保持兼容。\n\n'+history);}
  }
  if(overlay){for(const f of walk(overlay)){const rel=slash(path.relative(overlay,f));if(rel==='交付说明/V020开发历史.md'&&variant.folder!=='04_全资产开发')continue;const target=inside(dir,rel);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(f,target);}}
- if(integratedRelease){if(delivery==='V050')write(dir,'启动树鸭儿.bat','@echo off\r\ncd /d "%~dp0"\r\nstart "" "'+release.entry+'"\r\n');if(variant.public)write(dir,'AGENTS.md','# '+delivery+' 精简公开源码\n\n从本目录开发。先读README.md并按portable-runtime.json校验依赖；源码无运行二进制，样本按清单还原。植物格式4、材质格式25、ABI1、13槽保持兼容。完整单元枝按实例编辑。用户工程和制作原件不作为缓存删除。\n');}
+ if(integratedRelease){
+  const start='@echo off\r\nchcp 65001 >nul\r\nstart "" /d "%~dp0." "%~dp0'+release.entry+'"\r\n';
+  write(dir,'启动树鸭儿.bat',start);
+  if(variant.source&&!variant.public)for(const file of ['启动程序化树枝生成器.bat','Start_Branch_Generator.bat'])write(dir,file,start);
+  if(variant.public)write(dir,'AGENTS.md','# '+delivery+' 精简公开源码\n\n从本目录开发。先读README.md并按portable-runtime.json校验依赖；源码无运行二进制，样本按清单还原。植物格式4、材质格式25、ABI1、13槽保持兼容。完整单元枝按实例编辑。用户工程和制作原件不作为缓存删除。\n');
+ }
  json(dir,'release-config.json',release);
  const pkg={name:variant.public?'shuyaer-source-available':'shuyaer-'+delivery.toLowerCase(),version:release.version,private:!variant.public,type:'module',license:'LicenseRef-ShuYaEr-Free-Use-Source-Available-1.0',...(variant.source?{scripts:{test:'node --experimental-loader ./tests/vendor-loader.mjs --test '+coreTests.map(f=>'tests/'+f).join(' '),'test:all':'node --experimental-loader ./tests/vendor-loader.mjs --test tests/*.test.mjs'}}:{})};json(dir,'package.json',pkg);
  json(dir,'release.json',{...release,delivery,variant:variant.folder,sampleClasses:variant.lite?classes:null,sourceAvailable:!!variant.source,publicSource:!!variant.public,materialProjectFormatVersion:integratedRelease?25:undefined,license:pkg.license,commercialCreativeOutput:true,commercialRedistributionRequiresWrittenPermission:true});
  const counts=selection.counts[variant.lite?'lite':'full'];
- json(dir,'资产清单.json',{...counts,samples:variant.lite?classes:null,requiredBranchIds:variant.lite?[...requiredBranches]:null,excludedVerificationOnlyAsset:qaUnit});
+ json(dir,'资产清单.json',{...counts,samples:variant.lite?classes:null,requiredBranchIds:variant.lite?[...requiredBranches]:null,excludedLocalAssets:[...localUnitIds]});
  if(variant.public){
   const resources=walk(dir).filter(f=>slash(path.relative(dir,f)).startsWith('assets/')||slash(path.relative(dir,f)).startsWith('web/assets/')||slash(path.relative(dir,f)).startsWith('material/web/assets/'));const packed=packSampleResources(dir,resources);for(const file of resources)fs.unlinkSync(file);console.log('Sample blocks: '+packed.blocks.length+' for '+resources.length+' files');
   write(dir,'.gitignore','.runtime/\n导出/\n恢复资料/\nnode_modules/\n*.exe\n*.dll\n*.cso\n*.obj\n*.pdb\nmaterial/projects/\nmaterial/exports/\nmaterial/runtime/\nmaterial/web/assets/\n*.blend1\nassets/\nweb/assets/\n!web/assets/.gitkeep\nruntime/native/*.json\nruntime/native/*.hlsl\n');
   write(dir,'.gitattributes','* text=auto\n*.gz binary\n*.png binary\n*.jpg binary\n*.wasm binary\n');
  }
- write(dir,'README_从这里开始.md',fs.readFileSync(path.join(docs,variant.public?'README_SOURCE.md':variant.source?'README_DEVELOPMENT.md':'README_DESKTOP.md'),'utf8').replaceAll('{{VERSION}}',release.version).replaceAll('{{VARIANT}}',variant.folder).replaceAll('V050',delivery));
+ write(dir,'README_从这里开始.md',fs.readFileSync(path.join(docs,variant.public?'README_SOURCE.md':variant.source?'README_DEVELOPMENT.md':'README_DESKTOP.md'),'utf8').replaceAll('{{VERSION}}',release.version).replaceAll('{{VARIANT}}',variant.folder).replaceAll('{{DELIVERY}}',delivery).replaceAll('V050',delivery));
  if(variant.public)write(dir,'README.md',fs.readFileSync(inside(dir,'README_从这里开始.md'),'utf8'));
  const entries=[];for(const file of walk(dir)){const relative=slash(path.relative(dir,file)),bytes=fs.statSync(file).size;if(variant.public&&bytes>95*1024*1024)throw Error('Public source file requires splitting: '+relative);entries.push({path:relative,bytes,sha256:await digest(file)});}
  json(dir,'distribution-manifest.json',{format:1,release:release.version,variant:variant.folder,counts,files:entries});

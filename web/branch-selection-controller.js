@@ -20,7 +20,7 @@ import { TransformControls } from './vendor/TransformControls.js';
 import { SCULPT_TOOLS, createSculptSnapshot, createMeshPreview } from './tree-sculpt.js';
 import { SELECTION_TOOLS, TRANSFORM_TOOLS, descendants, polylineInRegion, transformBundles, bundleOverrides, createIsolationView } from './branch-selection.js';
 
-export function createBranchSelectionController({ canvas, camera, controls, modelRoot, skeletonRoot, getAsset, getLeafSources = () => [], getDuplicateAsset = getAsset, releaseDuplicateAsset = () => {}, getAuthoring, getSelection, setSelection, getWorkspace = () => 'TREE', selectableBranch = () => true, selectionId = b => b.stableId, getRegionHits = null, getSelectedPoint = () => null, getSelectionExclusions = () => new Set(), getEditTargets = null, getOutlineTargets = () => null, includeSelectionChildren = () => false, temporarySelectionDone = () => {}, temporaryClick = () => {}, renderMountPreview = () => {}, renderPointSlidePreview = () => {}, getTool, transact, commitPreview, status }) {
+export function createBranchSelectionController({ canvas, camera, controls, modelRoot, skeletonRoot, getAsset, getLeafSources = () => [], getDuplicateAsset = getAsset, releaseDuplicateAsset = () => {}, getAuthoring, getSelection, setSelection, getWorkspace = () => 'TREE', selectableBranch = () => true, selectionId = b => b.stableId, getRegionHits = null, getBoxSelection = () => null, getSelectedPoint = () => null, getSelectionExclusions = () => new Set(), getEditTargets = null, getOutlineTargets = () => null, includeSelectionChildren = () => false, temporarySelectionDone = () => {}, temporaryClick = () => {}, renderMountPreview = () => {}, renderPointSlidePreview = () => {}, getTool, transact, commitPreview, status }) {
   const $ = (id) => document.getElementById(id);
   const proxy = new THREE.Object3D();
   const outline = new THREE.Group();
@@ -484,9 +484,14 @@ export function createBranchSelectionController({ canvas, camera, controls, mode
     return [a, [b[0], a[1]], b, [a[0], b[1]]];
   }
   function regionHits() {
+    const shape = polygon();
+    region.target = null;
+    if(region.boxSelection){
+      const hits=region.boxSelection.hits(shape);
+      if(region.boxSelection.exclusive||hits.size){region.target=region.boxSelection;return hits;}
+    }
     const bounds = canvas.getBoundingClientRect();
     const asset = getAsset(); asset.group.updateWorldMatrix(true, false);
-    const shape = polygon();
     const branches = available();
     const project = (point) => {
       const projected = asset.group.localToWorld(point.clone()).project(camera);
@@ -514,14 +519,17 @@ export function createBranchSelectionController({ canvas, camera, controls, mode
     if (region.tool === 'BOX_SELECT') region.points = [region.points[0], next];
     else if (Math.hypot(next[0] - region.points.at(-1)[0], next[1] - region.points.at(-1)[1]) >= 3) region.points.push(next);
     path.setAttribute('points', polygon().map((p) => p.join(',')).join(' '));
-    $('bundleSelectionCount').textContent = `${regionHits().size} 枝`;
+    const hits=regionHits();
+    $('bundleSelectionCount').textContent = `${hits.size} ${region.target?.unit||'枝'}`;
+    return hits;
   }
   function beginRegion(event, tool, temporary) {
       const bounds = canvas.getBoundingClientRect();
       overlay.style.left = `${canvas.offsetLeft}px`; overlay.style.top = `${canvas.offsetTop}px`;
       overlay.style.width = `${bounds.width}px`; overlay.style.height = `${bounds.height}px`;
       overlay.setAttribute('viewBox', `0 0 ${bounds.width} ${bounds.height}`); overlay.removeAttribute('hidden');
-      region = { tool, temporary, excluded: new Set(getSelectionExclusions()), points: [point(event)], before: new Set(getSelection()), operation: event.ctrlKey ? 'SUBTRACT' : event.shiftKey ? 'ADD' : $('regionOperation').value };
+      region = { tool, temporary, excluded: new Set(getSelectionExclusions()), points: [point(event)], before: new Set(getSelection()), operation: event.ctrlKey ? 'SUBTRACT' : event.shiftKey ? 'ADD' : $('regionOperation').value,
+        boxSelection:tool==='BOX_SELECT'?getBoxSelection():null };
       if (temporary) { canvas.dataset.temporarySelection = region.operation; status(region.operation === 'SUBTRACT' ? `临时框选 · 减选（Ctrl）${SCULPT_TOOLS.has(getTool()) ? ' · 空白框清空全部选择' : ''}` : '临时框选 · 加选（Shift）', 'ready'); }
       lastPointer = event.pointerId; canvas.setPointerCapture(event.pointerId); controls.enabled = false;
       regionMove(event);
@@ -810,9 +818,8 @@ export function createBranchSelectionController({ canvas, camera, controls, mode
       if (drag?.mountRotation || drag?.pointRotation) {gizmo.pointerUp(pointer(event));releasePointer();return true;}
       if (!region && TRANSFORM_TOOLS.has(getTool())) { gizmo.pointerUp(pointer(event)); releasePointer(); return true; }
       if (!region) return SELECTION_TOOLS.has(getTool());
-      regionMove(event);
+      const hits = regionMove(event);
       const completed = region;
-      const hits = regionHits();
       const p = completed.points;
       const moved = p.some((value) => Math.hypot(value[0] - p[0][0], value[1] - p[0][1]) > 4);
       region = null; overlay.setAttribute('hidden', ''); releasePointer(); controls.enabled = true;
@@ -822,10 +829,13 @@ export function createBranchSelectionController({ canvas, camera, controls, mode
         && hits.size === 0 && SCULPT_TOOLS.has(getTool());
       let clicked = false;
       if (isRegion) {
-        const result = clear ? { ids: new Set(), excluded: new Set() }
-          : combineScopedSelection(getAsset().masterBranches, completed.before, hits, completed.operation, includeSelectionChildren(), completed.excluded);
         if (completed.temporary) temporarySelectionDone({ clear });
-        setSelection(result.ids, { excluded: result.excluded });
+        if(completed.target)completed.target.apply(hits,completed.operation,{clear});
+        else{
+          const result = clear ? { ids: new Set(), excluded: new Set() }
+            : combineScopedSelection(getAsset().masterBranches, completed.before, hits, completed.operation, includeSelectionChildren(), completed.excluded);
+          setSelection(result.ids, { excluded: result.excluded });
+        }
       } else {
         refresh();
         if (completed.temporary) clicked = Boolean(temporaryClick(event, completed.operation));

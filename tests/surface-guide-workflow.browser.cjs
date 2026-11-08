@@ -1,5 +1,5 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
-const {chromium}=require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {chromium}=require('playwright');
 (async()=>{
  const out=path.resolve('.runtime/guide-workflow');fs.mkdirSync(out,{recursive:true});const wall=path.join(out,'批量走势验收.obj');fs.writeFileSync(wall,'v -5 0 0\nv 5 0 0\nv 5 0 8\nv -5 0 8\nf 1 2 3\nf 1 3 4\n');
  const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'}),page=await browser.newPage({viewport:{width:1680,height:1080}}),report={checks:[],errors:[]};page.setDefaultTimeout(30000);page.on('pageerror',e=>report.errors.push(e.message));

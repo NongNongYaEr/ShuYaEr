@@ -86,7 +86,7 @@ bool ParseFile(const FString& FilePath, TArray<FBridgeBranch>& Branches, TArray<
 		for (const auto& Capability : *Capabilities)
 		{
 			FString Name;
-			if (!Capability->TryGetString(Name) || (Name != TEXT("imported_trunk_materials_v1") && Name != TEXT("imported_trunk_skin_v1")))
+			if (!Capability->TryGetString(Name) || (Name != TEXT("imported_trunk_materials_v1") && Name != TEXT("imported_trunk_skin_v1") && Name != TEXT("native_mesh_units_v1")))
 			{ Error = TEXT("资源包需要更新的树鸭儿 PVE 桥接版本"); return false; }
 		}
 	}

@@ -1,6 +1,6 @@
 // Paired, isolated native-editor interaction benchmark; never attaches to user windows.
 const fs=require('node:fs'),path=require('node:path'),net=require('node:net'),os=require('node:os'),crypto=require('node:crypto'),{spawn}=require('node:child_process'),assert=require('node:assert/strict');
-const {chromium}=require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {chromium}=require('playwright');
 const root=path.resolve(__dirname,'..'),arg=(name,fallback)=>{const i=process.argv.indexOf(name);return i<0?fallback:process.argv[i+1];};
 const input=path.resolve(arg('--project','.runtime/branch-junction-fix/当前工程_只读副本.branch.json'));
 const outputRoot=path.join(root,'.runtime/professional-interaction-perf'),out=path.resolve(arg('--out',path.join(outputRoot,new Date().toISOString().replace(/[:.]/g,'-'))));

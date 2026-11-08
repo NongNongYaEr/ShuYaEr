@@ -12,6 +12,8 @@ public:
 	/** Versioned handshake with the workbench; includes cold-load skin verification. */
 	UFUNCTION(BlueprintPure, Category="BranchForge")
 	static int32 GetTrunkBindingVersion() { return 4; }
+	UFUNCTION(BlueprintPure, Category="BranchForge")
+	static int32 GetMeshUnitVersion() { return 1; }
 	/** Resolve native export node folder, type, name and collision policy before building. */
 	UFUNCTION(BlueprintCallable, Category="BranchForge")
 	static FString PlanTrunkExport(UObject* SourceAsset,const FString& FolderOverride);

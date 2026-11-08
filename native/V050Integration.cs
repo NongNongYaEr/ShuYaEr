@@ -8,7 +8,7 @@ namespace ShuYaErV050 {
  }
  internal sealed class Workspace:Form {
   static readonly string ReleaseTitle="树鸭儿 V"+typeof(Workspace).Assembly.GetName().Version.ToString(3).Replace(".","");
-  readonly string root;readonly bool test;readonly BranchGeneratorFBXTool.MainForm plant;TreeMaterialLab.MainForm material;
+  readonly string root;readonly string graphicsMode;readonly bool test;readonly BranchGeneratorFBXTool.MainForm plant;TreeMaterialLab.MainForm material;
   readonly Panel surface=new Panel{Dock=DockStyle.Fill};readonly FlowLayoutPanel bar=new FlowLayoutPanel{Dock=DockStyle.Top,Height=42,Padding=new Padding(8,5,8,5)};
   readonly Button plantButton=new Button{Text="植物创作",Width=110,Height=30},materialButton=new Button{Text="树干材质",Width=110,Height=30};readonly Label state=new Label{AutoSize=true,Padding=new Padding(12,7,0,0)};
   bool closing,busy,closeAttempt,waitCancelled;string pendingInput;readonly JavaScriptSerializer json=new JavaScriptSerializer();
@@ -17,10 +17,10 @@ namespace ShuYaErV050 {
   readonly Button continueEditing=new Button{Text="返回工作台",AutoSize=true};
   Panel materialSurface,transitionCover;Rectangle componentBounds;bool materialActive,componentCommandBusy;
   internal Workspace(string directory,bool verify){
-   root=directory;test=verify;Text=ReleaseTitle+" · 植物与材质工坊";BackColor=Color.FromArgb(31,35,36);ForeColor=Color.FromArgb(234,235,219);MinimumSize=new Size(1080,760);WindowState=FormWindowState.Maximized;
+   root=directory;graphicsMode=GraphicsPreference.Read(root);test=verify;Text=ReleaseTitle+" · 植物与材质工坊";BackColor=Color.FromArgb(31,35,36);ForeColor=Color.FromArgb(234,235,219);MinimumSize=new Size(1080,760);WindowState=FormWindowState.Maximized;
    if(test){WindowState=FormWindowState.Normal;StartPosition=FormStartPosition.Manual;Location=new Point(-28000,-28000);Size=new Size(1600,1000);ShowInTaskbar=false;Environment.SetEnvironmentVariable("BRANCHFORGE_DESKTOP_TEST_DIR",Path.Combine(root,".runtime","integration-test","plant-host"));Environment.SetEnvironmentVariable("BRANCHFORGE_SESSION_TEST_DIR",Path.Combine(root,".runtime","integration-test","plant-session"));}
    string icon=Path.Combine(root,"web","brand","tree-duck-v5.ico");if(File.Exists(icon))Icon=new Icon(icon);
-   Controls.Add(surface);bar.Visible=false;plant=new BranchGeneratorFBXTool.MainForm(root);Embed(plant);plant.IntegrationMessage+=PlantMessage;
+   Controls.Add(surface);bar.Visible=false;plant=new BranchGeneratorFBXTool.MainForm(root,graphicsMode);Embed(plant);plant.IntegrationMessage+=PlantMessage;
    closeNotice.Controls.Add(closeNoticeText);closeNotice.Controls.Add(continueEditing);Controls.Add(closeNotice);closeNotice.BringToFront();
    continueEditing.Click+=delegate{waitCancelled=true;};
    plantButton.Click+=delegate{if(!busy)Select(false);};materialButton.Click+=delegate{if(!busy)Select(true);};FormClosing+=CloseWorkspace;
@@ -32,7 +32,7 @@ namespace ShuYaErV050 {
    if(editing&&material==null){
     materialSurface=new Panel{Visible=false,BackColor=Color.FromArgb(31,35,36)};surface.Controls.Add(materialSurface);
     if(componentBounds.IsEmpty)componentBounds=new Rectangle(0,164,surface.ClientSize.Width,Math.Max(100,surface.ClientSize.Height-236));materialSurface.Bounds=componentBounds;
-    material=new TreeMaterialLab.MainForm(Path.Combine(root,"material"),materialSurface);material.IntegrationMessage+=MaterialMessage;
+    material=new TreeMaterialLab.MainForm(Path.Combine(root,"material"),materialSurface,graphicsMode);material.IntegrationMessage+=MaterialMessage;
    }
    materialActive=editing;plant.Visible=true;plant.SetIntegrationActive(!editing);
    if(materialSurface!=null){materialSurface.Visible=editing;if(editing){materialSurface.BringToFront();material.StartForIntegration();}}
@@ -52,6 +52,10 @@ namespace ShuYaErV050 {
   static string SHA(string file){using(var stream=File.OpenRead(file))using(var hash=SHA256.Create())return BitConverter.ToString(hash.ComputeHash(stream)).Replace("-","").ToLowerInvariant();}
   async void PlantMessage(Dictionary<string,object> data){
    string action=Convert.ToString(data["action"]);
+   if(action=="graphics-mode"){
+    if(!closing&&!closeAttempt)await SaveGraphicsMode(data);
+    return;
+   }
    if(action=="material-component-bounds"){try{var b=(Dictionary<string,object>)data["bounds"];double dpr=Convert.ToDouble(b["dpr"]);if(dpr<.5||dpr>8)return;var r=new Rectangle((int)Math.Round(Convert.ToDouble(b["x"])*dpr),(int)Math.Round(Convert.ToDouble(b["y"])*dpr),(int)Math.Round(Convert.ToDouble(b["width"])*dpr),(int)Math.Round(Convert.ToDouble(b["height"])*dpr));if(r.Width<100||r.Height<100||r.X<0||r.Y<0||r.Right>surface.ClientSize.Width+2||r.Bottom>surface.ClientSize.Height+2)return;componentBounds=r;if(materialSurface!=null)materialSurface.Bounds=r;}catch(Exception e){Log(e);}return;}
    if(action=="material-component-command"){await ComponentCommand(data);return;}
    if(busy||closing||action!="edit-material")return;SetBusy(true);string id=null,previous=pendingInput;try{
@@ -60,7 +64,7 @@ namespace ShuYaErV050 {
    // The material workbench checkpoints its current document before starting a new draft.
    string target=Path.Combine(root,"material",".runtime","integration-input",id+".glb");Directory.CreateDirectory(Path.GetDirectoryName(target));File.Copy(source,target,false);pendingInput=id;
    bool resume=data.ContainsKey("resume")&&Convert.ToBoolean(data["resume"]);if(resume){string bundle=Path.ChangeExtension(source,".treeproj");if(!File.Exists(bundle)||new FileInfo(bundle).Length>200000000)throw new Exception("材质编辑包不存在或超过容量");File.Copy(bundle,Path.ChangeExtension(target,".treeproj"),false);}
-   string prepared=await material.IntegrationAwait("window.treeMaterialIntegration.receive("+json.Serialize(new {id=id,name=Convert.ToString(data["name"]),height=Convert.ToDouble(data["height"]),resume=resume,originKey=data.ContainsKey("originKey")?Convert.ToString(data["originKey"]):null,projectId=data.ContainsKey("projectId")?data["projectId"]:null,rebuild=data.ContainsKey("rebuild")&&Convert.ToBoolean(data["rebuild"]),target=data.ContainsKey("target")?Convert.ToInt32(data["target"]):50000,resolution=data.ContainsKey("resolution")?Convert.ToInt32(data["resolution"]):2048,stage=data.ContainsKey("stage")?Convert.ToString(data["stage"]):"material",preparation=data.ContainsKey("preparation")&&Convert.ToString(data["preparation"])=="material"?"material":"full",view=data.ContainsKey("view")?data["view"]:null})+")",300000);
+   string prepared=await material.IntegrationAwait("window.treeMaterialIntegration.receive("+json.Serialize(new {id=id,name=Convert.ToString(data["name"]),height=Convert.ToDouble(data["height"]),resume=resume,originKey=data.ContainsKey("originKey")?Convert.ToString(data["originKey"]):null,projectId=data.ContainsKey("projectId")?data["projectId"]:null,rebuild=data.ContainsKey("rebuild")&&Convert.ToBoolean(data["rebuild"]),target=data.ContainsKey("target")?Convert.ToInt32(data["target"]):50000,resolution=data.ContainsKey("resolution")?Convert.ToInt32(data["resolution"]):2048,stage=data.ContainsKey("stage")?Convert.ToString(data["stage"]):"material",preparation=data.ContainsKey("preparation")&&(Convert.ToString(data["preparation"])=="material"||Convert.ToString(data["preparation"])=="overlay")?Convert.ToString(data["preparation"]):"full",view=data.ContainsKey("view")?data["view"]:null})+")",300000);
    await plant.IntegrationAwait("window.treeDuckMaterialIntegration.notePrepared("+json.Serialize(id)+","+prepared+")",15000);
    File.Delete(source);File.Delete(Path.ChangeExtension(source,".treeproj"));await plant.IntegrationEvaluate("window.treeDuckMaterialIntegration.settle("+json.Serialize(id)+")");Status("树干已就绪 · 制作材质");
   }catch(Exception e){pendingInput=previous;Status("材质准备未完成："+e.Message);Log(e);Select(false);if(id!=null)try{File.Delete(TransferPath(id));File.Delete(Path.ChangeExtension(TransferPath(id),".treeproj"));File.Delete(Path.Combine(root,"material",".runtime","integration-input",id+".glb"));File.Delete(Path.Combine(root,"material",".runtime","integration-input",id+".treeproj"));NotifyPlantFailure(id,e.Message);}catch{}}finally{SetBusy(false);}}
@@ -96,6 +100,16 @@ namespace ShuYaErV050 {
    closeNoticeText.Text=text;
    continueEditing.Visible=canCancel;
    closeNotice.Visible=true;
+  }
+  async Task SaveGraphicsMode(Dictionary<string,object> data){
+   string mode=data.ContainsKey("mode")?Convert.ToString(data["mode"]):null;
+   string error=null;
+   try{GraphicsPreference.Save(root,mode);}
+   catch(Exception e){error="图形模式未保存。"+e.Message;Log(e);}
+   try{
+    await plant.IntegrationEvaluate("window.dispatchEvent(new CustomEvent('shuyaer-graphics-preference',{detail:"+
+     json.Serialize(new {ok=error==null,mode=mode,error=error})+"}))");
+   }catch(Exception e){Log(e);}
   }
   async void CloseWorkspace(object sender,FormClosingEventArgs e){
    if(closing){e.Cancel=!shutdownComplete;return;}

@@ -1,5 +1,5 @@
 const fs=require('fs'),path=require('path'),assert=require('node:assert/strict');
-const {chromium}=require(process.env.BRANCHFORGE_PLAYWRIGHT||'C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {chromium}=require(process.env.BRANCHFORGE_PLAYWRIGHT||'playwright');
 (async()=>{
  const out=path.resolve('.runtime/branch-point-slide');fs.mkdirSync(out,{recursive:true});const result={checks:[],errors:[]};
  const shape=(id,parent,points)=>({id,parent,points,knots:points,attach:parent==='ROOT'?1:.8,length:3,start_radius:.035,end_radius:.015});

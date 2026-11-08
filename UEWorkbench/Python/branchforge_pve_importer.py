@@ -91,8 +91,13 @@ def _resolve_meshes(contract, folder, explicit):
             if len(by_name[name]) != 1:
                 raise ContractError(f"{identifier}: 同名 StaticMesh 不唯一")
             mesh = by_name[name][0]
-        _slot(mesh, "bark")
-        _slot(mesh, "leaf")
+        if identifier in contract.get("mesh_unit_ids", ()):
+            slots = list(mesh.get_editor_property("static_materials"))
+            if not slots or any(not slot.get_editor_property("material_interface") for slot in slots):
+                raise ContractError(f"{identifier}: 完整网格的原始材质槽尚未导入")
+        else:
+            _slot(mesh, "bark")
+            _slot(mesh, "leaf")
         resolved[identifier] = mesh
     unknown = set(explicit) - set(contract["source_ids"])
     if unknown:
@@ -103,16 +108,19 @@ def _resolve_meshes(contract, folder, explicit):
 def _shared_materials(contract, meshes, config):
     bark = unreal.load_asset(config["bark_material"]) if config.get("bark_material") else None
     leaf = unreal.load_asset(config["leaf_material"]) if config.get("leaf_material") else None
-    bark_values = [_slot(mesh, "bark")[1] for mesh in meshes.values()]
-    leaf_values = [_slot(mesh, "leaf")[1] for mesh in meshes.values()]
+    legacy = [mesh for key, mesh in meshes.items() if key not in contract.get("mesh_unit_ids", ())]
+    bark_values = [_slot(mesh, "bark")[1] for mesh in legacy]
+    leaf_values = [_slot(mesh, "leaf")[1] for mesh in legacy]
     if bark and bark.get_class().get_name() not in ("Material", "MaterialInstanceConstant"):
         raise ContractError("bark_material 不是材质")
     if leaf and leaf.get_class().get_name() not in ("Material", "MaterialInstanceConstant"):
         raise ContractError("leaf_material 不是材质")
     manifest = contract["manifest"]
-    if not bark and manifest:
+    if not bark and manifest and legacy:
         signatures = []
         for entry in manifest["units"]:
+            if entry.get("mesh_unit"):
+                continue
             glb = Path(entry["glb"])
             if not glb.is_absolute():
                 glb = contract["path"].parent / glb
@@ -142,8 +150,17 @@ def _material_setup_with_material(previous, material):
     return replacement
 
 
+def check_mesh_unit_bridge(contract):
+    if contract.get("mesh_unit_ids"):
+        bridge = getattr(unreal, "BranchForgeAssemblyLibrary", None)
+        version = getattr(bridge, "get_mesh_unit_version", None)
+        if not version or version() < 1:
+            raise ContractError("此完整包含网格单元，请更新 UE 工作台及 C++ 桥接后重新导入")
+
+
 def preflight(json_path, mesh_folder=None):
     contract = read_contract(json_path)
+    check_mesh_unit_bridge(contract)
     config = _sidecar(contract["path"])
     if config.get("allow_compatible_replacement") and not config.get("bark_material"):
         raise ContractError("替换完整枝网格时请显式设置共用 bark_material")
@@ -205,7 +222,9 @@ def import_tree(json_path, mesh_folder=None, *, dry_run=False, open_editor=True)
     copied_json = _copy_contract_files(contract, data_folder, contract["path"].name)
     # The imported meshes remain user assets. Shared materials are rebound only
     # after every reference and GLB signature has passed preflight.
-    for mesh in ready["meshes"].values():
+    for identifier, mesh in ready["meshes"].items():
+        if identifier in contract.get("mesh_unit_ids", ()):
+            continue
         for token, material in (("bark", ready["bark"]), ("leaf", ready["leaf"])):
             slot, current = _slot(mesh, token)
             if current != material:
@@ -273,6 +292,12 @@ def _bridge_for_asset(asset):
 def _copy_contract_files(contract, folder, filename):
     folder.mkdir(parents=True, exist_ok=True)
     destination = folder / filename
+    if contract.get("dependency_files"):
+        for source in contract["dependency_files"]:
+            target = destination if source == contract["path"] else folder / source.name
+            if source != target:
+                shutil.copy2(source, target)
+        return destination
     if contract["path"] != destination:
         shutil.copy2(contract["path"], destination)
     if contract["manifest"]:
@@ -290,6 +315,7 @@ def _copy_contract_files(contract, folder, filename):
 def create_tree_unbound(json_path, *, dry_run=False, open_editor=True):
     """Create a skeleton graph with indexed empty slots for manual mesh assignment."""
     contract = read_contract(json_path)
+    check_mesh_unit_bridge(contract)
     config = _sidecar(contract["path"])
     template = unreal.load_asset(config.get("template_graph", TEMPLATE))
     if not template or template.get_class().get_name() != "ProceduralVegetation":
@@ -338,6 +364,7 @@ def _write_import_report(name, summary):
 def update_tree_json(json_path, asset_path, *, dry_run=False, open_editor=True):
     """Refresh geometry data in an existing graph, retaining current meshes by stable ID."""
     contract = read_contract(json_path)
+    check_mesh_unit_bridge(contract)
     asset = unreal.load_asset(asset_path)
     graph, bridge = _bridge_for_asset(asset)
     old_value = bridge.get_editor_property("skeleton_file").get_editor_property("file_path")
@@ -349,6 +376,12 @@ def update_tree_json(json_path, asset_path, *, dry_run=False, open_editor=True):
     if not old_path.exists():
         raise ContractError(f"原 JSON 不存在，无法按枝类 ID 保留手动绑定：{old_path}")
     old_contract = read_contract(old_path)
+    if contract.get("mesh_unit_ids"):
+        original = {item["id"]: item["glb_sha256"] for item in (old_contract["manifest"] or {}).get("units", ())
+                    if item.get("mesh_unit")}
+        if any(original.get(item["id"]) != item["glb_sha256"] for item in contract["manifest"]["units"]
+               if item.get("mesh_unit")):
+            raise ContractError("完整网格来源已新增或修改，请使用新建完整包以导入其原材质。")
     old_meshes = list(bridge.get_editor_property("leaf_meshes"))
     if len(old_meshes) > len(old_contract["source_ids"]):
         raise ContractError("原 PVE 网格槽多于原 JSON 枝类，更新前请核对")

@@ -21,14 +21,22 @@ def read_trunk_contract(path, data):
     def read(name):
         return json.loads(file(name).read_text(encoding='utf-8-sig'))
     capabilities = data.get('required_capabilities')
-    require(isinstance(capabilities, list) and set(capabilities) == {
-        'imported_trunk_materials_v1', 'imported_trunk_skin_v1'}, '树干包能力声明不受支持')
+    has_trunk = bool(data.get('imported_trunks'))
+    has_mesh_units = isinstance(capabilities, list) and 'native_mesh_units_v1' in capabilities
+    expected = {'imported_trunk_materials_v1', 'imported_trunk_skin_v1'} if has_trunk else set()
+    if has_mesh_units:
+        expected.add('native_mesh_units_v1')
+    require(bool(expected) and isinstance(capabilities, list) and set(capabilities) == expected,
+            '完整包能力声明不受支持')
     require(data.get('coordinate_system', {}).get('up') == 'Z' and
             data.get('coordinate_system', {}).get('unit') == 'meter', '树干骨架必须为 Z 向上、米制')
     branches, sources, instances = (data.get(k) for k in ('branches', 'foliage_sources', 'foliage'))
     require(isinstance(branches, list) and branches, '树干骨架为空')
     require(isinstance(sources, list) and isinstance(instances, list), '完整单元枝列表无效')
     ids = [s.get('id') for s in sources]
+    mesh_unit_indices = {i for i, source in enumerate(sources) if source.get('mesh_unit') is True}
+    mesh_unit_ids = {ids[i] for i in mesh_unit_indices}
+    require(bool(mesh_unit_ids) == has_mesh_units, '完整网格单元来源与能力不一致')
     branch_ids = [b.get('id') for b in branches]
     require(all(isinstance(i, str) and i for i in ids + branch_ids) and
             len(set(ids)) == len(ids) and len(set(branch_ids)) == len(branch_ids), '骨架或单元枝身份无效')
@@ -39,21 +47,30 @@ def read_trunk_contract(path, data):
         require(type(i) is int and 0 <= i < len(ids) and item.get('branch_id') in branch_ids,
                 '完整单元枝来源或挂接枝无效')
         require(isinstance(item.get('id'), str) and item['id'] not in seen, '完整单元枝身份重复')
+        if ids[i] in mesh_unit_ids:
+            for key in ('position_m', 'up', 'face'):
+                values = item.get(key)
+                require(isinstance(values, list) and len(values) == 3 and all(
+                    isinstance(v, (int, float)) and math.isfinite(v) for v in values), '完整网格挂接姿态无效')
+            require(isinstance(item.get('scale_m'), (int, float)) and math.isfinite(item['scale_m'])
+                    and item['scale_m'] > 0, '完整网格挂接尺寸无效')
         seen.add(item['id']); counts[ids[i]] += 1
     assembly = data.get('complete_unit_assembly', {})
     require(assembly.get('source_mesh_count') == len(ids) and assembly.get('unit_count') == len(instances)
             and assembly.get('leaf_instances') == 0 and assembly.get('organ_instances') == 0,
             '完整单元枝装配数量不一致')
-    trunks = data.get('imported_trunks', {})
-    require(trunks.get('version') == 1 and trunks.get('mounts') and trunks.get('sources'), '缺少固定树干来源')
-    for mount in trunks['mounts']:
-        require(set(mount.get('guide_map', {}).values()).issubset(set(branch_ids)) and mount.get('guide_map'),
-                '树干控制枝引用无效')
+    if has_trunk:
+        trunks = data['imported_trunks']
+        require(trunks.get('version') == 1 and trunks.get('mounts') and trunks.get('sources'), '缺少固定树干来源')
+        for mount in trunks['mounts']:
+            require(set(mount.get('guide_map', {}).values()).issubset(set(branch_ids)) and mount.get('guide_map'),
+                    '树干控制枝引用无效')
     manifest = read('complete_units.manifest.json')
     require(manifest.get('format') == 'BranchForgeCompleteUnitSet' and
             [u.get('id') for u in manifest.get('units', [])] == ids, '完整枝清单与来源顺序不一致')
     for unit in manifest['units']:
         require(unit.get('instance_count') == counts[unit['id']], '完整枝清单安装数量不一致')
+        require(bool(unit.get('mesh_unit')) == (unit['id'] in mesh_unit_ids), '完整网格来源与清单不一致')
     resolved = data.get('resolved_assembly', {})
     payload = read(resolved.get('manifest'))
     binary_file = file(resolved.get('binary'))
@@ -77,40 +94,44 @@ def read_trunk_contract(path, data):
                 record.get('sha256', '').upper(), '包内文件校验失败：' + name)
         checked_names.add(name); files.append(value)
     required = {'complete_units.manifest.json', resolved['manifest'], resolved['binary']}
-    skin = payload.get('imported_trunk_skin', {})
-    require(skin.get('version') == 1 and skin.get('stride') == 12 and skin.get('nodes'), '缺少树干两节点权重')
-    weights = file(skin.get('file')).read_bytes(); required.add(skin['file'])
-    require(weights[:8] == b'BFTS0001' and len(weights) == skin.get('bytes') and
-            hashlib.sha256(weights).hexdigest().upper() == skin.get('sha256', '').upper(), '树干权重校验失败')
-    for node in skin['nodes']:
-        require(node.get('branch_id') in branch_ids and len(node.get('position_cm', [])) == 3 and
-                all(math.isfinite(v) for v in node['position_cm']), '树干权重控制节点无效')
-    end = 8
-    for piece in skin.get('pieces', []):
-        require(type(piece.get('chunk')) is int and 0 <= piece['chunk'] < len(payload['chunks']), '树干权重分区无效')
-        chunk = payload['chunks'][piece['chunk']]
-        require(piece.get('offset') == end and piece.get('count') == chunk['vertex_count'], '树干权重与顶点数量不一致')
-        for i in range(piece['count']):
-            a, b, weight = struct.unpack_from('<IIf', weights, end + i * 12)
-            require(a < len(skin['nodes']) and b < len(skin['nodes']) and math.isfinite(weight) and
-                    0 <= weight <= 1, '树干权重值无效')
-        end += piece['count'] * 12
-    require(end == len(weights), '树干权重长度不一致')
-    materials = payload.get('imported_trunk_materials', {}).get('materials', [])
-    require(materials, '缺少树干 PBR 材质')
-    material_ids = {m['id'] for m in materials}
-    for chunk in payload['chunks']:
-        trunk_material = chunk.get('imported_trunk_material')
-        if trunk_material:
-            require(trunk_material.get('material_id') in material_ids, '树干材质槽引用无效')
-    for material in materials:
-        required.update(item['file'] for item in material.get('maps', {}).values())
+    require(all(chunk.get('source_index') not in mesh_unit_indices
+                for chunk in payload['chunks']), '完整网格在实际装配中重复')
+    if has_trunk:
+        skin = payload.get('imported_trunk_skin', {})
+        require(skin.get('version') == 1 and skin.get('stride') == 12 and skin.get('nodes'), '缺少树干两节点权重')
+        weights = file(skin.get('file')).read_bytes(); required.add(skin['file'])
+        require(weights[:8] == b'BFTS0001' and len(weights) == skin.get('bytes') and
+                hashlib.sha256(weights).hexdigest().upper() == skin.get('sha256', '').upper(), '树干权重校验失败')
+        for node in skin['nodes']:
+            require(node.get('branch_id') in branch_ids and len(node.get('position_cm', [])) == 3 and
+                    all(math.isfinite(v) for v in node['position_cm']), '树干权重控制节点无效')
+        end = 8
+        for piece in skin.get('pieces', []):
+            require(type(piece.get('chunk')) is int and 0 <= piece['chunk'] < len(payload['chunks']), '树干权重分区无效')
+            chunk = payload['chunks'][piece['chunk']]
+            require(piece.get('offset') == end and piece.get('count') == chunk['vertex_count'], '树干权重与顶点数量不一致')
+            for i in range(piece['count']):
+                a, b, weight = struct.unpack_from('<IIf', weights, end + i * 12)
+                require(a < len(skin['nodes']) and b < len(skin['nodes']) and math.isfinite(weight) and
+                        0 <= weight <= 1, '树干权重值无效')
+            end += piece['count'] * 12
+        require(end == len(weights), '树干权重长度不一致')
+        materials = payload.get('imported_trunk_materials', {}).get('materials', [])
+        require(materials, '缺少树干 PBR 材质')
+        material_ids = {m['id'] for m in materials}
+        for chunk in payload['chunks']:
+            trunk_material = chunk.get('imported_trunk_material')
+            if trunk_material:
+                require(trunk_material.get('material_id') in material_ids, '树干材质槽引用无效')
+        for material in materials:
+            required.update(item['file'] for item in material.get('maps', {}).values())
     required.update(u['glb'] for u in manifest['units'])
     require(required.issubset(checked_names), '依赖未列入完整校验清单')
-    if sources:
+    if len(sources) != len(mesh_unit_ids):
         require('leaf_atlas_color.png' in checked_names, '完整单元枝缺少图集')
     summary = dict(payload['summary']); summary['binary_bytes'] = len(binary)
     return {'path': path, 'data': data, 'source_ids': ids, 'counts': counts, 'branch_count': len(branches),
             'instance_count': len(instances), 'manifest': manifest, 'resolved_files': [file(resolved['manifest']), binary_file],
             'resolved_summary': summary, 'resolved_payload': payload, 'dependency_files': list(dict.fromkeys(files)),
-            'imported_trunk': True, 'warnings': validation.get('quality_warnings', [])}
+            'imported_trunk': has_trunk, 'mesh_unit_ids': mesh_unit_ids,
+            'warnings': validation.get('quality_warnings', [])}

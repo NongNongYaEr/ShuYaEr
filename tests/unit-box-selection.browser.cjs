@@ -1,5 +1,5 @@
 const fs=require('fs'),path=require('path'),assert=require('node:assert/strict');
-const {chromium}=require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {chromium}=require('playwright');
 
 // Actual viewport rectangles and C gestures in an isolated headless context.
 // Formal libraries stay read-only; project saves are captured into .runtime.

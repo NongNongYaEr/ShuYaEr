@@ -5,6 +5,7 @@ import * as THREE from './vendor/three.module.min.js';
 // Any supported attribute, storage, range or group change revokes the alias.
 const names=['position','normal','uv','color','sampleCenter','sampleTangent'];
 const aliases=new WeakMap();
+const objectUvPreviews=new WeakMap(),uvGeometries=new WeakMap();
 const attributeState=attribute=>{if(!attribute)return null;const data=attribute.data||attribute;return {attribute,data,array:data.array,version:data.version,stride:data.stride,count:attribute.count,size:attribute.itemSize,normalized:attribute.normalized,offset:attribute.offset};};
 const sameAttribute=(attribute,state)=>{if(!state)return !attribute;const data=attribute?.data||attribute;return attribute===state.attribute&&data===state.data&&data.array===state.array&&data.version===state.version&&data.stride===state.stride&&attribute.count===state.count&&attribute.itemSize===state.size&&attribute.normalized===state.normalized&&attribute.offset===state.offset;};
 const state=geometry=>({attributes:names.map(name=>attributeState(geometry.attributes[name])),index:attributeState(geometry.index),start:geometry.drawRange.start,count:geometry.drawRange.count,groups:geometry.groups.map(g=>({...g}))});
@@ -16,3 +17,26 @@ export function cloneNativePreviewGeometry(source){
  return clone;
 }
 export function nativePreviewGeometrySource(geometry){const a=aliases.get(geometry);return a&&unchanged(a.source,a.sourceState)&&unchanged(geometry,a.cloneState)?a.source:geometry;}
+
+// DX12 accepts one UV attribute per draw. Share the static glTF buffers and
+// substitute the chosen channel only in the geometry used for presentation.
+export function setNativePreviewUv(object,uv){
+  const source=object.geometry;
+  let byUv=uvGeometries.get(source);
+  if(!byUv)uvGeometries.set(source,byUv=new WeakMap());
+  let geometry=byUv.get(uv);
+  if(!geometry){
+    geometry=new THREE.BufferGeometry();
+    geometry.attributes={...source.attributes,uv};
+    geometry.index=source.index;
+    geometry.groups=source.groups;
+    geometry.drawRange=source.drawRange;
+    byUv.set(uv,geometry);
+  }
+  objectUvPreviews.set(object,{source,geometry});
+}
+
+export function nativePreviewGeometryForObject(object){
+  const preview=objectUvPreviews.get(object);
+  return preview&&preview.source===object.geometry ? preview.geometry : nativePreviewGeometrySource(object.geometry);
+}

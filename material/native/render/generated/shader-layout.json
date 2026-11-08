@@ -7,9 +7,9 @@
     "form-effects.js": "90ed3309392a208dad1e853a678c11b5ce1d43345493dbe1bfc476c24c9b2b9f",
     "material-paint-shader.js": "af94c0ef54e717178a174eb0db2146774a56671f1890dfe686a83ccc4d75dc98",
     "surface-extra-shader.js": "d026870a5e78701cbdb4547260f70c71b6f491053e157484e2edd12bed5206dc",
-    "studio-lighting-shader.js": "138c08d8782cffdd595f27d447ffbe4358b445fae0d689f6c91bedafa327d714",
+    "studio-lighting-shader.js": "cc1fe213c45c72fd43efea17179500c04a55058f18f6b0f90420d786811edc3d",
     "organic-layers-shader.js": "e38e78b5ef13018342bf457a37386a314d10a3c2a5a7d6b0959115a1dfd60415",
-    "renderer.js": "00c90f21828af3eec826403057d0d52dd9c6e3167bada955f128ffef08750236",
+    "renderer.js": "640af1e063a38c502605886efe7d0371b497764672d08a9cd36f8c79a56a3dec",
     "surface-effect-shader.js": "4be21dce119bda4178e4efd0e98452b439c59af3bb4a6da60c03aa238bde8259",
     "burl-scatter-shader.js": "f49cf0051c3b5dedb9ee15b4e9d574b565f00862e64aa38844a89eaaea4c1508",
     "local-patch-shader.js": "8e5453134d68242069174045f853e4c1d848bdeda1171f1d45c0101e4ad9ccc1"
@@ -226,9 +226,9 @@
     },
     "FRAGMENT": {
       "file": "material/native/render/generated/FRAGMENT.hlsl",
-      "sha256": "0b11c4723892d5ea84b88c40d05132e401c4ec0ae4e3b950354257d649af113f",
+      "sha256": "fc59cd81a8f961a1b93cf2ab035e609c29690f40776df86874633a887304791f",
       "binary": "FRAGMENT.cso",
-      "binarySHA256": "2cd1b5a7dbb11993a097cd89720c62d2134039776fd93c4ab3aa38c818856596",
+      "binarySHA256": "f20b8f3191d63776dcbd09d9182973a81a36bdcb52fa31c07fec1817a2707086",
       "profile": "ps_6_0",
       "reflection": {
         "entryPoints": [
@@ -312,7 +312,7 @@
               }
             ]
           },
-          "_451": {
+          "_459": {
             "name": "PixelUniforms",
             "members": [
               {
@@ -1258,7 +1258,7 @@
         ],
         "ubos": [
           {
-            "type": "_451",
+            "type": "_459",
             "name": "PixelUniforms",
             "block_size": 8720,
             "set": 0,
@@ -1315,17 +1315,17 @@
     "legacy": {
       "program": "tree-legacy",
       "binary": "FRAGMENT_LEGACY.cso",
-      "binarySHA256": "a040c46d228ba0d9e8ad413f8742c7935677edf7c7905eb52106bad4b43139ed",
+      "binarySHA256": "e88c1e2b50afd6c2aaec9c3aefe01cec19d69986188aa96316939b23635fc533",
       "file": "material/native/render/generated/FRAGMENT_LEGACY.hlsl",
-      "sha256": "130fe3631b042503206d5bca7bb588dcc6fafaca59574b0a834738e5cc655314",
+      "sha256": "32f9e2cf8ee48d12dbb942749377acffdaa386940bc29598fc41762e645be9ce",
       "uniformLayoutExact": true
     },
     "stack": {
       "program": "tree-stack",
       "binary": "FRAGMENT_STACK.cso",
-      "binarySHA256": "2c7e53854546dc34750eb310fa17ad05cacb2d3c30d6ded0241f53c1f022809a",
+      "binarySHA256": "86126d0df52d10daebcf7fd78309c5923fa3e3264aee5aed0a11558d9ee5638a",
       "file": "material/native/render/generated/FRAGMENT_STACK.hlsl",
-      "sha256": "253a2b1a13150e5a243ce39db8bc3bc9d103fdb11d9964d8f1caea26d8816254",
+      "sha256": "d7babf922ad5526cb7949a845306d78e244aec993cea142959897c19d1a8e1cb",
       "uniformLayoutExact": true
     }
   }

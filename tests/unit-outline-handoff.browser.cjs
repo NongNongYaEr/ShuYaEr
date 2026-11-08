@@ -1,5 +1,5 @@
 const fs = require('fs'), path = require('path'), assert = require('node:assert/strict'), crypto = require('crypto');
-const { chromium } = require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const { chromium } = require('playwright');
 
 // Instrument only an isolated test page. The generation Promise's first rAF is
 // delayed once after pointerup so real render frames cover the preview handoff.

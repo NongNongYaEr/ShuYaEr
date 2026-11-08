@@ -1,4 +1,4 @@
-const {chromium}=require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {chromium}=require('playwright');
 const fs=require('fs'),path=require('path'),assert=require('assert/strict');
 (async()=>{
   const out=path.resolve('.runtime/tree-recipe-export',String(Date.now()));fs.mkdirSync(out,{recursive:true});const report={checks:[],errors:[]};

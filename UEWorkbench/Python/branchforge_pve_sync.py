@@ -82,6 +82,8 @@ def _build_plan(json_path, asset_path):
     graph, bridge = _bridge_for_asset(asset)
     old_path = _old_path(bridge)
     previous = read_contract(old_path)
+    if contract.get('mesh_unit_ids') or previous.get('mesh_unit_ids'):
+        raise ContractError('含完整网格的包请使用“只更新 JSON”同步摆放。新增或修改完整网格请使用“新建：完整包自动导入”。')
     config = _config(old_path)
     current = list(bridge.get_editor_property('leaf_meshes'))
     if len(current) != len(previous['source_ids']):

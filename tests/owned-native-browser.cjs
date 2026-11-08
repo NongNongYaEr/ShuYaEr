@@ -1,6 +1,6 @@
 // A dedicated off-desktop WebView host, never an existing user browser/window.
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),{spawn}=require('node:child_process');
-const {chromium}=require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {chromium}=require('playwright');
 module.exports=async function openOwnedNative({out,executable,appRoot}={}){
  const root=path.resolve(appRoot||path.join(__dirname,'..'));out=path.resolve(out);assert(out.toLowerCase().startsWith((path.join(root,'.runtime')+path.sep).toLowerCase()));
  const port=await require('./native-test-port.cjs')(out),delay=ms=>new Promise(r=>setTimeout(r,ms));

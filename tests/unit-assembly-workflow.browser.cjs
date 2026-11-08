@@ -1,5 +1,5 @@
 const fs=require('fs'),path=require('path'),assert=require('node:assert/strict');
-const {chromium}=require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {chromium}=require('playwright');
 // Only generated fixtures/save requests are written. Formal source assets stay read-only.
 (async()=>{
  const out=path.resolve('.runtime/unit-assembly-workflow');fs.mkdirSync(out,{recursive:true});const report={checks:[],errors:[]};

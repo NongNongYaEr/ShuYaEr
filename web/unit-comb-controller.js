@@ -45,10 +45,13 @@ export function createUnitCombController(api) {
   const enabled = () => !api.selectionMode || api.selectionMode() === 'UNIT';
   const blocked = () => api.isBlocked?.() || !api.getAsset() || api.getAsset().group.userData.pending_rebuild;
   const message = (text, state='ready') => api.status?.(text, state);
+  const meshBrush = () => api.getMeshBrush?.() || null;
+  const brushName = () => meshBrush() ? '叶花果挂件笔刷' : '单元枝笔刷';
+  const selectionSummary = () => meshBrush()?.summary() || api.getSelectionSummary?.();
 
   function updateReferences() {
     const sampleStatus=document.getElementById('unitBrushSampleStatus'),centerStatus=document.getElementById('unitBrushCenterStatus');
-    if(sampleStatus)sampleStatus.textContent=picking==='SAMPLE'?'点击一支单元枝取样 · Esc 取消':sampleDirectionWorld?'已取样整支主轴方向':'尚未取样主轴方向';
+    if(sampleStatus)sampleStatus.textContent=picking==='SAMPLE'?'点击可见模型取样 · Esc 取消':sampleDirectionWorld?'已取样主轴方向':'尚未取样主轴方向';
     if(centerStatus)centerStatus.textContent=picking==='CENTER'?'点击画面设置固定中心 · Esc 取消':centerPointWorld?'固定中心已设置':'尚未设置固定中心';
     for(const [id,kind] of [['unitBrushSample','SAMPLE'],['unitBrushCenter','CENTER']]){
       const button=document.getElementById(id);button?.setAttribute('aria-pressed',String(picking===kind));button?.classList.toggle?.('active',picking===kind);
@@ -79,7 +82,7 @@ export function createUnitCombController(api) {
       radius:clamp(finite(values.radius ?? read('sculptRadius', 160), 160), 20, 700),
       strength:clamp(finite(values.strength ?? read('sculptStrength', .65), .65), .05, 1),
       hardness:clamp(finite(values.hardness ?? read('sculptHardness', .45), .45), 0, 1),
-      depthMode:values.scope || values.depthMode || (hitMode==='AUTO'?(api.getScope?.()==='ALL'?'SURFACE':'THROUGH'):hitMode),
+      depthMode:values.scope || values.depthMode || (hitMode==='AUTO'?(!meshBrush()&&api.getScope?.()==='ALL'?'SURFACE':'THROUGH'):hitMode),
       depthRadius:values.depthRadius!==undefined ? clamp(finite(values.depthRadius,.75),.025,15)
         : clamp(finite(values.depthRange ?? read('sculptDepth',1.5),1.5),.05,30)/2,
       direction:values.direction || read('sculptDirection', 'VIEW'),
@@ -94,7 +97,8 @@ export function createUnitCombController(api) {
       seed:Math.trunc(finite(values.seed??read('unitBrushSeed',1),1)),
     };
   }
-  function entries() {
+  function entries(mesh=meshBrush()) {
+    if(mesh)return mesh.entries();
     const asset = api.getAsset(), authoring = api.getAuthoring();
     if (!asset || !authoring) return [];
     const instances=api.getUnitInstances?.()||authoring.branch_instances,branches=api.getUnitBranches?.()||asset.masterBranches;
@@ -167,17 +171,22 @@ export function createUnitCombController(api) {
     return centerAt(items,proj,point,14)?.entry||null;
   }
   function pickReference(event) {
-    const asset=api.getAsset(),proj=projection(asset),point=pointAt(event,proj),items=referenceEntries(),item=referenceHit(event,items,proj,point);
+    const asset=api.getAsset(),proj=projection(asset),point=pointAt(event,proj),mesh=meshBrush()?.reference(event);
+    const items=mesh?[]:referenceEntries(),item=mesh?null:referenceHit(event,items,proj,point);
     if(picking==='SAMPLE'){
-      if(!item){message('未点中可见单元枝，请点击一支完整单元枝取样，Esc 取消');return true;}
-      const shape=resolveInstanceShape(item.instance,api.getAuthoring().branch_library),frame=shape&&evaluatedInstanceFrame(item.instance,shape,asset.masterBranches,api.getSettings?.()||{});
-      const axis=item.root.points.at(-1).clone().sub(frame?.position||item.root.points[0]);
-      if(axis.lengthSq()<1e-12){message('该单元枝没有有效主轴，请换一支取样');return true;}
+      if(!mesh&&!item){message('未点中可见模型，请点击完整模型取样，Esc 取消');return true;}
+      let position=mesh?.position,axis=mesh?.direction.clone();
+      if(item){
+        const shape=resolveInstanceShape(item.instance,api.getAuthoring().branch_library);
+        const frame=shape&&evaluatedInstanceFrame(item.instance,shape,asset.masterBranches,api.getSettings?.()||{});
+        position=frame?.position||item.root.points[0];axis=item.root.points.at(-1).clone().sub(position);
+      }
+      if(axis.lengthSq()<1e-12){message('该模型没有有效主轴，请换一件取样');return true;}
       sampleDirectionWorld=axis.normalize().transformDirection(asset.group.matrixWorld);
-      sampleOriginWorld=(frame?.position||item.root.points[0]).clone().applyMatrix4(asset.group.matrixWorld);picking='';updateReferences();
-      message('已取样单元枝主轴方向，可在当前选区刷过以对齐');return true;
+      sampleOriginWorld=position.clone().applyMatrix4(asset.group.matrixWorld);picking='';updateReferences();
+      message('已取样主轴方向，可在当前选区刷过以对齐');return true;
     }
-    let center=item?centerAt([item],proj,point,Math.max(proj.bounds.width,proj.bounds.height)*2):centerAt(items,proj,point,14);
+    const center=mesh?proj.project(mesh.position):item?centerAt([item],proj,point,Math.max(proj.bounds.width,proj.bounds.height)*2):centerAt(items,proj,point,14);
     if(center)centerPointWorld=proj.unproject(point,center.clip).applyMatrix4(asset.group.matrixWorld);
     else{
       const ray=new THREE.Raycaster();ray.setFromCamera(new THREE.Vector2(point[0]/proj.bounds.width*2-1,1-point[1]/proj.bounds.height*2),camera);
@@ -212,7 +221,7 @@ export function createUnitCombController(api) {
   function hide() { overlay.setAttribute('hidden',''); feedback.hidden=true; }
   function skippedMessage(skipped) {
     const counts=new Map();for(const reason of skipped?.values()||[])counts.set(reason,(counts.get(reason)||0)+1);
-    return [...counts].map(([reason,count])=>reason==='MISSING_REFERENCE'?`${count} 支未标定悬垂方向，请到枝条工作台设置整支参考方向`
+    return [...counts].map(([reason,count])=>reason==='MISSING_REFERENCE'?(meshBrush()?`${count} 件缺少绕轴参考方向`:`${count} 支未标定悬垂方向，请到枝条工作台设置整支参考方向`)
       :reason==='PARALLEL_REFERENCE'?`${count} 支参考方向与长轴平行，请重新标定`
       :reason==='PARALLEL_GRAVITY'?`${count} 支长轴与重力平行，无法确定绕轴向下方向`
       :reason==='MISSING_SAMPLE_DIRECTION'?`请先取样一支单元枝的主轴方向`
@@ -225,6 +234,7 @@ export function createUnitCombController(api) {
       :settings.effect==='SCALE'?(settings.sizeMode==='SHRINK'?'整支缩小':'整支放大'):effectNames[settings.effect];
   }
   function show(items, weights, point, settings, proj, skipped = new Map()) {
+    const mesh=Boolean(meshBrush()),counter=mesh?'件':'支',noun=mesh?'叶花果挂件':'单元枝';
     overlay.removeAttribute('hidden');
     Object.assign(overlay.style,{left:`${canvas.offsetLeft}px`,top:`${canvas.offsetTop}px`,width:`${proj.bounds.width}px`,height:`${proj.bounds.height}px`});
     overlay.setAttribute('viewBox',`0 0 ${proj.bounds.width} ${proj.bounds.height}`);
@@ -250,26 +260,32 @@ export function createUnitCombController(api) {
     for(const [band,paths]of batches){
       let element=weightLines.get(band);
       if(!element){
-        const weight=band/15;element=svgElement('path');element.setAttribute('fill','none');element.setAttribute('stroke-width','2');
-        element.setAttribute('stroke',`rgb(${Math.round(100+weight*145)},${Math.round(170+weight*25)},${Math.round(210-weight*130)})`);
-        element.setAttribute('opacity',.3+weight*.6);lines.append(element);weightLines.set(band,element);
+        element=svgElement('path');element.setAttribute('fill','none');lines.append(element);weightLines.set(band,element);
+      }
+      if(element.meshAxisHit!==mesh){
+        const weight=band/15;element.meshAxisHit=mesh;
+        element.setAttribute('stroke-width',mesh?3.2+weight*1.6:2);
+        element.setAttribute('stroke',mesh?'#ffce72':`rgb(${Math.round(100+weight*145)},${Math.round(170+weight*25)},${Math.round(210-weight*130)})`);
+        element.setAttribute('opacity',mesh ? .66+weight*.34 : .3+weight*.6);
+        if(mesh){element.setAttribute('data-mesh-axis-hit','');element.setAttribute('stroke-linecap','round');}
+        else{element.removeAttribute('data-mesh-axis-hit');element.removeAttribute('stroke-linecap');}
       }
       const path=paths.join(' ');if(element.unitBrushPath!==path){element.setAttribute('d',path);element.unitBrushPath=path;}
     }
     for (const [key,line] of weightLines) if (!batches.has(key)) {line.remove();weightLines.delete(key);}
-    const countLabel=document.getElementById('sculptTargetCount');if (countLabel) countLabel.textContent=`${count} 支单元枝`;
+    const countLabel=document.getElementById('sculptTargetCount');if (countLabel) countLabel.textContent=`${count} ${counter}${noun}`;
     feedback.hidden=false;
     feedback.style.left=`${canvas.offsetLeft+Math.max(8,Math.min(proj.bounds.width-300,point[0]+20))}px`;
     feedback.style.top=`${canvas.offsetTop+Math.max(8,Math.min(proj.bounds.height-78,point[1]+24))}px`;
-    feedback.querySelector('strong').textContent=`单元枝笔刷 · ${effectLabel(settings)} · 命中 ${count} 支`;
+    feedback.querySelector('strong').textContent=`${brushName()} · ${effectLabel(settings)} · 命中 ${count} ${counter}`;
     const scope=settings.depthMode==='THROUGH'?'穿透':settings.depthMode==='SPHERE'?'空间球':`表层 · 深度 ${settings.depthRadius*2} m`;
-    const selectionSummary=api.getSelectionSummary?.();
-    feedback.querySelector('span').textContent=`${selectionSummary?`已选 ${selectionSummary.selected} · 可刷 ${items.length} · `:''}${scope} · 半径 ${settings.radius} px`;
+    const summary=selectionSummary();
+    feedback.querySelector('span').textContent=`${summary?`已选 ${summary.selected} · 可刷 ${items.length} · `:''}${scope} · 半径 ${settings.radius} px`;
     const sizes=stroke?.options.effect==='SCALE'?[...stroke.updated].map(([id,after])=>Math.abs(after.scale/stroke.initialScales.get(id)-1)*100):[];
-    feedback.querySelector('small').textContent=skippedMessage(skipped)||(!items.length?selectionSummary?.reason||'缺少可用的完整单元枝模型，请检查源素材':'' )||(!count&&items.length?'移近所选整支；表层或空间球模式还会按深度筛选':null)||(settings.effect==='SCALE'?'木枝与叶花果同比例缩放 · '+(sizes.length?'本笔最多已变 '+Math.max(...sizes).toFixed(1)+'% / 上限 '+settings.sizeLimitPercent+'%':'枝根与源模型保持')
+    feedback.querySelector('small').textContent=skippedMessage(skipped)||(!items.length?summary?.reason||'缺少可用的完整模型，请检查源素材':'' )||(!count&&items.length?'移近所选模型。表层或空间球模式还会按深度筛选':null)||(settings.effect==='SCALE'?'完整模型等比缩放 · '+(sizes.length?'本笔最多已变 '+Math.max(...sizes).toFixed(1)+'% / 上限 '+settings.sizeLimitPercent+'%':'挂点与源模型保持')
       :settings.effect==='ALIGN'?'朝取样主轴逐步对齐 · 挂点与尺寸保持'
       :settings.effect==='JITTER'?`固定随机种子 ${settings.seed} · 每笔最多 ${settings.angleLimitDegrees}° · 挂点与尺寸保持`
-      :settings.effect==='TURN'?'围绕各自枝根转向 · 挂点、尺寸和内部样式保持':`围绕各自枝根转向 · 每笔最多 ${settings.angleLimitDegrees}° · 挂点与尺寸保持`);
+      :settings.effect==='TURN'?'围绕各自挂点转向 · 尺寸和内部样式保持':`围绕各自挂点转向 · 每笔最多 ${settings.angleLimitDegrees}°`);
   }
   function hoverAt(event) {
     lastHover={clientX:event.clientX,clientY:event.clientY};
@@ -278,12 +294,13 @@ export function createUnitCombController(api) {
     const items=entries(), proj=projection(), point=pointAt(event,proj), settings=options(), center=centerAt(items,proj,point,settings.radius);
     const result=center?evaluateUnitInstanceCombing(items,{...settings,center,worldRadius:center.worldRadius,delta:new THREE.Vector3(),project:proj.project}):{weights:new Map()};
     show(items,result.weights,point,settings,proj,result.skipped);
-    api.showActiveUnits?.(items,undefined,prepared.get(api.getAsset())?.outlineTargets);
+    if(!meshBrush())api.showActiveUnits?.(items,undefined,prepared.get(api.getAsset())?.outlineTargets);
   }
   const optionKey = settings => JSON.stringify([settings.effect,settings.orientation,settings.radius,settings.strength,settings.hardness,settings.depthMode,settings.depthRadius,
     settings.direction,settings.spreadMode,settings.effect==='SCALE'?'ALT_SIZE':settings.sizeMode,settings.angleLimitDegrees,settings.sizeLimitPercent,settings.seed,
     settings.sampleDirection?.toArray(),settings.centerPoint?.toArray(),settings.downDirection.toArray()]);
-  function valid(s) {return enabled() && !blocked() && api.getAsset()===s.asset && api.getAuthoring()===s.source && optionKey(options())===s.optionKey;}
+  function valid(s) {return enabled() && !blocked() && api.getAsset()===s.asset && api.getAuthoring()===s.source
+    && meshBrush()===s.mesh && (s.preview.valid?.()??true) && optionKey(options())===s.optionKey;}
   function flush(s) {
     if (stroke!==s || !valid(s)) return;
     if (s.previewDirty) {
@@ -291,7 +308,7 @@ export function createUnitCombController(api) {
       else s.preview.update(s.snapshot,s.transforms);
       s.previewDirty=false;
     }
-    api.showActiveUnits?.(s.working,s.transforms,s.outlineTargets);
+    if(!s.mesh)api.showActiveUnits?.(s.working,s.transforms,s.outlineTargets);
     show(s.working,s.weights,s.last,s.options,s.proj,s.skipped);
   }
   function compute(point,final=false) {
@@ -334,51 +351,60 @@ export function createUnitCombController(api) {
   function cancel() {
     const pending=Boolean(picking);picking='';const s=release(true);updateReferences();
     if (!s) {hide();if(pending)message('单元枝参照拾取 · 已取消');return pending;}
-    api.showActiveUnits?.(entries());message('单元枝笔刷 · 已取消');return true;
+    if(!s.mesh)api.showActiveUnits?.(entries());message(`${brushName()} · 已取消`);return true;
   }
   function requestReference(kind) {
     if(!enabled()||blocked())return false;
     cancel();picking=kind;updateReferences();hide();
-    message(kind==='SAMPLE'?'点击一支完整单元枝取样主轴方向 · 不改变当前选区 · Esc 取消':'点击画面设置固定中心 · Esc 取消','busy');return true;
+    message(kind==='SAMPLE'?'点击完整模型取样主轴方向 · Esc 取消':'点击画面设置固定中心 · Esc 取消','busy');return true;
   }
   function begin(event) {
     if (!enabled() || event.button!==0) return false;
     if (stroke) return true;if (blocked()) return true;
     if(picking)return pickReference(event);
-    const items=entries();
-    if (!items.length) {const summary=api.getSelectionSummary?.();message(summary?.reason||(summary?.selected?'所选实例缺少可用的完整模型，请检查源素材':'请先点选单元枝，或将作用范围切换为全部单元枝'));return true;}
+    const mesh=meshBrush(),items=entries(mesh);
+    if (!items.length) {const summary=selectionSummary();message(summary?.reason||(summary?.selected?'所选实例缺少可用的完整模型，请检查源素材':'请先点选单元枝，或将作用范围切换为全部单元枝'));return true;}
     const asset=api.getAsset(),source=api.getAuthoring(),proj=projection(asset),point=pointAt(event,proj),settings=options();
-    if(settings.effect==='ALIGN'&&!settings.sampleDirection){message('请先点击「取样主轴」，再点一支完整单元枝');return true;}
+    if(settings.effect==='ALIGN'&&!settings.sampleDirection){message('请先点击「取样主轴」，再点一个完整模型');return true;}
     if(settings.effect==='SPREAD'&&!settings.centerPoint){message('请先点击「固定中心」，再点画面设置散开／收拢的中心');return true;}
     const center=centerAt(items,proj,point,settings.radius);
-    if (!center) {message('单元枝梳理 · 未命中可调整单元枝');return true;}
+    if (!center) {message(`${brushName()} · 未命中可调整实例`);return true;}
     const initial=evaluateUnitInstanceCombing(items,{...settings,center,worldRadius:center.worldRadius,delta:new THREE.Vector3(),project:proj.project});
-    if (![...initial.weights.values()].some(value=>value>0)) {message('单元枝梳理 · '+(skippedMessage(initial.skipped)||'当前范围无可调整单元枝'));return true;}
+    if (![...initial.weights.values()].some(value=>value>0)) {message(`${brushName()} · `+(skippedMessage(initial.skipped)||'当前范围无可调整实例'));return true;}
     api.getInstanceEditor?.()?.deactivate();
     // Whole-model placement never edits knots, masks or sample bindings. Keep
     // independent rest points for preview/cache validation without preparing the
     // much larger per-point sculpt state for every branch in the tree.
-    const snapshot=new Map(asset.masterBranches.map(branch=>[branch.id,{...branch,points:branch.points.map(point=>point.clone())}])),branchIds=new Map(),targets=new Set(),unitRoots=new Map();
-    for (const item of items) {
-      branchIds.set(item.id,[]);
-      for (const id of item.familyIds || [item.id]) unitRoots.set(id,item.id);
+    const branchIds=new Map();
+    let snapshot,preview;
+    try {
+      if(mesh){
+        for(const item of items)branchIds.set(item.id,[item.id]);
+        preview=mesh.preview(items);
+      }else{
+        const targets=new Set(),unitRoots=new Map();
+        snapshot=new Map(asset.masterBranches.map(branch=>[branch.id,{...branch,points:branch.points.map(point=>point.clone())}]));
+        for (const item of items) {
+          branchIds.set(item.id,[]);
+          for (const id of item.familyIds || [item.id]) unitRoots.set(id,item.id);
+        }
+        const boundary=unitBranchIndex(api.getUnitBranches?.()||asset.masterBranches,api.getUnitInstances?.()||source.branch_instances);
+        for (const branch of asset.masterBranches) {
+          const owner=unitRoots.get(boundary.owners.get(branch.stableId)?.id);
+          if (owner) {branchIds.get(owner).push(branch.id);targets.add(branch.stableId);}
+        }
+        preview=(api.createPreview||createGpuMeshPreview)(asset,snapshot,{sampleLine,lineTangent,targets,rigid:true});
+      }
     }
-    const boundary=unitBranchIndex(api.getUnitBranches?.()||asset.masterBranches,api.getUnitInstances?.()||source.branch_instances);
-    for (const branch of asset.masterBranches) {
-      const owner=unitRoots.get(boundary.owners.get(branch.stableId)?.id);
-      if (owner) {branchIds.get(owner).push(branch.id);targets.add(branch.stableId);}
-    }
-    let preview;
-    try {preview=(api.createPreview||createGpuMeshPreview)(asset,snapshot,{sampleLine,lineTangent,targets,rigid:true});}
-    catch (error) {message('单元枝梳理预览失败：'+error.message,'error');return true;}
+    catch (error) {message(`${brushName()}预览失败 · ${error.message}`,'error');return true;}
     if (!preview) {message('当前模型暂不能建立实时梳理预览，请使用整支旋转调整','error');return true;}
     preview.dispose ||= preview.restore;
-    stroke={asset,source,settings:api.getSettings?.()||{},entries:items,working:items,snapshot,preview,branchIds,updated:new Map(),initialScales:new Map(items.map(i=>[i.id,i.instance.scale])),cumulative:new Map(),transforms:new Map(),
+    stroke={asset,source,mesh,settings:api.getSettings?.()||{},entries:items,working:items,snapshot,preview,branchIds,updated:new Map(),initialScales:new Map(items.map(i=>[i.id,i.instance.scale])),cumulative:new Map(),transforms:new Map(),
       pointerId:event.pointerId,controls:controls.enabled,proj,options:settings,optionKey:optionKey(settings),last:point.slice(),lastSample:point.slice(),weights:initial.weights,
       skipped:initial.skipped,skippedDuringStroke:new Map(initial.skipped),previewDirty:false,outlineTargets:prepared.get(asset)?.outlineTargets,workspace:new WeakSet()};
     controls.enabled=false;canvas.setPointerCapture?.(event.pointerId);
     show(items,initial.weights,point,settings,proj,initial.skipped);
-    message('单元枝笔刷 · '+effectLabel(settings)+'，Esc 取消'+(initial.skipped.size?' · '+skippedMessage(initial.skipped):''),'busy');return true;
+    message(`${brushName()} · `+effectLabel(settings)+'，Esc 取消'+(initial.skipped.size?' · '+skippedMessage(initial.skipped):''),'busy');return true;
   }
   function move(event) {
     if (!enabled()) return false;
@@ -391,7 +417,16 @@ export function createUnitCombController(api) {
     if (!valid(stroke)) {cancel();return true;}
     compute(pointAt(event,stroke.proj),true);if (!stroke) return true;
     const s=stroke;flush(s);release(false);
-    if (!s.updated.size) {s.preview.restore();message('单元枝梳理 · 未产生修改');return true;}
+    if (!s.updated.size) {s.preview.restore();message(`${brushName()} · 未产生修改`);return true;}
+    if(s.mesh){
+      s.preview.restore();
+      try{
+        const label=`${effectLabel(s.options)} ${s.updated.size} 件叶花果挂件`;
+        const accepted=s.mesh.commit(s.updated,label),skipped=skippedMessage(s.skippedDuringStroke);
+        message(accepted===false?'叶花果挂件梳理 · 未提交':`已${label}${skipped?' · '+skipped:''}`);
+      }catch(error){message(`叶花果挂件梳理未提交 · ${error.message}`,'error');}
+      return true;
+    }
     const apply=()=>api.transact(`${effectLabel(s.options)} ${s.updated.size} 支单元枝`, next=>{
       const placementContext=createInstancePlacementContext(next,s.asset.masterBranches,s.settings,{owners:s.updated.keys()});
       for (const entry of s.entries) {
@@ -416,7 +451,7 @@ export function createUnitCombController(api) {
     return true;
   }
   function toolChanged(next) {cancel();toolActive=!next||next==='COMB';prepared=new WeakMap();lastHover=null;hide();updateReferences();}
-  function refreshTargets() {prepared=new WeakMap();if (stroke || picking&&!enabled()) cancel();else if (lastHover && enabled() && !blocked()) hoverAt(lastHover);else api.showActiveUnits?.(enabled()?entries():[]);updateReferences();}
+  function refreshTargets() {prepared=new WeakMap();if (stroke || picking&&!enabled()) cancel();else if (lastHover && enabled() && !blocked()) hoverAt(lastHover);else if(!meshBrush())api.showActiveUnits?.(enabled()?entries():[]);updateReferences();}
   function resetReferences() {cancel();sampleDirectionWorld=null;sampleOriginWorld=null;centerPointWorld=null;prepared=new WeakMap();updateReferences();}
   const settingsChanged=()=>{cancel();refreshTargets();};
   for(const id of ['unitCombOrientation','unitBrushEffect','unitBrushSpreadMode','unitBrushSizeMode','unitBrushAngleLimit','unitBrushSizeLimit','unitBrushSeed',

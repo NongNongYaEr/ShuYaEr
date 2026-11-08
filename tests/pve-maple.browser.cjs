@@ -1,5 +1,5 @@
 const fs=require('fs'),path=require('path'),assert=require('node:assert/strict'),crypto=require('crypto');
-const {chromium}=require(process.env.BRANCHFORGE_PLAYWRIGHT||'C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {chromium}=require(process.env.BRANCHFORGE_PLAYWRIGHT||'playwright');
 const {fingerprintScene,fingerprintBinary}=require('./pve-geometry-audit.cjs');
 (async()=>{
  const root=path.resolve('.runtime/pve-maple-acceptance');fs.mkdirSync(root,{recursive:true});

@@ -22,6 +22,8 @@
   <link rel="stylesheet" href="/branch-workflow-ui.css">
   <link rel="stylesheet" href="/branch-variant-workspace.css">
   <link rel="stylesheet" href="/plant-unit-workspace.css">
+  <link rel="stylesheet" href="/mesh-unit-library-ui.css">
+  <link rel="stylesheet" href="/mesh-unit-workspace.css">
   <script src="/vendor/lucide.min.js"></script>
   <script type="importmap">
     {"imports":{"three":"/vendor/three.module.min.js","fflate":"/vendor/fflate-browser.js","@comfyorg/fbx-exporter-three":"/vendor/fbx-exporter/index.js"}}
@@ -724,6 +726,39 @@
       <aside class="inspector-panel">
         <header class="inspector-header"><div><h2>资产检查</h2><span id="validationBadge" data-state="busy">等待生成</span></div></header>
         <div class="inspector-scroll">
+          <details id="bonsaiPanel" class="inspector-section bonsai-panel" hidden>
+            <summary>盆景搭配</summary>
+            <p data-bonsai="name">导入一只花盆，和当前树搭配。</p>
+            <p data-bonsai="material-note" hidden>大贴图会缩小预览，DX12 会兼容显示特殊材质。导出保留原材质与贴图。</p>
+            <input type="file" accept=".glb,model/gltf-binary" data-bonsai="file" aria-label="选择花盆 GLB" hidden>
+            <button type="button" data-bonsai="import">导入花盆 GLB</button>
+            <div data-bonsai="actions" hidden>
+              <div class="bonsai-actions">
+                <button type="button" data-bonsai="edit" aria-pressed="false">编辑花盆</button>
+                <button type="button" data-bonsai="visibility">隐藏</button>
+                <button type="button" data-bonsai="remove">移除</button>
+              </div>
+              <div data-bonsai="editing" hidden>
+                <div class="bonsai-actions">
+                  <button type="button" data-bonsai="align">对齐树根</button>
+                  <button type="button" data-bonsai="pick" aria-pressed="false">点选种植点</button>
+                </div>
+                <div class="bonsai-fields">
+                  <label>X（cm）<input type="number" step="any" data-bonsai="x"></label>
+                  <label>Y（cm）<input type="number" step="any" data-bonsai="y"></label>
+                  <label>Z（cm）<input type="number" step="any" data-bonsai="z"></label>
+                  <label>绕 Z（°）<input type="number" step="any" min="-360" max="360" data-bonsai="yaw"></label>
+                  <label>等比倍率<input type="number" step="any" min=".001" max="100" data-bonsai="scale"></label>
+                  <label>种植深度（cm）<input type="number" step="any" data-bonsai="depth"></label>
+                </div>
+              </div>
+              <div class="switch-list">
+                <label title="适用于静态和骨骼 GLB。花盆单独成件，可在视口隐藏。"><span>导出 GLB 时包含花盆</span><input type="checkbox" data-bonsai="export-with-tree"></label>
+              </div>
+              <button type="button" class="accent" data-bonsai="export">导出盆景 GLB</button>
+            </div>
+            <p role="status" aria-live="polite" data-bonsai="status"></p>
+          </details>
           <section class="inspector-section">
             <h3>几何统计</h3>
             <dl class="stats-grid">

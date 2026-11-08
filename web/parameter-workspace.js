@@ -24,7 +24,9 @@ export function createParameterWorkspace({ begin, preview, commit, cancel, defau
   const assets = document.createElement('div'); assets.id = 'assetProperties'; assets.hidden = true;
   const outliner = document.querySelector('.branch-outliner-section');
   const surfaceGuides = $('surfaceGuidePanel');
-  [...inspector.children].forEach((section) => { if (section !== outliner && section !== surfaceGuides) assets.append(section); });
+  [...inspector.children].forEach((section) => {
+    if (section !== outliner && section !== surfaceGuides && section.id !== 'bonsaiPanel') assets.append(section);
+  });
   const current = $('selectedBranchLabel').closest('section'); current.id = 'currentBranchPanel';
   if (surfaceGuides) context.append(surfaceGuides);
   context.append(current); inspector.append(context, outliner, assets);

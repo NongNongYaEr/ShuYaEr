@@ -4,6 +4,7 @@ import { normalizeLeafMaterial } from './leaf-material-data.js';
 import { pveGlbMatrix } from './pve-export.js';
 import { mergeGeometries } from './vendor/surface/utils/BufferGeometryUtils.js';
 import {createSkinnedGlbScene} from './glb-skinned-scene.js';
+import {originalPotImages} from './bonsai-pot-images.js';
 
 // Export textures own their images; never reuse an incompletely loaded preview map.
 export async function bindGlbTextures(material, raw, cache = null) {
@@ -144,6 +145,38 @@ export async function exportGlb(root, options = {}) {
     if(options.rigAsset)disposeMaterials=prepareSceneMaterials(scene,true);
     if(result.report)options.onRigReport?.(result.report);
     return await new GLTFExporter().parseAsync(scene, { binary: true, onlyVisible: true,...(options.rigAsset?{trs:true}:{}) });
+  } finally {
+    disposeMaterials();
+    dispose();
+  }
+}
+
+export async function exportBonsaiGlb(tree, pot, {rigAsset,onRigReport} = {}) {
+  const flowerpot=pot.clone(true);
+  const base=new THREE.Box3().setFromObject(flowerpot,true).min.z;
+  if (!Number.isFinite(base)) throw Error('无法计算盆底的落地高度。');
+  const {scene,dispose,mesh,report}=rigAsset
+    ? createSkinnedGlbScene(rigAsset,{floorZ:base})
+    : createGlbExportScene(tree,{rasterizeBarkTextures:true});
+  let disposeMaterials=()=>{};
+  try {
+    let axis=scene.children[0];
+    if (rigAsset) {
+      mesh.name='树';
+      disposeMaterials=prepareSceneMaterials(scene,true);
+      axis=new THREE.Group();
+      axis.name='BranchForge_Z_to_Y';
+      axis.rotation.x=-Math.PI/2;
+      scene.add(axis);
+      onRigReport?.(report);
+    } else {
+      axis.children[0].name='树';
+    }
+    flowerpot.name='花盆';
+    axis.add(flowerpot);
+    axis.position.y=-base;
+    scene.updateMatrixWorld(true);
+    return await new GLTFExporter().register(originalPotImages).parseAsync(scene,{binary:true,onlyVisible:true,trs:!!rigAsset});
   } finally {
     disposeMaterials();
     dispose();

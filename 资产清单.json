@@ -99,5 +99,8 @@
     "FINISHED_SCENE_FLOWER_SIDE_MATURE_V1",
     "FINISHED_SCENE_FLOWER_TIP_MATURE_V1"
   ],
-  "excludedVerificationOnlyAsset": "prepared-aca902b0-b643-4bfb-9881-6eefd4d9621e"
+  "excludedLocalAssets": [
+    "prepared-aca902b0-b643-4bfb-9881-6eefd4d9621e",
+    "prepared-38f2336e-adcf-406d-a4a1-15bf5fd91dc1"
+  ]
 }

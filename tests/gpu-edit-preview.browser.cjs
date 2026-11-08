@@ -1,5 +1,5 @@
 const fs=require('fs'),path=require('path'),assert=require('node:assert/strict');
-const {chromium}=require(process.env.BRANCHFORGE_PLAYWRIGHT||'C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {chromium}=require(process.env.BRANCHFORGE_PLAYWRIGHT||'playwright');
 (async()=>{
  const out=path.resolve('.runtime/gpu-edit-preview');fs.mkdirSync(out,{recursive:true});const report={checks:[],errors:[],shaderErrors:[]};
  const assetFile='次枝资产/全植物次枝成品V1/红叶石楠/红叶石楠_短弯细梢_红嫩叶_成品V1.branchasset.json',source=JSON.parse(fs.readFileSync(assetFile,'utf8')).asset;

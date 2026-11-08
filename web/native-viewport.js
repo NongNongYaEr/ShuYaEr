@@ -3,10 +3,13 @@ import {createViewportContext} from './viewport-context.js';
 import {createNativeTransformRetention} from './native-transform-retention.js';
 import {createNativeMaterialEncoder} from './native-material-cache.js';
 import {createNativeModelCache} from './native-model-cache.js';
-import {nativePreviewGeometrySource} from './native-preview-geometry.js';
+import {nativePreviewGeometryForObject} from './native-preview-geometry.js';
+import {nativeMaterialUnsupported,nativePreviewMaterial} from './native-preview-material.js';
 import {retainNativeDraw,createNativeSceneRetention,encodeRetainedNativeScene,nativeBindingDelta,nativeDrawDelta,nativeSceneDelta,createRetainedNativeMaterialTable} from './native-scene-retention.js';
 import * as THREE from './vendor/three.module.min.js';
 import {createNativeTransportSession} from './native-transport-session.js';
+
+export {nativeMaterialUnsupported};
 
 // Ephemeral presentation transport. Never modifies source attributes, instances,
 // saved authoring, export fields, selection or CPU picking.
@@ -88,28 +91,46 @@ export function createNativeMaterialTable(){
   return {materials,intern(object,encode){if(objects.has(object))return objects.get(object);const record=encode(object),signature=JSON.stringify(record);let index=indices.get(signature);if(index===undefined){index=materials.length;materials.push(record);indices.set(signature,index);}objects.set(object,index);return index;}};
 }
 function supported(object){const materials=Array.isArray(object.material)?object.material:[object.material];return (object.isMesh||object.isLine)&&object.geometry?.attributes.position&&!object.isSkinnedMesh&&!object.geometry.morphAttributes.position?.length&&materials.every(m=>m&&m.depthTest!==false&&!m.isShaderMaterial&&!m.isRawShaderMaterial);}
-export function nativeMaterialUnsupported(material,capabilities=null){
-  if(material.isShaderMaterial||material.isRawShaderMaterial)return '自定义着色器';
-  if(material.displacementMap||material.alphaMap||material.lightMap||material.envMap)return '扩展材质贴图';
-  if((material.emissiveMap||material.aoMap||material.metalnessMap&&material.metalness>0||[material.map,material.normalMap,material.roughnessMap].some(t=>t?.userData.importedTrunk))&&capabilities?.gltf_pbr_protocol!==1)return 'GLB 材质需要更新 DX12 运行库';
-  if(material.clearcoat>0||material.transmission>0||material.sheen>0||material.iridescence>0||material.anisotropy>0)return '扩展物理材质';
-  if(material.clippingPlanes?.length||material.stencilWrite)return '材质裁切';
-  if([material.map,material.normalMap,material.roughnessMap,material.metalnessMap,material.aoMap,material.emissiveMap].some(t=>t&&t.channel!==0))return '额外 UV 通道';
-  if(material.normalMap&&material.normalMapType!==THREE.TangentSpaceNormalMap)return '物体空间法线';
-  return null;
-}
-
 export function nativeRuntimeCompatibility(status){
   if(status?.material_table_protocol!==1||status?.retained_scene_protocol!==1)return 'DX12 运行库与当前界面版本不匹配。请保存工程，完全退出并更新完整程序目录后重新打开。';
   return null;
 }
-export function createNativeViewport({scene,camera,renderer,canvas,isAllowed=()=>true,isSuspended=()=>false,assetIdentity=()=>'',motionRoot=()=>null,getRetainedModel=()=>null,profile=null}){
+function deviceFailure(reason){
+  if(/device (?:removed|lost|reset|hung)|gpu timeout|DXGI_ERROR_DEVICE|DLSS .*failed/i.test(reason))return true;
+  const hresult=reason.match(/HRESULT=(0x[\da-f]+|\d+)/i);
+  return !!hresult&&[0x887a0005,0x887a0006,0x887a0007,0x887a0020].includes(Number(hresult[1])>>>0);
+}
+const GRAPHICS_MODES=new Set(['auto','dx12','compatibility']);
+const INITIALIZE_TIMEOUT=12000,FIRST_FRAME_TIMEOUT=25000;
+
+export function createNativeViewport({scene,camera,renderer,canvas,isAllowed=()=>true,isSuspended=()=>false,assetIdentity=()=>'',motionRoot=()=>null,getRetainedModel=()=>null,profile=null,onCompatibility=()=>{},onGraphicsPreference=()=>{}}){
   let contextChanged=()=>{};
   const context=createViewportContext({scene,camera,renderer,canvas,isAllowed,isSuspended,assetIdentity,motionRoot,getRetainedModel},next=>{
     scene=next.scene;camera=next.camera;renderer=next.renderer;canvas=next.canvas;isAllowed=next.isAllowed||(()=>true);isSuspended=next.isSuspended||(()=>false);assetIdentity=next.assetIdentity||(()=>scene.uuid);motionRoot=next.motionRoot||(()=>null);getRetainedModel=next.getRetainedModel||(()=>null);contextChanged();
   });
   const enterPreview=next=>context.enter(next);
-  const host=window.chrome?.webview;if(!host||!(window.__branchForgeNativeHost||window.__branchForgeNativeRequired))return {enterPreview,render:()=>{if(!isSuspended())renderer.render(scene,camera);},get stats(){return {available:false};}};
+  let webglFrame=0,webglAsset=null;
+  function renderWebGL(){
+    const gl=renderer.getContext?.(),expected=assetIdentity();
+    if(gl?.isContextLost?.())throw Error('WebGL2 图形上下文已中断。');
+    renderer.render(scene,camera);
+    if(gl?.isContextLost?.())throw Error('WebGL2 图形上下文已中断。');
+    webglAsset=expected;
+    webglFrame++;
+  }
+  const webglStatus=()=>({frame:webglFrame,assetIdentity:webglAsset});
+  const host=window.chrome?.webview;
+  if(!host||!(window.__branchForgeNativeHost||window.__branchForgeNativeRequired)){
+    return {enterPreview,render:()=>{if(!isSuspended())renderWebGL();},get stats(){return {available:false};},
+      waitForPresentation({timeout=60000,onProgress=()=>{}}={}){
+        const expected=assetIdentity(),owner=context.current;
+        return waitForNativePresentation({read:()=>({available:false,backend:'webgl',webgl:webglStatus()}),
+          current:()=>context.current===owner&&assetIdentity()===expected,asset:expected,webglRevision:webglFrame+1,timeout,onProgress});
+      }};
+  }
+  const graphicsMode=GRAPHICS_MODES.has(window.__shuyaerGraphicsMode)?window.__shuyaerGraphicsMode:null;
+  let compatibility=graphicsMode==='compatibility',fallbackReason='',watchdogStarted=null,webglStartFrame=0;
+  const compatibilityRenderers=new WeakSet();
   const sceneSession=crypto.randomUUID(),transport=createNativeTransportSession(sceneSession),presentationFence=new NativePresentationFence();let activationRevision=0,compatibilityReason=null,runtimeVerified=false;
   let buffer=null,inFlight=false,outbound=null,resourceQueueDirty=false,ready=false,active=false,wanted=true,dlss=false,sequence=0,lastSceneRevision=0,lastAcceptedRevision=0,uploaded=new Set(),pendingIds=new Set(),outboundIds=new Set(),pendingResources=[],currentObjects=[],lastRect='',lastStatus={},lastError='',disposed=false;
   const objectRecords=new WeakMap(),geometryProbes=new WeakMap(),transforms=createNativeTransformRetention(()=>motionRoot());let collectFrame=0;
@@ -117,15 +138,102 @@ export function createNativeViewport({scene,camera,renderer,canvas,isAllowed=()=
   const geometryUses=new Map();
   const resourceState=new WeakMap(),instanceState=new WeakMap(),geometryRevisions=new WeakMap(),drawCache=new Map(),resourceTokens=new Map(),retention=createNativeSceneRetention(),retainedMaterials=createRetainedNativeMaterialTable({immutableRecords:true});let bindingVersion=0,lastSubmittedBindingVersion=-1,lastCollectedBindings=-1,overlayRoots=[],overlayMembers=[],lastSentFields=null,graphState=null,lastSentGraph=0,lastSubmittedBindings=new Map(),currentBindings=new Map(),frameStamp=0;let latestScene=null,latestSignature='',lastSentSignature='',latestSceneBytes=null,epoch=0;
   const counters={packets:0,bytes:0,resourceUploads:0,fallbacks:0,fullScenes:0,scenePatches:0,graphBuilds:0,coalescedFrames:0,modelCacheHits:0,modelScans:0,modelAudits:0,modelAuditMismatches:0};
-  const controls=document.createElement('div');controls.className='native-render-controls';controls.innerHTML='<strong title="专业版主视口">DX12</strong><select hidden aria-label="视口诊断后端"><option value="native">DX12</option><option value="webgl">WebGL 诊断</option></select><label>画质 <select aria-label="视口抗锯齿"><option value="dlss">DLSS 质量</option><option value="native">原始分辨率</option></select></label><span role="status">正在准备 DX12 视口</span>';
-  const statusbar=document.querySelector('.statusbar');if(statusbar)statusbar.insertBefore(controls,statusbar.children[1]||null);else canvas.parentElement.append(controls);const [backend,quality]=controls.querySelectorAll('select'),message=controls.querySelector('span');quality.value='native';
-  const notice=document.createElement('div');notice.className='native-viewport-notice';notice.hidden=true;notice.setAttribute('role','alert');notice.innerHTML='<strong>DX12 视口暂不可用</strong><p></p><button type="button">重试 DX12</button><small>当前工程与编辑记录保留，可继续保存工程。</small>';canvas.parentElement.append(notice);notice.querySelector('button').onclick=()=>restart();
-  function restart(){presentationFence.reset();runtimeVerified=false;transport.restart();lastError='';compatibilityReason=null;wanted=true;backend.value='native';ready=false;buffer=null;uploaded.clear();pendingIds.clear();outboundIds.clear();pendingResources=[];inFlight=false;outbound=null;resourceQueueDirty=false;latestScene=null;latestSceneBytes=null;latestSignature='';lastSentSignature='';lastSentGraph=0;lastSubmittedBindings.clear();lastSubmittedBindingVersion=-1;lastSentFields=null;lastAcceptedRevision=0;resourceTokens.clear();bindingVersion++;lastStatus={};epoch++;deactivate();notice.hidden=true;message.textContent='正在重启 DX12 视口';post({action:'initialize',restart:true});}
-  backend.onchange=()=>{wanted=backend.value==='native';deactivate();lastSentSignature='';if(wanted&&lastError)restart();};quality.onchange=()=>{dlss=quality.value==='dlss';lastSentSignature='';};
+  const controls=document.createElement('div');
+  controls.className='native-render-controls';
+  controls.innerHTML='<strong title="专业版主视口">DX12</strong><label class="native-quality">画质 <select aria-label="视口抗锯齿"><option value="dlss">DLSS 质量</option><option value="native">原始分辨率</option></select></label><span role="status">正在准备 DX12 视口</span>';
+  const statusbar=document.querySelector('.statusbar');if(statusbar)statusbar.insertBefore(controls,statusbar.children[1]||null);else canvas.parentElement.append(controls);
+  const badge=controls.querySelector('strong'),quality=controls.querySelector('select'),message=controls.querySelector('span');
+  quality.value='native';
+  const notice=document.createElement('div');notice.className='native-viewport-notice';notice.hidden=true;notice.setAttribute('role','alert');notice.innerHTML='<strong>DX12 视口暂不可用</strong><p></p><button type="button">重试 DX12</button><small>当前工程与编辑记录保留，可继续保存工程。</small>';canvas.parentElement.append(notice);
+  const retry=notice.querySelector('button');
+  retry.onclick=()=>restart();
+  let removePreference=()=>{};
+  if(graphicsMode){
+    const label=document.createElement('label');
+    label.innerHTML='<span>图形</span><select aria-label="图形模式"><option value="auto">自动</option><option value="dx12">DX12</option><option value="compatibility">兼容</option></select>';
+    quality.parentElement.after(label);
+    const preference=label.querySelector('select');
+    let savedMode=graphicsMode,pendingMode=null,saveTimer=0;
+    preference.value=savedMode;
+    preference.title='选择下次启动时使用的图形模式';
+    function finishPreference({ok,mode,error}){
+      clearTimeout(saveTimer);
+      pendingMode=null;
+      if(ok)savedMode=mode;
+      preference.value=savedMode;
+      preference.disabled=false;
+      preference.title=ok&&mode!==graphicsMode?'保存并重开软件后生效':'选择下次启动时使用的图形模式';
+      onGraphicsPreference(ok?(mode===graphicsMode?'图形模式已保存':'图形模式已保存，重开软件后生效。'):(error||'图形模式保存失败，请重试。'),!ok);
+    }
+    const acknowledge=e=>{if(pendingMode&&e.detail?.mode===pendingMode)finishPreference(e.detail);};
+    window.addEventListener('shuyaer-graphics-preference',acknowledge);
+    preference.onchange=()=>{
+      const mode=preference.value;
+      if(!GRAPHICS_MODES.has(mode)||mode===savedMode)return;
+      pendingMode=mode;
+      preference.disabled=true;
+      saveTimer=setTimeout(()=>finishPreference({ok:false,error:'图形模式保存超时，请重试。'}),5000);
+      try{host.postMessage(JSON.stringify({topic:'shuyaer-v050',action:'graphics-mode',mode}));}
+      catch(error){finishPreference({ok:false,error:error.message});}
+    };
+    removePreference=()=>{clearTimeout(saveTimer);window.removeEventListener('shuyaer-graphics-preference',acknowledge);};
+  }
+  function releaseBuffer(){
+    if(!buffer)return;
+    try{host.releaseBuffer?.(buffer);}catch{}finally{buffer=null;}
+  }
+  function restart(){
+    if(disposed||compatibility)return;
+    presentationFence.reset();runtimeVerified=false;transport.restart();lastError='';compatibilityReason=null;wanted=true;ready=false;watchdogStarted=null;
+    releaseBuffer();uploaded.clear();pendingIds.clear();outboundIds.clear();pendingResources=[];inFlight=false;outbound=null;resourceQueueDirty=false;latestScene=null;latestSceneBytes=null;latestSignature='';lastSentSignature='';lastSentGraph=0;lastSubmittedBindings.clear();lastSubmittedBindingVersion=-1;lastSentFields=null;lastAcceptedRevision=0;resourceTokens.clear();bindingVersion++;lastStatus={};epoch++;deactivate();notice.hidden=true;message.textContent='正在重启 DX12 视口';post({action:'initialize',restart:true});
+  }
+  quality.onchange=()=>{dlss=quality.value==='dlss';lastSentSignature='';};
   const post=data=>host.postMessage(JSON.stringify({topic:'branchforge-native',transportSession:transport.id,...data}));
   function deactivate(){active=false;activationRevision=0;modelCache.clear();document.body.classList.remove('native-viewport-active');document.documentElement.classList.remove('native-viewport-active');renderer.setClearAlpha(1);}
   function showNotice(reason){notice.hidden=false;notice.querySelector('p').textContent=reason;message.textContent='DX12 视口待恢复';message.title=reason;}
-  function fail(error){const reason=error.message||String(error);if(lastError===reason)return;lastError=reason;deactivate();showNotice(lastError);post({action:'hide'});}
+  function labelCompatibility(){
+    badge.textContent='兼容模式';
+    badge.title=fallbackReason?'已从 DX12 切换到 WebGL2\n'+fallbackReason:'正在使用 WebGL2';
+    quality.parentElement.hidden=true;
+    message.textContent=fallbackReason?'DX12 不可用，已切换 WebGL2':'WebGL2';
+    message.title=badge.title;
+  }
+  function enterCompatibility(reason){
+    if(compatibility||disposed)return;
+    compatibility=true;
+    fallbackReason=reason;
+    webglStartFrame=webglFrame;
+    counters.fallbacks++;
+    lastError='';compatibilityReason=null;ready=false;runtimeVerified=false;watchdogStarted=null;
+    deactivate();
+    // The host must see the still-current session when it releases native resources.
+    try{post({action:'use-compatibility'});}catch{}
+    releaseBuffer();
+    transport.restart();
+    pendingResources=[];pendingIds.clear();outboundIds.clear();uploaded.clear();
+    inFlight=false;outbound=null;latestSceneBytes=null;graphState=null;latestScene=null;
+    drawCache.clear();resourceTokens.clear();currentObjects=[];currentBindings.clear();lastSubmittedBindings.clear();
+    geometryUses.clear();lastSentFields=null;overlayRoots=[];overlayMembers=[];
+    retention.update([],[]);retainedMaterials.reset();
+    notice.hidden=true;labelCompatibility();
+    queueMicrotask(()=>{if(!disposed)onCompatibility(fallbackReason);});
+  }
+  function fail(error,canFallback=false){
+    if(compatibility||disposed)return;
+    const reason=error.message||String(error);
+    if(graphicsMode==='auto'&&wanted&&canFallback){enterCompatibility(reason);return;}
+    if(lastError===reason)return;
+    lastError=reason;deactivate();showNotice(lastError);post({action:'hide'});
+  }
+  function noteNativeProgress(){if(watchdogStarted!==null)watchdogStarted=performance.now();}
+  function watchNativePresentation(){
+    if(graphicsMode!=='auto'||active||lastError||compatibilityReason){watchdogStarted=null;return;}
+    const now=performance.now();
+    watchdogStarted??=now;
+    const initialized=ready&&runtimeVerified;
+    if(now-watchdogStarted>=(initialized?FIRST_FRAME_TIMEOUT:INITIALIZE_TIMEOUT))
+      enterCompatibility(initialized?'DX12 等待首帧超时。':'DX12 初始化超时。');
+  }
   function keyFor(object,version){const old=resourceState.get(object);if(old?.version===version)return old.key;const key=object.uuid+':'+version;resourceState.set(object,{key,version});return key;}
   const known=id=>uploaded.has(id)||pendingIds.has(id)||outboundIds.has(id);
   function queueResource(resource,parts){if(known(resource.id))return;pendingResources.push({resource,parts});pendingIds.add(resource.id);}
@@ -152,9 +260,13 @@ export function createNativeViewport({scene,camera,renderer,canvas,isAllowed=()=
     if(latestScene&&latestScene.assetIdentity!==assetIdentity()){deactivate();lastSentGraph=0;lastSentFields=null;lastSentSignature='';drawCache.clear();retainedMaterials.reset();epoch++;}
     const matrixProfile=profile?.begin('native.world_matrices');collectFrame++;materialEncoder.beginFrame();scene.updateMatrixWorld(true);camera.updateMatrixWorld(true);matrixProfile?.end();
     const projection=toD3D.clone().multiply(camera.projectionMatrix),view=camera.matrixWorldInverse,vp=projection.clone().multiply(view),draws=[],objects=[],overlays=[],useMaterialTable=lastStatus.material_table_protocol===1,materialTable=lastStatus.retained_scene_protocol===1?retainedMaterials:createNativeMaterialTable();if(materialTable===retainedMaterials)retainedMaterials.beginFrame();
-    const result={assetIdentity:assetIdentity(),projection:projection.elements,view:view.elements.slice(),viewProjection:vp.elements,camera:[...camera.position.toArray(),0],near:camera.near,far:camera.far,fov:THREE.MathUtils.degToRad(camera.fov||38),orthographic:Boolean(camera.isOrthographicCamera),dlss:dlss&&lastStatus.dlss_supported!==false,background:rgba(renderer.getClearColor(new THREE.Color())),fog:[scene.fog?.near||1e6,scene.fog?.far||1e7,renderer.toneMappingExposure,0]};let lightIndex=0;
+    const result={assetIdentity:assetIdentity(),projection:projection.elements,view:view.elements.slice(),viewProjection:vp.elements,camera:[...camera.position.toArray(),0],near:camera.near,far:camera.far,fov:THREE.MathUtils.degToRad(camera.fov||38),orthographic:Boolean(camera.isOrthographicCamera),dlss:dlss&&lastStatus.dlss_supported!==false,background:rgba(renderer.getClearColor(new THREE.Color())),fog:[scene.fog?.near||1e6,scene.fog?.far||1e7,renderer.toneMappingExposure,scene.fog?.studioShadowRadius??0]};let lightIndex=0;
     
-    const frameMaterial=m=>materialTable.intern(m,m=>{if(m.visible&&m.depthTest!==false)compatibilityReason||=nativeMaterialUnsupported(m,lastStatus);return material(m);});
+    const frameMaterial=source=>materialTable.intern(source,()=>{
+      const preview=nativePreviewMaterial(source);
+      if(preview.visible&&preview.depthTest!==false)compatibilityReason||=nativeMaterialUnsupported(preview,lastStatus);
+      return material(preview);
+    });
     if(lastStatus.retained_scene_protocol===1&&motionRoot())result.rootTransforms={[motionRoot().uuid]:motionRoot().matrixWorld.elements.slice()};
     const managed=lastStatus.retained_scene_protocol===1&&useMaterialTable?getRetainedModel():null;let modelVisited=false,modelMaterials=null;
     if(!managed)modelCache.clear();
@@ -166,7 +278,7 @@ export function createNativeViewport({scene,camera,renderer,canvas,isAllowed=()=
       if(object.__branchForgeNativeEdit?.influences===2&&lastStatus.weighted_edit_protocol!==1)compatibilityReason||='树干柔性预览需要更新 DX12 运行库';
       if(modelMaterials&&(object.isMesh||object.isLine))for(const m of Array.isArray(object.material)?object.material:[object.material])if(m)modelMaterials.add(m);
       const pose=lastStatus.retained_scene_protocol===1?transforms.get(object,collectFrame):null,objectMatrix=pose?.matrix||object.matrixWorld.elements,root=pose?.root||'';
-      const encodedGeometry=object.geometry?nativePreviewGeometrySource(object.geometry):null;
+      const encodedGeometry=object.geometry?nativePreviewGeometryForObject(object):null;
       const cached=objectRecords.get(object);if(cached&&cached.frame===collectFrame-1&&cached.epoch===epoch&&cached.materialProtocol===lastStatus.material_table_protocol&&cached.retainedProtocol===lastStatus.retained_scene_protocol&&cached.geometry===object.geometry&&cached.encodedGeometry===encodedGeometry&&cached.material===object.material&&!object.isSkinnedMesh&&!object.geometry.morphAttributes.position?.length){
         const probe=geometryProbe(encodedGeometry),im=object.instanceMatrix,storage=im?.data||im,radius=object.geometry.attributes.sampleRadius,edit=object.__branchForgeNativeEdit,lookup=edit?.lookupTexture,frames=edit?.frameTexture,world=objectMatrix;
         let same=cached.root===root&&cached.geometryRevision===probe.revision&&cached.instanceAttribute===im&&cached.instanceArray===storage?.array&&cached.instanceVersion===storage?.version&&cached.radius===radius&&cached.radiusArray===radius?.array&&cached.radiusVersion===radius?.version&&cached.radiusCount===radius?.count&&cached.radiusSize===radius?.itemSize&&cached.radiusNormalized===radius?.normalized&&cached.count===object.count&&cached.edit===edit&&cached.lookup===lookup&&cached.lookupVersion===lookup?.version&&cached.frames===frames&&cached.framesVersion===frames?.version&&cached.castShadow===object.castShadow&&cached.receiveShadow===object.receiveShadow&&cached.line===object.isLine&&cached.lineLoop===object.isLineLoop&&cached.lineSegments===object.isLineSegments;
@@ -233,8 +345,14 @@ export function createNativeViewport({scene,camera,renderer,canvas,isAllowed=()=
     if(pendingResources.length){const reserve={byteLength:(lastStatus.retained_scene_protocol===1&&lastSentGraph===graphState.version?JSON.stringify(nativeSceneDelta(lastSentFields,graphState.fields)).length:graphState.bytes.byteLength)+JSON.stringify(latestScene).length+currentBindings.size*512+4096},batch=planNativeResourceBatch(pendingResources,buffer.byteLength,latestScene,reserve),metadata={resources:batch.selected.map(r=>r.resource)};pendingResources.splice(0,batch.selected.length);for(const item of batch.selected)pendingIds.delete(item.resource.id);if(batch.complete)Object.assign(metadata,sceneMetadata());else{deactivate();lastSentSignature='';}send(metadata,batch.parts);return;}
     if(latestSignature!==lastSentSignature||presentationFence.needsSubmission(lastAcceptedRevision))send(sceneMetadata());
   }
-  host.addEventListener('sharedbufferreceived',event=>{if(disposed||!transport.shared(event.additionalData))return;buffer=event.getBuffer();lastError='';lastRect='';ready=true;});
-  host.addEventListener('message',event=>{let value=event.data;if(value?.topic!=='branchforge-native'||!transport.message(value))return;
+  function receiveBuffer(event){
+    if(disposed||compatibility||!transport.shared(event.additionalData))return;
+    releaseBuffer();
+    buffer=event.getBuffer();lastError='';lastRect='';ready=true;noteNativeProgress();
+  }
+  function receiveMessage(event){
+    const value=event.data;
+    if(disposed||compatibility||value?.topic!=='branchforge-native'||!transport.message(value))return;
     if(value.action==='ack'){
       inFlight=false;
       if(value.accepted===false){
@@ -249,18 +367,113 @@ export function createNativeViewport({scene,camera,renderer,canvas,isAllowed=()=
         }
         outbound=null;outboundIds.clear();
       }else{
+        if(outbound)noteNativeProgress();
         for(const resource of outbound?.metadata.resources||[]){uploaded.add(resource.id);counters.resourceUploads++;}
         const state=outbound?.sceneState;if(state){lastAcceptedRevision=outbound.metadata.revision;lastSentGraph=state.graph;lastSentFields=state.fields;lastSentSignature=state.signature;lastSubmittedBindings=state.bindings;lastSubmittedBindingVersion=state.bindingVersion;}
         outbound=null;outboundIds.clear();
       }
     }
-    if(value.action==='status'){lastStatus=value.status;const incompatible=nativeRuntimeCompatibility(lastStatus);if(incompatible){fail(Error(incompatible));return;}runtimeVerified=true;if(lastStatus.requires_full_scene){lastSentGraph=0;lastSentSignature='';}if(lastStatus.error){fail(Error(lastStatus.error));return;}if(lastStatus.dlss_supported===false){quality.value='native';quality.querySelector('[value=dlss]').disabled=true;quality.title='当前设备不支持 DLSS';}if(!lastError&&wanted&&!compatibilityReason&&isAllowed()&&lastStatus.frames>0&&lastStatus.scene_session===sceneSession&&lastStatus.asset_identity===assetIdentity()&&lastStatus.revision>=activationRevision&&activationRevision>0){active=true;notice.hidden=true;document.body.classList.add('native-viewport-active');document.documentElement.classList.add('native-viewport-active');message.textContent=`${lastStatus.dlss_active?'DLSS 质量':'原始分辨率'} · ${Number(lastStatus.gpu_ms||0).toFixed(1)} ms`;} }
-    if(value.action==='error')fail(Error(value.message));
-  });
-  post({action:'initialize'});
+    if(value.action==='status'){
+      lastStatus=value.status;
+      const incompatible=nativeRuntimeCompatibility(lastStatus);
+      if(incompatible){fail(Error(incompatible));return;}
+      if(lastStatus.error){fail(Error(lastStatus.error),!runtimeVerified||deviceFailure(lastStatus.error));return;}
+      if(!runtimeVerified&&lastStatus.ready!==false){runtimeVerified=true;noteNativeProgress();}
+      if(lastStatus.requires_full_scene){lastSentGraph=0;lastSentSignature='';}
+      if(lastStatus.dlss_supported===false){dlss=false;quality.value='native';quality.querySelector('[value=dlss]').disabled=true;quality.title='当前设备不支持 DLSS';}
+      if(!lastError&&wanted&&!compatibilityReason&&isAllowed()&&lastStatus.frames>0&&lastStatus.scene_session===sceneSession&&lastStatus.asset_identity===assetIdentity()&&lastStatus.revision>=activationRevision&&activationRevision>0){
+        active=true;notice.hidden=true;watchdogStarted=null;
+        document.body.classList.add('native-viewport-active');document.documentElement.classList.add('native-viewport-active');
+        message.textContent=`${lastStatus.dlss_active?'DLSS 质量':'原始分辨率'} · ${Number(lastStatus.gpu_ms||0).toFixed(1)} ms`;
+      }
+    }
+    if(value.action==='error')fail(Error(value.message),value.operation==='initialize'||deviceFailure(value.message||''));
+  }
   function renderOverlay(){const overlayProfile=profile?.begin('native.overlay');const prior=renderer.getClearAlpha(),background=scene.background,sceneAuto=scene.matrixWorldAutoUpdate,cameraAuto=camera.matrixWorldAutoUpdate,hidden=active?overlayRoots.map(o=>[o,o.visible]):[];if(!active)scene.traverseVisible(o=>{if((o.isMesh||o.isLine||o.isPoints||o.isSprite)&&(Array.isArray(o.material)?o.material:[o.material]).every(m=>m?.depthTest!==false))hidden.push([o,o.visible]);});if(active){scene.background=null;renderer.setClearAlpha(0);scene.matrixWorldAutoUpdate=false;camera.matrixWorldAutoUpdate=false;}for(const [o]of hidden)o.visible=false;if(active)scene.traverseVisible(o=>{if(supported(o)){hidden.push([o,o.visible]);o.visible=false;}});try{renderer.render(scene,camera);}finally{for(const [o,visible]of hidden)o.visible=visible;scene.background=background;scene.matrixWorldAutoUpdate=sceneAuto;camera.matrixWorldAutoUpdate=cameraAuto;renderer.setClearAlpha(prior);overlayProfile?.end();}}
-  contextChanged=()=>{canvas.parentElement.append(notice);lastRect='';restart();};
-  const api={enterPreview,render(){if(disposed)return;if(isSuspended()){post({action:'hide'});return;}frameStamp=Date.now();if(active&&lastStatus.asset_identity!==assetIdentity())deactivate();try{const rect=canvas.getBoundingClientRect(),bounds=JSON.stringify({x:rect.x,y:rect.y,width:rect.width,height:rect.height,dpr:devicePixelRatio});if(bounds!==lastRect){lastRect=bounds;post({action:'bounds',bounds:JSON.parse(bounds)});}if(!wanted||!isAllowed()){deactivate();notice.hidden=true;message.textContent=wanted?'辅助多视图 · WebGL':'WebGL 诊断';post({action:'hide'});return renderer.render(scene,camera);}pump();post({action:compatibilityReason||lastError?'hide':'show'});renderOverlay();
-    }catch(error){fail(error);renderOverlay();}},async waitForPresentation({timeout=60000,onProgress=()=>{},afterRevision=0,refresh=false}={}){const expected=assetIdentity(),revision=refresh?presentationFence.request(Math.max(afterRevision,lastSceneRevision)):afterRevision+1;return waitForNativePresentation({read:()=>({...api.stats,presentationAllowed:isAllowed()}),current:()=>!disposed&&assetIdentity()===expected,asset:expected,session:sceneSession,revision,timeout,onProgress});},async auditModel({timeout=10000}={}){if(!ready||!wanted||!isAllowed()||lastError)return {checked:false,mismatch:false,reason:'viewport-inactive'};const before=counters.modelAudits,started=performance.now();forceModelAudit=true;while(!disposed&&counters.modelAudits===before){if(performance.now()-started>timeout)throw Error('Native model audit timeout');await new Promise(resolve=>setTimeout(resolve,37));}return {...lastModelAudit};},restart,setMode(mode){backend.value=mode;backend.onchange();},setDlss(value){quality.value=value?'dlss':'native';quality.onchange();},get stats(){return {available:true,ready,active,wanted,dlss,lastError,presentation:!wanted?'diagnostic-webgl':!isAllowed()?'auxiliary-webgl':lastError||compatibilityReason?'blocked':active?'dx12':'pending',submittedRevision:lastSceneRevision,acceptedRevision:lastAcceptedRevision,sceneSession,transportSession:transport.id,compatibilityReason,pendingResources:pendingResources.length,inFlight,...counters,native:{...lastStatus}};},dispose(){disposed=true;epoch++;deactivate();post({action:'dispose'});controls.remove();notice.remove();}};window.addEventListener('beforeunload',()=>api.dispose(),{once:true});return api;
+  function renderCompatibility(){
+    try{
+      if(!compatibilityRenderers.has(renderer)){
+        const ratio=renderer.getPixelRatio?.();
+        if(ratio>1.25)renderer.setPixelRatio(1.25);
+        if(renderer.shadowMap)renderer.shadowMap.enabled=false;
+        compatibilityRenderers.add(renderer);
+      }
+      renderWebGL();
+      if(lastError){lastError='';notice.hidden=true;labelCompatibility();}
+    }catch(error){
+      const reason=error.message||String(error);
+      if(lastError===reason)return;
+      lastError=reason;
+      notice.querySelector('strong').textContent='兼容视口暂不可用';
+      notice.querySelector('p').textContent=reason;
+      retry.hidden=true;notice.hidden=false;
+      message.textContent='WebGL2 视口待恢复';message.title=reason;
+    }
+  }
+  contextChanged=()=>{canvas.parentElement.append(notice);lastRect='';webglAsset=null;if(!compatibility)restart();};
+  const api={
+    enterPreview,
+    render(){
+      if(disposed)return;
+      if(isSuspended()){watchdogStarted=null;if(!compatibility)post({action:'hide'});return;}
+      if(compatibility){renderCompatibility();return;}
+      frameStamp=Date.now();
+      if(active&&lastStatus.asset_identity!==assetIdentity())deactivate();
+      try{
+        const rect=canvas.getBoundingClientRect(),bounds=JSON.stringify({x:rect.x,y:rect.y,width:rect.width,height:rect.height,dpr:devicePixelRatio});
+        if(bounds!==lastRect){lastRect=bounds;post({action:'bounds',bounds:JSON.parse(bounds)});}
+        if(!wanted||!isAllowed()){
+          watchdogStarted=null;deactivate();notice.hidden=true;
+          message.textContent=wanted?'辅助多视图 · WebGL':'WebGL 诊断';
+          post({action:'hide'});
+          return renderWebGL();
+        }
+        pump();
+        if(rect.width>0&&rect.height>0)watchNativePresentation();
+        if(compatibility){renderCompatibility();return;}
+        post({action:compatibilityReason||lastError?'hide':'show'});
+        renderOverlay();
+      }catch(error){fail(error);renderOverlay();}
+    },
+    waitForPresentation({timeout=60000,onProgress=()=>{},afterRevision=0,refresh=false}={}){
+      const expected=assetIdentity(),owner=context.current;
+      const revision=refresh&&!compatibility?presentationFence.request(Math.max(afterRevision,lastSceneRevision)):afterRevision+1;
+      return waitForNativePresentation({read:()=>({...api.stats,presentationAllowed:isAllowed()}),
+        current:()=>!disposed&&context.current===owner&&assetIdentity()===expected,asset:expected,session:sceneSession,
+        revision,webglRevision:webglFrame+1,timeout,onProgress});
+    },
+    async auditModel({timeout=10000}={}){if(!ready||!wanted||!isAllowed()||lastError)return {checked:false,mismatch:false,reason:'viewport-inactive'};const before=counters.modelAudits,started=performance.now();forceModelAudit=true;while(!disposed&&counters.modelAudits===before){if(performance.now()-started>timeout)throw Error('Native model audit timeout');await new Promise(resolve=>setTimeout(resolve,37));}return {...lastModelAudit};},
+    restart,
+    setMode(mode){
+      if(compatibility)return;
+      wanted=mode==='native';deactivate();lastSentSignature='';
+      if(wanted&&lastError)restart();
+    },
+    setDlss(value){if(!compatibility){quality.value=value?'dlss':'native';quality.onchange();}},
+    get stats(){
+      const presentation=compatibility?'compatibility-webgl':!wanted?'diagnostic-webgl':!isAllowed()?'auxiliary-webgl':lastError||compatibilityReason?'blocked':active?'dx12':'pending';
+      return {available:true,graphicsMode,backend:compatibility||!wanted?'webgl':'dx12',ready:compatibility?webglFrame>webglStartFrame&&webglAsset===assetIdentity()&&!lastError:ready,
+        active,wanted:!compatibility&&wanted,dlss:!compatibility&&dlss,lastError,fallbackReason,presentation,webgl:webglStatus(),
+        submittedRevision:lastSceneRevision,acceptedRevision:lastAcceptedRevision,sceneSession,transportSession:transport.id,
+        compatibilityReason,pendingResources:pendingResources.length,inFlight,...counters,native:{...lastStatus}};
+    },
+    dispose(){
+      if(disposed)return;
+      disposed=true;epoch++;deactivate();
+      if(!compatibility)post({action:'dispose'});
+      releaseBuffer();
+      host.removeEventListener('sharedbufferreceived',receiveBuffer);
+      host.removeEventListener('message',receiveMessage);
+      removePreference();controls.remove();notice.remove();
+    },
+  };
+  if(compatibility)labelCompatibility();
+  else{
+    host.addEventListener('sharedbufferreceived',receiveBuffer);
+    host.addEventListener('message',receiveMessage);
+    post({action:'initialize'});
+  }
+  window.addEventListener('beforeunload',()=>api.dispose(),{once:true});
+  return api;
 }
 

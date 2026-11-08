@@ -64,7 +64,7 @@ export function traceTrunkMedialTree({grid,shape,origin,pitch,bounds,distance,so
   const attachmentRadius=Math.sqrt(distance[at]);
   if(paths&&amount<Math.max(minimum,attachmentRadius*2.25)){for(const i of chain)cover(i);pruned++;continue;}
   for(const i of chain){chosen[i]=1;cover(i);}paths++;
-  if(paths>256)throw Error('分叉候选过多，请提高短枝过滤后重新识别');
+  if(paths>256)throw Object.assign(Error('分叉候选过多，请提高短枝过滤后重新识别'),{code:'TRUNK_BRANCH_LIMIT'});
  }
  notify('整理主干与子枝',.82);
  const selected=solid.filter(i=>chosen[i]),children=new Map(selected.map(i=>[i,[]])),positions=new Map(selected.map(i=>[i,world(i)]));

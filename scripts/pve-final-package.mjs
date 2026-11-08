@@ -9,6 +9,7 @@ import { extractPveUnitGeometry, hashPveUnitGeometry, equalPveUnitGeometry, disp
 import { createPveBarkExporter } from './pve-bark-materials.mjs';
 import {ensureImportedTrunkSkinPoints} from './imported-trunk-skin.mjs';
 import { fitPveUnitPair, matchesTransformedPveGeometry } from './pve-unit-reuse.mjs';
+import { exportPveMeshUnit } from './pve-mesh-unit-glb.mjs';
 
 export async function generateFinalCompletePackage({ tool, input, document, sourceBytes, output, progress }) {
   const imp = relative => import(pathToFileURL(path.join(tool, relative)).href);
@@ -33,7 +34,13 @@ export async function generateFinalCompletePackage({ tool, input, document, sour
     asset = k.buildBranchAsset(settings, null, sources, 0, authoring);
     warnings.push(...checkPveGeometry(asset.report, '整树实际装配'));
     const plan = resolvePveExportPlan(asset, authoring);
-    if (!plan.units.length&&!authoring.imported_trunks?.mounts.length) throw Error('工程没有可交付的完整成品枝实例');
+    const meshUnits = [];
+    if (authoring.mesh_units?.instances.length) {
+      const { resolveMeshUnitPlacements } = await imp('web/mesh-unit-data.js');
+      meshUnits.push(...resolveMeshUnitPlacements(authoring, asset, { strict: true }));
+      if (meshUnits.length !== authoring.mesh_units.instances.length) throw Error('完整网格装配缺少素材或母枝，请先修复挂接');
+    }
+    if (!plan.units.length&&!meshUnits.length&&!authoring.imported_trunks?.mounts.length) throw Error('工程没有可交付的完整成品枝实例');
     const skeleton = createPVESkeleton({ ...asset, masterBranches: plan.structuralBranches,
       masterPlacements: [], placements: [] }, []);
     ensureImportedTrunkSkinPoints(asset,skeleton);
@@ -105,6 +112,14 @@ export async function generateFinalCompletePackage({ tool, input, document, sour
       classes.get(id).instance_count++;
       unit.source_id = id;
     }
+    for (const { source } of meshUnits) {
+      if (!classes.has(source.id)) {
+        classes.set(source.id, { id: source.id, base_id: source.id, revision: source.revision,
+          instance_count: 0, meshUnit: source });
+      }
+      if (classes.get(source.id).meshUnit !== source) throw Error('完整网格素材标识冲突：' + source.id);
+      classes.get(source.id).instance_count++;
+    }
     const ordered = [...classes.values()].sort((a, b) => a.id.localeCompare(b.id));
     const sourceIndex = new Map(ordered.map((source, index) => [source.id, index]));
     let maxRootError = 0;
@@ -125,18 +140,48 @@ export async function generateFinalCompletePackage({ tool, input, document, sour
         scale_m: scale, radial_scale: Number(unit.sourceInstance?.radius_scale || 1),
         ...(unit.parentUnitId ? {parent_unit_id:`UNIT_${unit.parentUnitId}`,parent_unit_branch_id:unit.parent.stableId,parent_unit_t:unit.root.parentT} : {}) };
     });
+    const { pveGlbMatrix } = await imp('web/pve-export.js');
+    const graphByIndex = new Map(asset.masterBranches.map(branch => [branch.id, branch]));
+    const structural = new Set(plan.structuralBranches.map(branch => branch.stableId));
+    for (const { instance, source, parent, matrix } of meshUnits) {
+      let host = parent, hostT = instance.attach;
+      while (host && !structural.has(host.stableId)) {
+        hostT = host.parentT;
+        host = graphByIndex.get(host.parentId);
+      }
+      if (!host) throw Error('完整网格单元缺少承重母枝：' + source.name);
+      const transform = matrix.clone().multiply(pveGlbMatrix(source.connector).invert());
+      const pivot = new T.Vector3().applyMatrix4(transform);
+      const up = new T.Vector3(0, 1, 0).applyMatrix4(transform).sub(pivot);
+      const face = new T.Vector3(0, 0, 1).applyMatrix4(transform).sub(pivot);
+      const scale = up.length();
+      const parentUnit = plan.units.find(unit => unit.branches.includes(parent));
+      foliage.push({
+        id: `UNIT_${instance.id}`, source_index: sourceIndex.get(source.id),
+        branch_id: host.stableId, branch_t: hostT, position_m: pivot.toArray(),
+        up: up.normalize().toArray(), face: face.normalize().toArray(), scale_m: scale, radial_scale: 1,
+        ...(parentUnit && parent.stableId.startsWith(parentUnit.id + '.') ? {
+          parent_unit_id: `UNIT_${parentUnit.id}`, parent_unit_branch_id: parent.stableId, parent_unit_t: instance.attach,
+        } : {}),
+      });
+    }
     const countUnits = (unit, kind) => (kind === 'LEAF' ? unit.leaves : unit.organs).length;
-    Object.assign(skeleton, { foliage_sources: ordered.map(source => ({ id: source.id, name: source.id })), foliage,
+    Object.assign(skeleton, { foliage_sources: ordered.map(source => ({ id: source.id,
+      name: source.meshUnit?.name || source.id, ...(source.meshUnit ? { mesh_unit: true } : {}) })), foliage,
       complete_unit_assembly: { unit_count: foliage.length, source_mesh_count: ordered.length,
         leaf_instances: 0, organ_instances: 0, baked_unit_leaves: 0, baked_unit_organs: 0,
         max_unit_root_error_m: maxRootError } });
     if(authoring.imported_trunks?.mounts.length){skeleton.version=3;skeleton.required_capabilities=['imported_trunk_materials_v1','imported_trunk_skin_v1'];skeleton.imported_trunks={version:1,sources:authoring.imported_trunks.assets.map(a=>({id:a.id,revision:a.revision,source_sha256:a.source.sha256})),mounts:authoring.imported_trunks.mounts};}
+    if (meshUnits.length) {
+      skeleton.version = 3;
+      (skeleton.required_capabilities ??= []).push('native_mesh_units_v1');
+    }
     const validation = validatePVESkeleton(skeleton);
     if (!validation.valid) throw Error('完整枝骨架无效：' + validation.errors.slice(0, 8).join('；'));
     const manifest = { format: 'BranchForgeCompleteUnitSet', version: 1,
       source_whole_project: input, source_whole_sha256: sha(sourceBytes),
       strategy: 'Reusable authored complete-unit classes and independently mounted nested units; complete variants for historical edited families',
-      authored_unit_classes: [...new Set(plan.units.map(unit => unit.sourceAsset.id))],
+      authored_unit_classes: [...new Set([...plan.units.map(unit => unit.sourceAsset.id), ...meshUnits.map(unit => unit.source.id)])],
       radius_variant_mode: 'none', radius_scale_policy: 'software_resolved_per_instance_geometry',
       standard_pve_radius_fidelity: 'unsupported', standard_pve_visual_fidelity: 'not_exact',
       local_variant_mesh_policy: 'baked_final_geometry_deduplicated_by_content',
@@ -160,7 +205,20 @@ export async function generateFinalCompletePackage({ tool, input, document, sour
     for (const [index, source] of ordered.entries()) {
       progress('生成骨架与样本枝', `正在生成 ${index + 1}/${ordered.length}：${source.id}`);
       let bytes, triangles, leaves, organs;
-      if (source.group) {
+      if (source.meshUnit) {
+        const { buildMeshUnitModel } = await imp('web/mesh-unit-source.js');
+        const { GLTFExporter } = await imp('web/vendor/GLTFExporter.js');
+        const { mergeGeometries } = await imp('web/vendor/surface/utils/BufferGeometryUtils.js');
+        const model = buildMeshUnitModel(source.meshUnit);
+        try {
+          ({ bytes, triangles } = await exportPveMeshUnit({ source: source.meshUnit, model, THREE: T,
+            GLTFExporter, mergeGeometries, frame: pveGlbMatrix(source.meshUnit.connector) }));
+        } finally {
+          model.traverse(mesh => { if (mesh.isMesh) { mesh.geometry.dispose(); mesh.material.dispose(); } });
+        }
+        leaves = 0;
+        organs = 0;
+      } else if (source.group) {
         rebuildPveUnitTangents(source.group);
         barkExporter.capture(source.group);
         triangles = source.group.children.reduce((count, mesh) => count + mesh.geometry.index.count / 3, 0);
@@ -200,8 +258,9 @@ export async function generateFinalCompletePackage({ tool, input, document, sour
       manifest.units.push({ id: source.id, base_id: source.base_id, revision: source.revision,
         radius_scale: 1, instance_count: source.instance_count, glb, glb_sha256: sha(bytes), triangles,
         complete_unit_leaves: leaves, complete_unit_organs: organs,
+        ...(source.meshUnit ? { mesh_unit: true, role: source.meshUnit.role } : {}),
         ...(source.content_sha256 ? { variant_kind: 'final_complete_unit', content_sha256: source.content_sha256 } : {}),
-        ...(source.representative.sourceRecovery ? { source_recovery: source.representative.sourceRecovery } : {}) });
+        ...(source.representative?.sourceRecovery ? { source_recovery: source.representative.sourceRecovery } : {}) });
       const barkBindings = barkExporter.glbBindings(bytes);
       if (barkBindings) manifest.units.at(-1).bark_material_bindings = barkBindings;
       skeleton.complete_unit_assembly.baked_unit_leaves += leaves * source.instance_count;

@@ -13,6 +13,7 @@ import {validateParts} from './surface-parts.js';
 import {validatePartMaterials,partMaterialResources} from './part-materials.js';
 import {validateTreeUvOptions} from './tree-uv-rules.js';
 import {validateSurface,legacySurface} from './surface-effects.js';
+import {validateSourcePbrBase} from './source-pbr-base.js';
 export const PROJECT_VERSION=25;
 const hash=/^[a-f0-9]{64}$/;
 export function validateDocument(raw){
@@ -29,6 +30,7 @@ export function validateDocument(raw){
   if(!raw.resources||typeof raw.resources!=='object'||Array.isArray(raw.resources)||Object.values(raw.resources).some(v=>v!=null&&!hash.test(v))||new Set(Object.values(raw.resources).filter(Boolean)).size>PROJECT_RESOURCE_LIMIT)throw Error('工程素材引用无效或超过32项。');
   for(const key of ['source','working','bark','ao','height','roughness','normal'])if(raw.resources?.[key]!=null&&!hash.test(raw.resources[key]))throw Error('工程素材引用无效。');
   if(!hash.test(raw.resources?.source||''))throw Error('工程缺少源模型。');
+  if(raw.materialBase!=null)raw.materialBase=validateSourcePbrBase(raw.materialBase);
   if(raw.meshOptimization!=null)raw.meshOptimization=validateMeshOptimization(raw.meshOptimization,raw.resources);
   raw.parts=validateParts(raw.parts,raw.resources.source);raw.partSuggestionOptions=validatePartSuggestionOptions(raw.partSuggestionOptions);
   raw.partMaterials=validatePartMaterials(raw.partMaterials,raw.parts);raw.resources=partMaterialResources(raw.resources,raw.partMaterials);if(new Set(Object.values(raw.resources).filter(Boolean)).size>PROJECT_RESOURCE_LIMIT)throw Error('工程素材引用超过32项。');

@@ -1,4 +1,4 @@
-const {chromium}=require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {chromium}=require('playwright');
 const fs=require('fs'),path=require('path'),assert=require('assert/strict'),crypto=require('crypto');
 (async()=>{const out=path.resolve('.runtime/creative-workflow');fs.mkdirSync(out,{recursive:true});const report={checks:[],errors:[],native:0};const metas=fs.readdirSync('assets/tree-template-library').filter(f=>f.endsWith('.meta.json')).map(f=>JSON.parse(fs.readFileSync(path.join('assets/tree-template-library',f),'utf8').replace(/^\uFEFF/,'')));const meta=metas.find(m=>m.species==='JASMINE'&&!m.userSaved),hash=()=>crypto.createHash('sha256').update(fs.readFileSync(meta.path)).digest('hex'),originalHash=hash();const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});let page;
 try{page=await browser.newPage({viewport:{width:1650,height:1150}});page.setDefaultTimeout(180000);page.on('pageerror',e=>report.errors.push(e.message));page.on('dialog',async d=>{report.native++;await d.dismiss();});

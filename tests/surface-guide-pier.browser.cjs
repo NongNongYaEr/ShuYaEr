@@ -1,5 +1,5 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
-const {chromium}=require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {chromium}=require('playwright');
 (async()=>{
  const out=path.resolve('.runtime/guide-pier');fs.mkdirSync(out,{recursive:true});const report={checks:[],errors:[]};
  const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'}),page=await browser.newPage({viewport:{width:1680,height:1080}});page.setDefaultTimeout(30000);page.on('pageerror',e=>report.errors.push(e.message));

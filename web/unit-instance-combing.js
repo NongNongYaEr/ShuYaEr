@@ -40,6 +40,9 @@ function lazySamples(entry, lines) {
 // evaluated matrix stay valid until the next entry replaces them. Do not search
 // the entire runtime graph for the same carrier on every brush sample.
 const placementContexts = new WeakMap(), updateFrames = new WeakMap();
+function evaluatePlacement(entry, instance, carriers) {
+  return entry.evaluatePlacement ? entry.evaluatePlacement(instance) : evaluatedInstanceFrame(instance, entry.shape, carriers, entry.settings);
+}
 function placementContext(entry, frame = null) {
   let context = placementContexts.get(entry);
   if (context?.instance === entry.instance && context.parent === entry.parent
@@ -47,11 +50,12 @@ function placementContext(entry, frame = null) {
   const parent = entry.parent || (entry.instance.parent ? entry.branches?.find(branch => branch.stableId === entry.instance.parent) : undefined);
   const carriers = parent ? [parent] : [];
   context = { instance: entry.instance, parent: entry.parent, carrier: parent, carriers, shape: entry.shape, settings: entry.settings,
-    frame: frame || evaluatedInstanceFrame(entry.instance, entry.shape, carriers, entry.settings) };
+    frame: frame || evaluatePlacement(entry, entry.instance, carriers) };
   placementContexts.set(entry, context);
   return context;
 }
 function rotatedPlacement(entry, instance, frame, rotation) {
+  if (entry.rotatePlacement) return entry.rotatePlacement(instance, rotation);
   const transform = new THREE.Matrix4().makeTranslation(...frame.position.toArray())
     .multiply(new THREE.Matrix4().makeRotationFromQuaternion(rotation))
     .multiply(new THREE.Matrix4().makeTranslation(...frame.position.clone().negate().toArray()));
@@ -59,7 +63,7 @@ function rotatedPlacement(entry, instance, frame, rotation) {
 }
 function placementDelta(entry, after) {
   const context = placementContext(entry);
-  const frame = evaluatedInstanceFrame(after, entry.shape, context.carriers, entry.settings);
+  const frame = evaluatePlacement(entry, after, context.carriers);
   context.inverse ||= context.frame.matrix.clone().invert();
   return { frame, matrix: frame.matrix.clone().multiply(context.inverse) };
 }
@@ -265,7 +269,7 @@ function fixedStrokeUpdate(entry, options, state, motion, influence, force) {
   if (state.effect === 'SCALE' ? sizeProgress === (stroke.sizeProgress ?? 0) : progress === stroke.progress) return null;
   const totalRotation = new THREE.Quaternion().slerp(stroke.targetRotation || new THREE.Quaternion(), progress);
   const after = state.effect === 'SCALE' ? copyPlacement(stroke.instance)
-    : rotatedPlacement(entry, stroke.instance, stroke.frame || evaluatedInstanceFrame(stroke.instance, entry.shape, placementContext(entry).carriers, entry.settings), totalRotation);
+    : rotatedPlacement(entry, stroke.instance, stroke.frame || evaluatePlacement(entry, stroke.instance, placementContext(entry).carriers), totalRotation);
   const family = entry.familyScales || [stroke.instance.scale];
   const sizeRatio = state.effect === 'SCALE' ? clamp(1 + Number(options.sizeLimitPercent ?? 20) / 100 * sizeProgress,
     Math.max(...family.map(scale => INSTANCE_SCALE_MIN / scale)), Math.min(...family.map(scale => INSTANCE_SCALE_MAX / scale))) : 1;

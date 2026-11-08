@@ -12,11 +12,11 @@ export function triangleSquareDistance(a,b){
  for(let i=0;i<polygon.length;i++){const p=polygon[i],q=polygon[(i+1)%polygon.length];consider(p,q,0);consider(p,q,1);for(const [x,y]of [[p.x,q.x],[p.y,q.y],[p.x-p.y,q.x-q.y],[p.x+p.y,q.x+q.y]]){const t=-x/(y-x);if(t>0&&t<1)consider(p,q,t);}}
  return best;
 }
-export function strictUvCharts(mesh){
+export function strictUvCharts(mesh,{isolatedFaces=null,faceGroups=null}={}){
  const count=mesh.indices.length/3,parent=Int32Array.from({length:count},(_,i)=>i),edges=new Map(),positions=Array.from({length:mesh.pos.length/3},(_,i)=>Array.from(mesh.pos.subarray(i*3,i*3+3)).join(','));
  const find=i=>{while(parent[i]!==i){parent[i]=parent[parent[i]];i=parent[i];}return i;};
  for(let face=0;face<count;face++)for(let corner=0;corner<3;corner++){const a=mesh.indices[face*3+corner],b=mesh.indices[face*3+(corner+1)%3],pa=positions[a],pb=positions[b],key=pa<pb?pa+'|'+pb:pb+'|'+pa;let list=edges.get(key);if(!list)edges.set(key,list=[]);list.push({face,a,b,pa,pb});}
- for(const list of edges.values())if(list.length===2){const [a,b]=list;if(a.face!==b.face&&a.pa!==a.pb&&a.pa===b.pb&&a.pb===b.pa&&[0,1].every(k=>mesh.uv[a.a*2+k]===mesh.uv[b.b*2+k]&&mesh.uv[a.b*2+k]===mesh.uv[b.a*2+k]))parent[find(a.face)]=find(b.face);}
+ for(const list of edges.values())if(list.length===2){const [a,b]=list;if(!isolatedFaces?.has(a.face)&&!isolatedFaces?.has(b.face)&&(!faceGroups||faceGroups[a.face]===faceGroups[b.face])&&a.face!==b.face&&a.pa!==a.pb&&a.pa===b.pb&&a.pb===b.pa&&[0,1].every(k=>mesh.uv[a.a*2+k]===mesh.uv[b.b*2+k]&&mesh.uv[a.b*2+k]===mesh.uv[b.a*2+k]))parent[find(a.face)]=find(b.face);}
  const roots=new Map(),labels=new Int32Array(count);for(let face=0;face<count;face++){const root=find(face);if(!roots.has(root))roots.set(root,roots.size);labels[face]=roots.get(root);}return{labels,count:roots.size};
 }
 class Heap{constructor(){this.items=[];}push(value){const a=this.items;let i=a.length;a.push(value);while(i){const p=(i-1)>>1;if(a[p][0]<value[0]||a[p][0]===value[0]&&a[p][1]<=value[1])break;a[i]=a[p];i=p;}a[i]=value;}pop(){const a=this.items,value=a[0],last=a.pop();if(a.length){let i=0;while(i*2+1<a.length){let c=i*2+1;if(c+1<a.length&&(a[c+1][0]<a[c][0]||a[c+1][0]===a[c][0]&&a[c+1][1]<a[c][1]))c++;if(a[c][0]>last[0]||a[c][0]===last[0]&&a[c][1]>=last[1])break;a[i]=a[c];i=c;}a[i]=last;}return value;}get length(){return this.items.length;}}

@@ -1,5 +1,5 @@
 const fs=require('fs'),path=require('path'),assert=require('node:assert/strict');
-const {chromium}=require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {chromium}=require('playwright');
 (async()=>{
  const out=path.resolve('.runtime/assembly-groups');fs.mkdirSync(out,{recursive:true});const report={checks:[],errors:[]};
  const dir='assets/branch-asset-library',allMeta=fs.readdirSync(dir).filter(n=>n.endsWith('.meta.json')).map(n=>({file:n,...JSON.parse(fs.readFileSync(path.join(dir,n),'utf8').replace(/^\uFEFF/,''))})),meta=allMeta.filter(m=>m.name.includes('香樟')&&m.name.includes('短弯'));

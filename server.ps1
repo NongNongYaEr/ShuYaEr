@@ -203,13 +203,22 @@ function Get-PlantUnitPath {
 $script:AppearancePath = Join-Path $script:ConfigDir 'appearance.json'
 if ($env:BRANCHFORGE_SESSION_TEST_DIR) { $script:AppearancePath = Join-Path $script:SessionDir 'appearance.json' }
 
+function Confirm-ViewportLighting($Value) {
+    if ($null -eq $Value) { return [ordered]@{ preset = 'default'; angle = 0 } }
+    if (@('default','overcast','side','warm','studio') -cnotcontains [string]$Value.preset -or
+        [string]$Value.angle -notmatch '^\d{1,3}$' -or [int]$Value.angle -gt 360) {
+        throw '灯光预设或光向角度无效。'
+    }
+    return [ordered]@{ preset = [string]$Value.preset; angle = [int]$Value.angle }
+}
+
 function Confirm-AppearanceSettings($Value) {
     if (-not $Value -or @('graphite','cream','forest') -notcontains [string]$Value.palette -or
         [string]$Value.background -notmatch '^#[0-9a-fA-F]{6}$' -or [string]$Value.ground -notmatch '^#[0-9a-fA-F]{6}$') {
         throw '外观设置无效，请选择配色及完整颜色值。'
     }
     $modifiedAt = if ($null -eq $Value.modified_at) { 0 } else { if ([string]$Value.modified_at -notmatch '^\d{1,16}$') { throw '外观设置时间无效' }; [long]$Value.modified_at }
-    return [ordered]@{ palette = [string]$Value.palette; background = ([string]$Value.background).ToLowerInvariant(); ground = ([string]$Value.ground).ToLowerInvariant(); modified_at = $modifiedAt }
+    return [ordered]@{ palette = [string]$Value.palette; background = ([string]$Value.background).ToLowerInvariant(); ground = ([string]$Value.ground).ToLowerInvariant(); lighting = (Confirm-ViewportLighting $Value.lighting); modified_at = $modifiedAt }
 }
 
 $config = Load-Config
@@ -249,17 +258,20 @@ try {
             if ($path -eq '/api/appearance' -and $context.Request.HttpMethod -eq 'GET') {
                 $saved = Test-Path -LiteralPath $script:AppearancePath
                 $appearance = if ($saved) { Confirm-AppearanceSettings (Get-Content -LiteralPath $script:AppearancePath -Raw -Encoding UTF8 | ConvertFrom-Json) }
-                    else { [ordered]@{ palette = 'graphite'; background = '#0b100d'; ground = '#101711' } }
+                    else { Confirm-AppearanceSettings @{ palette = 'graphite'; background = '#0b100d'; ground = '#101711' } }
                 Send-Json $context @{ success = $true; saved = $saved; settings = $appearance }; continue
             }
             if ($path -eq '/api/appearance' -and $context.Request.HttpMethod -eq 'POST') {
-                try { $appearance = Confirm-AppearanceSettings (Read-RequestJson $context.Request) }
-                catch { Send-Json $context @{ success = $false; message = '外观设置无效，请选择配色及完整颜色值。' } 400; continue }
+                try { $body = Read-RequestJson $context.Request; $appearance = Confirm-AppearanceSettings $body }
+                catch { Send-Json $context @{ success = $false; message = '外观或灯光设置无效，请检查配色、颜色和光向。' } 400; continue }
                 if (Test-Path -LiteralPath $script:AppearancePath) {
                     $previousAppearance = $null
                     try { $previousAppearance = Get-Content -LiteralPath $script:AppearancePath -Raw -Encoding UTF8 | ConvertFrom-Json } catch {}
                     if ($previousAppearance -and [long]$previousAppearance.modified_at -gt [long]$appearance.modified_at) {
                         Send-Json $context @{ success = $false; message = '设置已有更新，旧的保存请求已取消；请重新调整后保存。' } 409; continue
+                    }
+                    if ($null -eq $body.lighting -and $previousAppearance.lighting) {
+                        try { $appearance.lighting = Confirm-ViewportLighting $previousAppearance.lighting } catch {}
                     }
                 }
                 $bytes = [Text.Encoding]::UTF8.GetBytes(($appearance | ConvertTo-Json -Compress))

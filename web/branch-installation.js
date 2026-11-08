@@ -9,6 +9,93 @@ import { applyLeafMaterial, waitForLeafTextures } from './leaf-resources.js';
 import { resolveSampleMaterial } from './sample-materials.js';
 import { assemblyBranchLimit } from './local-assembly-data.js';
 import {pickImportedTrunkAttachment} from './imported-trunk-picker.js';
+import {branchMountAt} from './branch-mount-frame.js';
+import {lineTangent,nearestParameter,sampleLine} from './tree-sculpt.js';
+
+function branchSurfaceTarget(hit,branch,attach,point,inverseWorld) {
+  const meshMatrix=hit.object.matrixWorld.clone();
+  if(hit.object.isInstancedMesh&&hit.instanceId!==undefined){
+    const instanceMatrix=new THREE.Matrix4();
+    hit.object.getMatrixAt(hit.instanceId,instanceMatrix);
+    meshMatrix.multiply(instanceMatrix);
+  }
+  meshMatrix.premultiply(inverseWorld);
+  const direction=hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(meshMatrix));
+  const surfaceDirection=direction.clone();
+  const position=point.clone(),center=sampleLine(branch.points,attach),tangent=lineTangent(branch.points,attach);
+  const mount=branchMountAt(branch,attach);
+  if(mount){
+    const inverse=mount.clone().invert();
+    position.applyMatrix4(inverse);center.applyMatrix4(inverse);
+    direction.transformDirection(inverse);tangent.transformDirection(inverse);
+  }
+  return {parent:branch.stableId,attach,trunk_anchor:null,
+    frame:{position:position.toArray(),direction:direction.toArray(),parent_tangent:tangent.toArray(),parent_position:center.toArray()},
+    surface_frame:{position:point,direction:surfaceDirection}};
+}
+
+export function pickBranchPlacementTarget(event,{canvas,camera,asset,authoring,ray,surface=false,cast}) {
+  if(!asset)return null;
+  const rect = canvas.getBoundingClientRect();
+  const x=(event.clientX-rect.left)/rect.width,y=(event.clientY-rect.top)/rect.height;
+  if(surface&&!(x>=0&&x<=1&&y>=0&&y<=1))return null;
+  camera.updateWorldMatrix(true,false);
+  ray.setFromCamera(new THREE.Vector2(x*2-1,1-y*2),camera);
+  return (cast||createBranchPlacementRaycast({asset,authoring,surface}))(ray);
+}
+
+export function createBranchPlacementRaycast({asset,authoring,surface=false}) {
+  const meshes=[];
+  const byStable=new Map(asset.masterBranches.map(branch=>[branch.stableId,branch]));
+  const byId=new Map(asset.masterBranches.map(branch=>[branch.id,branch]));
+  const indexed=new Map();
+  let unindexed=null;
+  asset.group.updateWorldMatrix(true,true);
+  asset.group.traverseVisible(o=>{if(o.isMesh&&(o.userData.category==='branch'||surface&&o.userData.category==='junction'))meshes.push(o);});
+  const inverseWorld=asset.group.matrixWorld.clone().invert();
+  function carrierMeshes(carrier){
+    if(!unindexed){
+      unindexed=[];
+      const mounts=new Map(authoring?.imported_trunks?.mounts?.map(mount=>[mount.id,Object.values(mount.guide_map)])||[]);
+      for(const mesh of meshes){
+        const data=mesh.userData,bindings=mesh.isInstancedMesh?asset.editPreviewBindings?.(mesh)?.instances:null;
+        const owners=data.imported_trunk?mounts.get(data.trunk_mount_id)
+          :bindings?bindings.map(binding=>binding.stableId||binding.object().userData.stable_id)
+          :[data.stable_id||byId.get(data.branch_id)?.stableId];
+        if(!owners?.length||owners.some(id=>!id)){unindexed.push(mesh);continue;}
+        for(const id of new Set(owners)){
+          if(!indexed.has(id))indexed.set(id,[]);
+          indexed.get(id).push(mesh);
+        }
+      }
+    }
+    const candidates=indexed.get(carrier.stableId)||[];
+    return unindexed.length?[...candidates,...unindexed]:candidates;
+  }
+  return (ray,{carrier,nearPoint}={})=>{
+    const hits=ray.intersectObjects(carrier?carrierMeshes(carrier):meshes,false);
+    if(nearPoint)hits.sort((a,b)=>a.point.distanceToSquared(nearPoint)-b.point.distanceToSquared(nearPoint));
+    for(const hit of hits){
+      if(hit.object.userData.imported_trunk){
+        if(carrier&&!carrier.importedTrunkHost)continue;
+        const target=pickImportedTrunkAttachment(asset,authoring,hit);
+        if(!carrier||target?.parent===carrier.stableId)return target;
+        continue;
+      }
+      const data=hit.object.userData;
+      const descriptor=hit.object.isInstancedMesh&&asset.editPreviewBindings?.(hit.object)?.instances?.[hit.instanceId];
+      const branchData=descriptor?.object().userData||data;
+      const branch=branchData.stable_id?byStable.get(branchData.stable_id):byId.get(branchData.branch_id);
+      if(carrier&&branch!==carrier)continue;
+      if(!branch){if(surface)return null;continue;}
+      if(surface&&branch.importedTrunkHost)return null;
+      const point=hit.point.clone().applyMatrix4(inverseWorld),t=nearestParameter(branch.points,point);
+      if(surface)return branchSurfaceTarget(hit,branch,t,point,inverseWorld);
+      return {parent:branch.stableId,attach:THREE.MathUtils.clamp(t,.02,.98),trunk_anchor:null,frame:null,surface_frame:null};
+    }
+    return null;
+  };
+}
 
 export function createBranchInstallation(api) {
   const { canvas, camera, modelRoot } = api; const ray = new THREE.Raycaster(); const ghostRoot = new THREE.Group(); ghostRoot.name = 'BranchPlacementPreview'; modelRoot.add(ghostRoot);
@@ -18,14 +105,7 @@ export function createBranchInstallation(api) {
   let pending = null, ghost = null, timer = null, generation = 0, committing = false, sourceGeometries=[];
   function clearGhost() { if (ghost) { ghostRoot.remove(ghost.group); disposeBranchAsset(ghost); ghost = null; }sourceGeometries.forEach(g=>g.dispose());sourceGeometries=[]; }
   function cancel() { if (!pending) return false; pending = null; generation++; clearTimeout(timer); timer = null; clearGhost(); bar.hidden = true; document.body.classList.remove('branch-placement-active'); return true; }
-  function hit(event) {
-    const rect = canvas.getBoundingClientRect(); ray.setFromCamera(new THREE.Vector2((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1), camera);
-    const asset=api.getAsset(),meshes=[],batches=new Map();asset?.group.updateWorldMatrix(true,true);asset?.group.traverse((o) => { if (o.isMesh && o.visible && o.userData.category === 'branch') {meshes.push(o);const binding=asset.editPreviewBindings?.(o);if(binding?.instances)batches.set(o,binding.instances);} });
-    let result,branch;for(const hit of ray.intersectObjects(meshes,false)){if(hit.object.userData.imported_trunk)return pickImportedTrunkAttachment(asset,api.getAuthoring(),hit);const descriptor=batches.get(hit.object)?.[hit.instanceId],id=descriptor?.object().userData.stable_id||hit.object.userData.stable_id;const candidate=asset.masterBranches.find(b=>b.stableId===id);if(candidate){result=hit;branch=candidate;break;}}if(!branch)return null;
-    const point = asset.group.worldToLocal(result.point.clone()); let closest = 0, distance = Infinity;
-    for (let i = 0; i < branch.points.length - 1; i++) { const a = branch.points[i], b = branch.points[i + 1]; const d = b.clone().sub(a); const t = Math.max(0, Math.min(1, point.clone().sub(a).dot(d) / Math.max(1e-12, d.lengthSq()))); const error = a.clone().addScaledVector(d, t).distanceToSquared(point); if (error < distance) { distance = error; closest = (i + t) / (branch.points.length - 1); } }
-    return { parent: branch.stableId, attach: Math.max(0.02, Math.min(0.98, closest)),trunk_anchor:null,frame:null,surface_frame:null };
-  }
+  const hit = event => pickBranchPlacementTarget(event,{canvas,camera,ray,asset:api.getAsset(),authoring:api.getAuthoring()});
   function values() {
     const result = { ...api.values(), attach: pending.attach };
     if(pending.trunk_anchor){result.trunk_anchor=pending.trunk_anchor;result.frame=pending.frame;}

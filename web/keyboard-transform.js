@@ -51,7 +51,7 @@ export function bindKeyboardTransform({ canvas, camera, modelRoot, controls, sta
     if(result?.amount!==undefined)delta.amount=result.amount;
     const label = { translate: 'G 移动', rotate: 'R 旋转', scale: 'S 缩放', radius: 'Alt+S 粗细' }[active.mode];
     const axis = active.adapter.axisLabel || (active.adapter.alongBranch ? '吸附枝干 '+(result?.carrier||'') : active.mode === 'scale' && active.adapter.uniform ? '等比' : active.axis || (active.mode === 'translate' ? '视图平面' : active.mode === 'rotate' ? '视图轴' : '等比'));
-    hud.textContent = `${label} · ${active.adapter.label} · ${axis} · ${active.mode==='scale'||active.adapter.alongBranch?delta.amount.toFixed(3):active.numeric || delta.amount.toFixed(3)}${active.mode === 'translate' ? ' m' : active.mode === 'rotate' ? '°' : ' 倍'}\n移动鼠标或输入数值 · ${active.adapter.hint || (active.adapter.alongBranch?'拖到目标枝干切换挂接 / 数值沿原枝':'X/Y/Z 约束轴')} · 左键/Enter 确认 · 右键/Esc 取消${active.mode==='scale' && active.adapter.uniform ? '\n叶花果保持单元比例，S 只做等比缩放。' : ''}`;
+    hud.textContent = `${label} · ${active.adapter.label} · ${axis} · ${active.mode==='scale'||active.adapter.alongBranch?delta.amount.toFixed(3):active.numeric || delta.amount.toFixed(3)}${active.mode === 'translate' ? ' m' : active.mode === 'rotate' ? '°' : ' 倍'}\n移动鼠标或输入数值 · ${active.adapter.hint || (active.adapter.alongBranch?'拖到目标枝干切换挂接 / 数值沿原枝':'X/Y/Z 约束轴')} · 左键/Enter 确认 · 右键/Esc 取消${active.mode==='scale' && active.adapter.uniform ? '\n'+(active.adapter.uniformHint || '叶花果保持单元比例，S 只做等比缩放。') : ''}`;
     hud.style.left = bounds.left + 24 + 'px'; hud.style.top = bounds.bottom - 112 + 'px'; hud.hidden = false;
   }
   function finish(commit) {

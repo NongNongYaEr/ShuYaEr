@@ -6,10 +6,14 @@ import {createGlbRig} from './glb-rig.js';
 // The caller supplies a dedicated complete export asset, not the live editor.
 // Geometry is copied in its final pose before weights are attached. No sweep,
 // source material edits, bind-pose rebuild or PVE schema changes occur here.
-export function createSkinnedGlbScene(asset,{connector=null,maxBones=4096}={}){
+export function createSkinnedGlbScene(asset,{connector=null,maxBones=4096,floorZ=0}={}){
  if(asset.group.userData.pending_rebuild)throw Error('请等待当前模型生成完成后再导出');
  if(asset.isInstancedAssembly)throw Error('骨骼导出需要完整导出网格，请先展开导出副本');
- asset.group.updateWorldMatrix(true,true);const frame=connector?pveGlbMatrix(connector):new T.Matrix4().makeRotationX(-Math.PI/2),inverseGroup=asset.group.matrixWorld.clone().invert(),rig=createGlbRig(asset,frame.clone().multiply(asset.group.matrixWorld),{maxBones}),scene=new T.Scene(),geometries=[],chunks=[],materials=[],groups=[];let merged=null,offset=0,displayColor=false;
+ asset.group.updateWorldMatrix(true,true);
+ const frame=connector?pveGlbMatrix(connector):new T.Matrix4().makeRotationX(-Math.PI/2);
+ // Apply the common floor offset before binding, so the pot and bind pose share an origin.
+ if(floorZ)frame.premultiply(new T.Matrix4().makeTranslation(0,-floorZ,0));
+ const inverseGroup=asset.group.matrixWorld.clone().invert(),rig=createGlbRig(asset,frame.clone().multiply(asset.group.matrixWorld),{maxBones}),scene=new T.Scene(),geometries=[],chunks=[],materials=[],groups=[];let merged=null,offset=0,displayColor=false;
  scene.name=asset.group.name;scene.add(rig.root);const position=new T.Vector3();
  try{asset.group.traverseVisible(object=>{if(!object.isMesh)return;if(object.isSkinnedMesh||object.isInstancedMesh||object.geometry.morphAttributes.position?.length)throw Error('骨骼导出副本含未展开的变形或实例网格');
   const src=object.geometry,attributes=src.attributes,count=attributes.position?.count;if(!count)return;const g=src.clone(),global=new T.Matrix4().multiplyMatrices(frame,object.matrixWorld);geometries.push(g);

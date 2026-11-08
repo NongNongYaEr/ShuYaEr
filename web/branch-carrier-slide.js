@@ -6,16 +6,35 @@ import { cloneAxis } from './branch-axis.js';
 import {pickImportedTrunkAttachment,pickImportedTrunkCarrier} from './imported-trunk-picker.js';
 import {evaluateTrunkAttachment} from './imported-trunk-attachments.js';
 
+export function createBranchSlideScreen(branches,{camera,modelRoot,bounds}) {
+  const projection=camera.projectionMatrix.clone().multiply(camera.matrixWorldInverse).multiply(modelRoot.matrixWorld);
+  const project=p=>{const v=new THREE.Vector4(p.x,p.y,p.z,1).applyMatrix4(projection);return {x:bounds.left+(v.x/v.w+1)*bounds.width/2,y:bounds.top+(1-v.y/v.w)*bounds.height/2,z:v.z/v.w,w:v.w};};
+  // Preserve explicit curve times so screen picking and the evaluated attachment agree.
+  const paths=branches.filter(b=>b.points.length>1).map(parent=>({parent,path:cloneAxis(parent.points,project)}));
+  function pick(x,y,carrier,originalParent,originalT){
+    let current=null,original=null,nearest=null;
+    for(const {parent,path} of paths){
+      const attach=projectedMountParameter(path,x,y,parent===originalParent?originalT:.5),p=project(sampleLine(parent.points,attach));
+      const gap=p.w>0&&Math.abs(p.z)<=1?Math.hypot(p.x-x,p.y-y):Infinity;
+      const candidate={parent,attach,gap};
+      if(parent===carrier)current=candidate;
+      if(parent===originalParent)original=candidate;
+      if(!nearest||gap<nearest.gap)nearest=candidate;
+    }
+    const chosen=current||original;
+    if(nearest?.gap<=16&&(!chosen||nearest.gap+4<chosen.gap))return nearest;
+    return chosen;
+  }
+  return {project,pick};
+}
+
 // Attachment parameters remain polyline parameters, matching existing PVE data.
 export function createBranchCarrierSlide(branches, root, {camera, modelRoot, bounds, excludeSubtree=true,asset=null,authoring=null}) {
   const parent=branches.find(b=>b.id===root.parentId), family=excludeSubtree?descendants(branches,new Set([root.stableId])):new Set();
   if(!parent)return null;
-  const projection=camera.projectionMatrix.clone().multiply(camera.matrixWorldInverse).multiply(modelRoot.matrixWorld);
-  const project=p=>{const v=new THREE.Vector4(p.x,p.y,p.z,1).applyMatrix4(projection);return {x:bounds.left+(v.x/v.w+1)*bounds.width/2,y:bounds.top+(1-v.y/v.w)*bounds.height/2,z:v.z/v.w,w:v.w};};
+  const carriers=branches.filter(b=>!family.has(b.stableId)&&!b.unitOwner&&!b.instanceId&&!b.symmetryGroup);
+  const {project,pick}=createBranchSlideScreen(carriers,{camera,modelRoot,bounds});
   const anchor=project(root.trunkCarrierAnchor?root.points[0]:sampleLine(parent.points,root.parentT));
-  // Local subdivisions have explicit parameter times. Screen picking must keep
-  // them so its attachment is sampled at the same visible location afterwards.
-  const carriers=branches.filter(b=>!family.has(b.stableId)&&!b.unitOwner&&!b.instanceId&&!b.symmetryGroup&&b.points.length>1).map(b=>({b,path:cloneAxis(b.points,project)}));
   let carrier=parent;
   const ray=new THREE.Raycaster(),meshes=[];if(asset&&authoring)asset.group.traverse(o=>{if(o.isMesh&&o.visible&&o.userData.imported_trunk)meshes.push(o);});
   const originalInstance=authoring?.branch_instances?.find(i=>i.id===root.instanceId),anchorBinding=originalInstance?.trunk_anchor||root.trunkCarrierAnchor;
@@ -28,11 +47,8 @@ export function createBranchCarrierSlide(branches, root, {camera, modelRoot, bou
     if(n!==null||Math.hypot(dx,dy)<2){carrier=parent;return {parent,attach:n===null?root.parentT:slideMountParameter(parent.points,root.parentT,n)};}
     const x=anchor.x+dx,y=anchor.y+dy;
     if(meshes.length){ray.setFromCamera(new THREE.Vector2((x-bounds.left)/bounds.width*2-1,1-(y-bounds.top)/bounds.height*2),camera);const hit=ray.intersectObjects(meshes,false)[0];if(hit){const target=(root.instanceId||root.unitOwner?pickImportedTrunkAttachment:pickImportedTrunkCarrier)(asset,authoring,hit),branch=branches.find(b=>b.stableId===target?.parent);if(branch)return {...target,parent:branch,distance:0};}}
-    const candidates=carriers.map(({b,path})=>{const attach=projectedMountParameter(path,x,y,b===parent?root.parentT:.5),p=project(sampleLine(b.points,attach));return {parent:b,attach,gap:p.w>0&&Math.abs(p.z)<=1?Math.hypot(p.x-x,p.y-y):Infinity};});
-    let chosen=candidates.find(c=>c.parent===carrier)||candidates.find(c=>c.parent===parent);
-    const nearest=candidates.reduce((a,b)=>b.gap<a.gap?b:a,chosen);
-    if(nearest.gap<=16&&nearest.gap+4<chosen.gap)chosen=nearest;
-    if(anchorBinding&&authoring.imported_trunks.mounts.some(m=>Object.values(m.guide_map).includes(chosen.parent.stableId)))return {parent,attach:root.parentT,distance:0,blocked:true};
+    const chosen=pick(x,y,carrier,parent,root.parentT);
+    if(!chosen||anchorBinding&&authoring?.imported_trunks?.mounts.some(m=>Object.values(m.guide_map).includes(chosen.parent.stableId)))return {parent,attach:root.parentT,distance:0,blocked:true};
     carrier=chosen.parent;
     return {...chosen,distance:mountDistanceAt(carrier.points,chosen.attach)-(carrier===parent?mountDistanceAt(parent.points,root.parentT):0)};
   };

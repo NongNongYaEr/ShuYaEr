@@ -1,4 +1,5 @@
 import { normalizeTrunkForms } from './trunk-form.js';
+import { equalData } from './branch-workbench-data.js';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
@@ -477,30 +478,25 @@ export function expandVariantMatrix(matrix, limit = 64) {
   return variants.slice(0, Math.max(1, limit));
 }
 
-export function compileGenerationPlan(previous, next) {
+export function compileGenerationPlan(previous, next, {includeKey = true} = {}) {
   const previousSettings = previous?.settings || {};
   const nextSettings = next?.settings || {};
   const previousAuthoring = previous?.authoring || {};
   const nextAuthoring = next?.authoring || {};
   const materialKeys = ['bark_color', 'leaf_color', 'autumn_color', 'bud_color', 'fruit_color', 'wind_strength'];
   const foliageKeys = ['leaf_density', 'leaf_scale', 'leaf_loss', 'foliage_mode', 'cluster_leaf_count', 'leaf_min_spacing'];
-  const changedSettings = Object.keys({ ...previousSettings, ...nextSettings }).filter((key) => stableStringify(previousSettings[key]) !== stableStringify(nextSettings[key]));
+  const changedSettings = Object.keys({ ...previousSettings, ...nextSettings }).filter((key) => !equalData(previousSettings[key], nextSettings[key]));
   const foliageAuthoring = ['attachment_layers', 'leaf_edits', 'foliage_masks', 'foliage_range'];
   const interfaceAuthoring = ['selection_sets', 'active_sculpt_layer', 'recipe', 'quality', 'workbench'];
-  const changedAuthoring = Object.keys({ ...previousAuthoring, ...nextAuthoring }).filter((key) => stableStringify(previousAuthoring[key]) !== stableStringify(nextAuthoring[key]));
+  const changedAuthoring = Object.keys({ ...previousAuthoring, ...nextAuthoring }).filter((key) => !equalData(previousAuthoring[key], nextAuthoring[key]));
   const topologyChanged = changedAuthoring.some((key) => !foliageAuthoring.includes(key) && !interfaceAuthoring.includes(key))
-    || stableStringify(previousAuthoring.workbench?.skeleton_thickness) !== stableStringify(nextAuthoring.workbench?.skeleton_thickness)
-    || stableStringify(normalizeTrunkForms(previousAuthoring.workbench?.trunk_forms)) !== stableStringify(normalizeTrunkForms(nextAuthoring.workbench?.trunk_forms))
-    || stableStringify(previousAuthoring.workbench?.procedural_growth) !== stableStringify(nextAuthoring.workbench?.procedural_growth)
-    || fingerprint(previousAuthoring.overrides || {}) !== fingerprint(nextAuthoring.overrides || {})
-    || fingerprint(previousAuthoring.topology || {}) !== fingerprint(nextAuthoring.topology || {})
+    || !equalData(previousAuthoring.workbench?.skeleton_thickness, nextAuthoring.workbench?.skeleton_thickness)
+    || !equalData(normalizeTrunkForms(previousAuthoring.workbench?.trunk_forms), normalizeTrunkForms(nextAuthoring.workbench?.trunk_forms))
+    || !equalData(previousAuthoring.workbench?.procedural_growth, nextAuthoring.workbench?.procedural_growth)
     || changedSettings.some((key) => !materialKeys.includes(key) && !foliageKeys.includes(key));
-  const foliageChanged = stableStringify(previous?.leaf_sources) !== stableStringify(next?.leaf_sources)
+  const foliageChanged = !equalData(previous?.leaf_sources, next?.leaf_sources)
     || changedAuthoring.some((key) => foliageAuthoring.includes(key))
-    || fingerprint(previousAuthoring.attachment_layers || {}) !== fingerprint(nextAuthoring.attachment_layers || {})
-    || fingerprint(previousAuthoring.leaf_edits || {}) !== fingerprint(nextAuthoring.leaf_edits || {})
-    || fingerprint(previousAuthoring.foliage_masks || {}) !== fingerprint(nextAuthoring.foliage_masks || {})
     || changedSettings.some((key) => foliageKeys.includes(key));
   const scope = !previous ? 'FULL' : topologyChanged ? 'TOPOLOGY' : foliageChanged ? 'FOLIAGE' : changedSettings.length ? 'MATERIAL' : 'NONE';
-  return { scope, key: fingerprint(next), changed_settings: changedSettings };
+  return { scope, ...(includeKey ? {key:fingerprint(next)} : {}), changed_settings: changedSettings };
 }

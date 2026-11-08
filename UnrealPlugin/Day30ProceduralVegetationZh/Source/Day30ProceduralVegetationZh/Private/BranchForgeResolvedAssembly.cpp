@@ -104,11 +104,25 @@ bool BuildBranchForgeResolvedAssembly(const FManagedArrayCollection& Input,
 	TArray<int32> SharedModes; SharedModes.Init(0, Names.Num());
 	TArray<FPVFoliageInfo> SharedInfos = InputFoliage.GetFoliageInfos();
 	int32 NumSharedParts = 0;
+	const auto& Sources = Root->GetArrayField(TEXT("sources"));
+	for (int32 S = 0; S < Names.Num(); ++S)
+	{
+		bool bMeshUnit = false;
+		if (!Sources[S]->AsObject()->TryGetBoolField(TEXT("mesh_unit"), bMeshUnit) || !bMeshUnit || Replaced[S]) continue;
+		if (!SharedInfos.IsValidIndex(S) || !SharedInfos[S].Mesh.LoadSynchronous())
+		{
+			Error = TEXT("完整网格单元缺少原材质 StaticMesh 绑定"); return false;
+		}
+		// The canonical source is already the complete immutable mesh. Native
+		// foliage placement retains its UVs/slots and uses one rigid host pose.
+		SharedModes[S] = 2;
+		++NumSharedParts;
+	}
 	if (Settings.bUseSharedAssembly && Settings.SharedBinaryHash.Equals(Hash.ToString(), ESearchCase::IgnoreCase))
 	{
 		for (int32 S = 0; S < Names.Num(); ++S)
 		{
-			if (Replaced[S] || !Settings.SharedPartModes.IsValidIndex(S) || !Settings.SharedPartMeshes.IsValidIndex(S) ||
+			if (Replaced[S] || SharedModes[S] || !Settings.SharedPartModes.IsValidIndex(S) || !Settings.SharedPartMeshes.IsValidIndex(S) ||
 				Settings.SharedPartModes[S] < 1 || Settings.SharedPartModes[S] > 2 || !Settings.SharedPartMeshes[S].LoadSynchronous()) continue;
 			SharedModes[S] = Settings.SharedPartModes[S];
 			SharedInfos[S].Mesh = Settings.SharedPartMeshes[S]; ++NumSharedParts;

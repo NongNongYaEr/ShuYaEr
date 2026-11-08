@@ -1,5 +1,5 @@
 const fs=require('fs'),path=require('path'),assert=require('node:assert/strict');
-const {chromium}=require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {chromium}=require('playwright');
 (async()=>{
  const out=path.resolve('.runtime/sculpt-brush-workflow');fs.mkdirSync(out,{recursive:true});const report={checks:[],errors:[]};
  const shape=(id,parent,points)=>({id,parent,points,length:3,start_radius:.05,end_radius:.02});

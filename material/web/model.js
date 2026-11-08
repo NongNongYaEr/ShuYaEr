@@ -91,3 +91,5 @@ export async function parseGLB(buffer,name) {
   const repairHistory=doc.extras?.treeMaterialLab?.geometryRepair,geometryRepairHistory=repairHistory?.version===1&&repairHistory.method==='remove-exact-zero-area-faces-v1'&&Number.isInteger(repairHistory.removedFaces)&&repairHistory.removedFaces>0&&/^[a-f0-9]{64}$/.test(repairHistory.originalSHA256||'')?repairHistory:null;
   return {pos,normal,uv,sourceUV,tangent,indices,min,max,height,name,original,originalFactor,originalSampler,geometryRepairHistory,requiresPairedMesh:requiresPairedMesh||!!normalRepair?.correctedVertices||!!geometryRepairHistory,...(normalRepair?{normalRepair}:{}),extraAttributes,sourceBytes:buffer.slice(0),hasSourceUV:p.attributes.TEXCOORD_0!=null,hasSourceColorUV,badUV:bad,ao:new Float32Array(pos.length/3).fill(1),sourceSHA256:await digest(buffer),uvSHA256,sourceUvSHA256:uvSHA256,sourceIndices:Uint32Array.from({length:pos.length/3},(_,i)=>i)};
 }
+
+export {mul as multiplyNodeMatrices,nodeMatrix,repairInvalidNormals};

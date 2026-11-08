@@ -1,5 +1,5 @@
 const fs = require('fs'), path = require('path'), assert = require('node:assert/strict'), crypto = require('crypto');
-const { chromium } = require(process.env.BRANCHFORGE_PLAYWRIGHT || 'C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const { chromium } = require(process.env.BRANCHFORGE_PLAYWRIGHT || 'playwright');
 
 (async () => {
   const out = path.resolve('.runtime/trunk-section-points'); fs.mkdirSync(out, { recursive: true });

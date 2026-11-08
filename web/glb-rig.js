@@ -20,6 +20,14 @@ export function createGlbRig(asset,frame,{maxBones=4096}={}){
  if(!structural.length&&!index.roots.size)throw Error('当前模型没有可用的枝干骨架，请先完成树干整理');
  const root=new T.Bone();root.name='Tree_Root';root.userData={kind:'plant_root'};
  const bones=[root],points=[new T.Vector3()],chains=new Map(),units=new Map(),required=new Map(structural.map(b=>[b.stableId,new Set([0,1,...adaptiveTimes(b)])])),building=new Set();
+ const attachments=new Map(),meshUnitInstances=new Map((asset.authoring.mesh_units?.instances||[]).map(i=>[i.id,i]));
+ for(const group of asset.meshUnitExportRoot?.children||[]){
+  const instance=meshUnitInstances.get(group.userData.mesh_unit_id),parent=index.byBranch.get(instance?.parent);
+  if(!parent)throw Error('叶花果装配缺少承重骨架：'+group.name);
+  const t=clamp(instance.attach);
+  required.get(parent.stableId)?.add(t);
+  attachments.set(instance.id,{parent,t});
+ }
  const trunkCache=new Map();
  function trunk(key){if(trunkCache.has(key))return trunkCache.get(key);const mount=asset.authoring.imported_trunks?.mounts.find(m=>m.id===key),model=asset.authoring.imported_trunks?.assets.find(a=>a.id===mount?.asset_id);if(!mount||!model)throw Error('雕刻树干绑定来源缺失');const pose=createTrunkPose(model,mount,branches),result={mount,source:pose.source};trunkCache.set(key,result);return result;}
  function add(parent,name,point,data){if(bones.length>=Math.min(65535,maxBones))throw Error(`骨骼数量超过 ${maxBones}，请减少装配数量或拆分植物后导出`);const bone=new T.Bone(),position=point.clone().applyMatrix4(frame),parentIndex=bones.indexOf(parent);bone.name=name.replace(/[^A-Za-z0-9_.-]/g,'_').slice(0,110);bone.position.copy(position).sub(points[parentIndex]);bone.userData=data;parent.add(bone);points.push(position);bones.push(bone);return {bone,index:bones.length-1};}
@@ -49,6 +57,11 @@ export function createGlbRig(asset,frame,{maxBones=4096}={}){
   const instance=index.byInstance.get(id),record=add(parentBone,'Unit_'+String(bones.length).padStart(4,'0')+'_'+id,branch.points[0],{kind:'complete_unit',instance_id:id,asset_id:instance?.asset_id||branch.sourceAssetId||'',revision:instance?.pinned_revision||0});units.set(id,record);building.delete(key);return record;
  }
  for(const id of index.roots.keys())unitFor(id);
+ const attachmentJoints=new Map();
+ for(const [id,{parent,t}] of attachments){
+  const owner=index.ownerOf(parent.stableId);
+  attachmentJoints.set(id,owner?unitFor(owner.id).index:stationRecord(parent.stableId,t).index);
+ }
  function weights(id,t,{blend=true}={}){const owner=index.ownerOf(id);if(owner&&units.has(owner.id))return [{index:units.get(owner.id).index,weight:1}];const branch=byStable.get(id);if(!branch)throw Error('网格缺少有效枝干归属：'+id);const result=pair(id,t),parent=byRuntime.get(branch.parentId);
   if(blend&&parent&&chains.has(parent.stableId)){const distance=t*Math.max(.001,branch.length),length=Math.min(branch.length*.3,Math.max(.03,branch.startRadius*2)),amount=clamp(distance/Math.max(.001,length));if(amount<1){for(const v of result)v.weight*=amount;result.push({index:bones.indexOf(station(parent.stableId,clamp(branch.parentT))),weight:1-amount});}}
   const combined=new Map();for(const v of result)if(v.weight>1e-10)combined.set(v.index,(combined.get(v.index)||0)+v.weight);return [...combined].map(([index,weight])=>({index,weight}));
@@ -59,6 +72,11 @@ export function createGlbRig(asset,frame,{maxBones=4096}={}){
   if(!e)return null;const owner=index.ownerOf(e.id),branch=index.byBranch.get(e.id);if(!branch)return null;const result=owner?{unit:owner.id}:{branch:e.id,rigid:origin?.type!=='BRANCH',t:nearestParameter(branch.points,new T.Vector3(...(origin?.pivot||e.pivot)))};elementCache.set(indexValue,result);return result;
  }
  function vertex(object,n,localPosition){const data=object.userData;
+  if(data.mesh_unit_instance){
+   const index=attachmentJoints.get(data.mesh_unit_instance);
+   if(index===undefined)throw Error('叶花果网格缺少挂接骨骼：'+object.name);
+   return [{index,weight:1}];
+  }
   if(data.imported_trunk){
    const {mount,source}=trunk(data.trunk_mount_id),primitive=source.primitives.find(p=>p.id===data.trunk_primitive_id),sourceIndex=data.trunk_source_vertices?.[n];
    if(!primitive||sourceIndex===undefined)throw Error('雕刻树干源顶点映射丢失');
@@ -74,5 +92,5 @@ export function createGlbRig(asset,frame,{maxBones=4096}={}){
   if(target?.rigid){const chain=chains.get(branch.stableId),choice=[...chain].reverse().find(p=>p.t<=target.t+1e-8)||chain[0];return [{index:choice.index,weight:1}];}
   return weights(branch.stableId,nearestParameter(branch.points,localPosition));
  }
- return {root,bones,chains,units,index,vertex,weights,report:{bones:bones.length,carrier_chains:chains.size,complete_units:units.size,max_influences:4,animation:false}};
+ return {root,bones,chains,units,index,vertex,weights,report:{bones:bones.length,carrier_chains:chains.size,complete_units:units.size,mesh_attachments:attachmentJoints.size,max_influences:4,animation:false}};
 }

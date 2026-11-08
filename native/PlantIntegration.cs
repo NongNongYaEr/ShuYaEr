@@ -18,6 +18,7 @@ namespace BranchGeneratorFBXTool {
      try{if(handle!=IntPtr.Zero)BFViewportDestroy(handle);}
      finally{StopPlantServer();}
     });
+    await nativeCompatibilityRelease;
    }finally{
     if(sharedBuffer!=null){sharedBuffer.Dispose();sharedBuffer=null;}
     Close();

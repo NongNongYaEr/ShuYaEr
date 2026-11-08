@@ -1,11 +1,14 @@
 // Boundary-pinned local conformal solve. Existing UV cuts remain separate;
 // only real patch/host source edges are welded. Outside UV nodes are exact pins.
 const sub=(a,b)=>a.map((v,k)=>v-b[k]),dot=(a,b)=>a.reduce((s,v,k)=>s+v*b[k],0),cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
-export function solvePinnedUvPatch(mesh,topology,uv,owner,host,patch,localFaces,height){
+export function solvePinnedUvPatch(mesh,topology,uv,owner,host,patch,localFaces,height,weldEdges=null){
  const selected=new Set(localFaces),faceMap=new Map(localFaces.map((f,i)=>[f,i])),keys=new Map(),nodes=[],corners=[],key=(f,c)=>owner[f]+':'+topology.vertices[mesh.indices[f*3+c]]+':'+uv[f*6+c*2]+':'+uv[f*6+c*2+1];
  for(const f of localFaces)for(let c=0;c<3;c++){const k=key(f,c);if(!keys.has(k)){keys.set(k,nodes.length);nodes.push({p:[uv[f*6+c*2],uv[f*6+c*2+1]],point:Array.from(mesh.pos.subarray(mesh.indices[f*3+c]*3,mesh.indices[f*3+c]*3+3),v=>v/height)});}corners.push(keys.get(k));}
  const parent=Int32Array.from({length:nodes.length},(_,i)=>i),find=i=>{while(parent[i]!==i){parent[i]=parent[parent[i]];i=parent[i];}return i;};
- for(const f of patch.faces)for(const h of topology.neighbors[f])if(owner[h.face]===host.id&&selected.has(h.face)){const e=topology.edges[h.edge],[a,b]=e.halves;for(const[ca,cb]of [[a.edge,(b.edge+1)%3],[(a.edge+1)%3,b.edge]])parent[find(corners[faceMap.get(a.face)*3+ca])]=find(corners[faceMap.get(b.face)*3+cb]);}
+ const edges=weldEdges??patch.faces.flatMap(f=>topology.neighbors[f]
+  .filter(h=>owner[h.face]===host.id&&selected.has(h.face)).map(h=>topology.edges[h.edge]));
+ for(const {halves:[a,b]} of edges)for(const [ca,cb] of [[a.edge,(b.edge+1)%3],[(a.edge+1)%3,b.edge]])
+  parent[find(corners[faceMap.get(a.face)*3+ca])]=find(corners[faceMap.get(b.face)*3+cb]);
  const fixed=new Map();for(const f of host.faces)if(!selected.has(f))for(let c=0;c<3;c++){const id=keys.get(key(f,c));if(id==null)continue;const root=find(id),p=[uv[f*6+c*2],uv[f*6+c*2+1]];if(fixed.has(root)&&fixed.get(root).some((v,k)=>v!==p[k]))return{ok:false,reason:'pin-conflict'};fixed.set(root,p);}
  const roots=[...new Set(corners.map(find))],free=roots.filter(id=>!fixed.has(id)),freeIndex=new Map(free.map((id,i)=>[id,i])),size=free.length*2;if(fixed.size<2)return{ok:false,reason:'missing-pins'};if(size>256)return{ok:false,reason:'node-budget'};
  const center=[0,0];for(const p of fixed.values())for(let k=0;k<2;k++)center[k]+=p[k]/fixed.size;let orientation=0;for(const f of host.faces.slice(0,1)){const i=f*6;orientation=Math.sign((uv[i+2]-uv[i])*(uv[i+5]-uv[i+1])-(uv[i+3]-uv[i+1])*(uv[i+4]-uv[i]));}if(!orientation)return{ok:false,reason:'orientation'};

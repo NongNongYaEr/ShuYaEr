@@ -36,10 +36,12 @@ def _check_bridge():
 
 def check_package(json_path, target_root, contract=None):
     from branchforge_pve_package import _empty_root
+    from branchforge_pve_importer import check_mesh_unit_bridge
     contract = contract or read_contract(json_path)
     if not contract.get('imported_trunk'):
         raise ContractError('请选择 V3 树干完整包')
     _empty_root(target_root.rstrip('/')); _check_bridge()
+    check_mesh_unit_bridge(contract)
     return contract, contract['dependency_files'], contract.get('warnings', [])
 
 
@@ -132,6 +134,24 @@ def create_from_package(json_path, target_root, *, open_editor=True):
         if len(parts) != len(contract['source_ids']):
             raise RuntimeError('完整单元枝源数量不一致')
         modes = list(preview.get_editor_property('shared_part_modes'))
+        if copied.get('mesh_unit_ids'):
+            tasks = []
+            for i, unit in enumerate(copied['manifest']['units']):
+                if not unit.get('mesh_unit'):
+                    continue
+                task = unreal.AssetImportTask()
+                task.filename = str(stage / unit['glb'])
+                task.destination_path = folder + '/Branches'
+                task.automated, task.save, task.replace_existing = True, True, False
+                tasks.append((i, task))
+            tools.import_asset_tasks([task for _, task in tasks])
+            for i, task in tasks:
+                meshes = [obj for obj in task.get_objects() if obj.get_class().get_name() == 'StaticMesh']
+                if len(meshes) != 1:
+                    raise RuntimeError('完整网格 GLB 必须导入为一个 StaticMesh：' + task.filename)
+                parts[i], modes[i] = meshes[0], 2
+            if not unreal.BranchForgeAssemblyLibrary.set_prepared_parts(preview, parts, modes, prepared['binary_sha1']):
+                raise RuntimeError('完整网格装配状态无效')
         if len(modes) != len(parts) or any(not mesh or mode != 2 for mesh, mode in zip(parts, modes)):
             raise RuntimeError('完整单元枝未通过共享模型校验，已停止导入。请检查源工程的完整单元枝并重新导出；不会拆散叶花果代替完整模型。')
         skeleton.set_editor_property('leaf_meshes', parts)

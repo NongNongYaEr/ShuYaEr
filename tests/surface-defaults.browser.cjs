@@ -1,5 +1,5 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
-const {chromium}=require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {chromium}=require('playwright');
 (async()=>{
  const out=path.resolve('.runtime/surface-defaults');fs.mkdirSync(out,{recursive:true});
  const source=path.resolve('.runtime/surface-workbench/桥墩叶簇验收.branch.json'),doc=JSON.parse(fs.readFileSync(source,'utf8'));

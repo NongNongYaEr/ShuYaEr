@@ -1,6 +1,6 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 require('node:module').register('./vendor-loader.mjs',require('node:url').pathToFileURL(__filename));
-const {chromium}=require(process.env.BRANCHFORGE_PLAYWRIGHT||'C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {chromium}=require(process.env.BRANCHFORGE_PLAYWRIGHT||'playwright');
 module.exports=async function verifyTrunkPreparation(page,out){
  const {importedTrunkFixture}=await import('./imported-trunk-fixture.mjs'),file=path.join(out,'雕刻树洞测试.glb');fs.writeFileSync(file,await importedTrunkFixture());
  const errors=[],checks=[],consoleErrors=[],pendingRequests=new Set();page.on('request',r=>pendingRequests.add(r.url()));page.on('requestfinished',r=>pendingRequests.delete(r.url()));page.on('requestfailed',r=>pendingRequests.delete(r.url()));page.on('console',m=>{if(m.type()==='error')consoleErrors.push(m.text());});page.on('pageerror',error=>errors.push(error.message));const check=message=>{checks.push(message);console.log('PASS '+message);};

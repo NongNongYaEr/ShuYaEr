@@ -131,6 +131,8 @@ FString UBranchForgeAssemblyLibrary::PrepareSharedParts(UPVBranchForgePreviewSet
 	TArray<TSharedPtr<FJsonValue>> Reports; int64 SharedFaces=0; double MaxError=0;
 	for (int32 S=0;S<Sources.Num();++S)
 	{
+		bool bMeshUnit = false;
+		if (Sources[S]->AsObject()->TryGetBoolField(TEXT("mesh_unit"), bMeshUnit) && bMeshUnit) continue;
 		TArray<int32> Members;
 		for (int32 I=0;I<Instances.Num();++I) if (Instances[I]->AsObject()->GetIntegerField(TEXT("source_index"))==S) Members.Add(I);
 		// Trunk exports bind complete units to rigid assembly bones even when a

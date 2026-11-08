@@ -1,7 +1,7 @@
 import { copy, equalData } from './branch-workbench-data.js';
 import { activeProject, projectBinding } from './project-library-data.js';
 import { saveContext, defaultSaveMode, prepareSaveDocument, templateContext } from './project-save-data.js';
-import { sendProjectSave } from './project-save-request.js';
+import { boundedProjectJson, PROJECT_SAVE_LIMIT, sendProjectSave } from './project-save-request.js';
 import { PROJECT_THUMBNAIL_VERSION } from './project-thumbnail.js';
 
 export function createProjectSavePanel(api) {
@@ -25,8 +25,8 @@ export function createProjectSavePanel(api) {
   const origins=new Map();
   let baseline=null,busy=false,opening=false,finished=false,resolve=null,context={},speciesMap={},savedItem=null,fileOnly=false,exportPve=false,exportStatic=false,lastPath='',loaded=false,closeOnSuccess=false;
   const leafStamp=()=>api.leaves().map(({geometry,...source})=>({...copy(source),geometry:geometry?.uuid}));
-  const stamp=()=>({authoring:api.authoring(),prefabs:api.prefabs?.(),settings:api.settings(),leaves:leafStamp(),mode:api.mode()});
-  const dirty=()=>!baseline||baseline.authoring!==api.authoring()||baseline.prefabs!==api.prefabs?.()||baseline.mode!==api.mode()||!equalData(baseline.settings,api.settings())||!equalData(baseline.leaves,leafStamp());
+  const stamp=()=>({authoring:api.authoring(),prefabs:api.prefabs?.(),composition:api.composition?.(),settings:api.settings(),leaves:leafStamp(),mode:api.mode()});
+  const dirty=()=>!baseline||baseline.authoring!==api.authoring()||baseline.prefabs!==api.prefabs?.()||baseline.composition!==api.composition?.()||baseline.mode!==api.mode()||!equalData(baseline.settings,api.settings())||!equalData(baseline.leaves,leafStamp());
   function projectInfo(){
     const source=saveContext(api.authoring()),origin=origins.get(api.mode())||{},objectName=api.settings().object_name;
     const name=origin.name&&objectName===origin.objectName?origin.name:objectName||'未命名工程';
@@ -70,7 +70,7 @@ export function createProjectSavePanel(api) {
       const doc=await api.capture(),id=selected==='FILE'?'':selected==='CURRENT'?context.templateId:'template-'+crypto.randomUUID().replaceAll('-','');
       const prepared=prepareSaveDocument(doc,{name:$('psName').value,notes:$('psNotes').value,species:$('psSpecies').value,mode:selected,id,context});
       await phase('正在打包工程与贴图…');
-      const projectJson=JSON.stringify(doc,null,selected==='FILE'?2:undefined);
+      const projectJson=selected==='FILE'?JSON.stringify(doc,null,2):boundedProjectJson(doc);
       await phase(selected==='FILE'?(exportPve?'保存工程阶段：正在写入导出目录的工程副本…':'请选择工程文件保存位置…'):'正在写入样板和预览图…');
       let savedContext=prepared.context,path='';
       if(selected==='FILE'){
@@ -80,7 +80,7 @@ export function createProjectSavePanel(api) {
         path=response.path||'';if(!path){$('psStatus').textContent='已取消选择位置，工程尚未保存。';return;}
       }else{
         const response=await sendProjectSave('/api/tree-template',{id,mode:selected,parentId:selected==='VERSION'?context.templateId:'',name:prepared.name,notes:prepared.notes,
-          species:$('psSpecies').value,speciesName:speciesMap[$('psSpecies').value]?.name||'未分类',kind:api.mode(),binding:projectBinding(doc),thumbnail:$('psPreview').src,sourcePath:context.sourcePath||'',sourceId:context.templateId||'',saveToken:prepared.context.saveToken,expectedSaveToken:context.saveToken||''},projectJson);
+          species:$('psSpecies').value,speciesName:speciesMap[$('psSpecies').value]?.name||'未分类',kind:api.mode(),binding:projectBinding(doc),thumbnail:$('psPreview').src,sourcePath:context.sourcePath||'',sourceId:context.templateId||'',saveToken:prepared.context.saveToken,expectedSaveToken:context.saveToken||''},projectJson,PROJECT_SAVE_LIMIT);
         savedItem=response.item;savedContext=templateContext(savedItem);path=savedItem.path;
       }
       api.saved(prepared.name,savedContext);origins.set(api.mode(),{name:prepared.name,objectName:prepared.name,path,file:selected==='FILE'});baseline=stamp();loaded=false;lastPath=path;updateBadge();finished=true;

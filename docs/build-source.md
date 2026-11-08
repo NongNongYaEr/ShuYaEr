@@ -1,30 +1,22 @@
 [项目首页](../README.md) / [使用文档](README.md) / 构建源码
 
-> 对应 V052 精简单文件 EXE 的公开下载地址待补充。已有该 EXE 时可按下列步骤准备。
+> 本次公开精简源码与样本。准备运行依赖时，需要作者提供的对应 V071 精简 EXE。
 
-# 树鸭儿 0.5.2 · 精简公开源码
+# 树鸭儿 0.7.1 · 精简公开源码
 
-完整功能源码与八类用途样本。采用《树鸭儿免费使用与源码公开许可 1.0》，允许内部生产和商业作品创作；商业分发软件、源码、修改版或原始素材库需单独书面授权。见 [软件许可](../LICENSE.txt)、[素材许可](../ASSETS_LICENSE.md)、[品牌说明](../BRAND_NOTICE.md)和[第三方许可](../THIRD_PARTY_NOTICES.md)。本项目是源码可用许可。
+完整功能源码与八类植物样本。软件采用《树鸭儿免费使用与源码公开许可 1.0》。允许内部生产和商业作品创作，商业分发软件、源码、修改版或原始素材库需作者书面授权。许可及资源说明见 `LICENSE.txt`、`ASSETS_LICENSE.md`、`BRAND_NOTICE.md` 和 `THIRD_PARTY_NOTICES.md`。
 
 ## 准备与重建
 
-取得对应 V052 精简单文件 EXE，在本目录执行：
+取得同版本的「01_精简EXE」后，在本目录执行。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-source-runtime.ps1 -RuntimeSource "..\01_精简EXE"
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-desktop.ps1
 ```
 
-准备脚本先检查 portable-runtime.json 固定的 EXE 哈希，再以隐藏的仅准备模式提取 Node、WebView2、植物和材质两套已验证的 DX12 依赖，并按样本清单还原压缩资源。之后双击生成的“树鸭儿V052.exe”。无需原开发磁盘或开发者缓存。
+准备脚本按 `portable-runtime.json` 校验同版 EXE，再还原运行依赖和样本。重建后双击「树鸭儿V071.exe」。系统需有 WebView2。
 
-`web/` 与 `native/` 是植物工作台；`material/web/`、`material/core/`、`material/native/` 是嵌入式材质工作台；`scripts/` 包含构建及服务。样本在 `sample-resources/` 按内容块去重压缩，保留校验清单。公开目录不含 EXE、DLL、CSO、私人工程、恢复资料或完整植物库。
+`web` 和 `native` 为植物工作台，`material` 为材质工作台。八类样本存于 `sample-resources` 的压缩资源块。公开包的运行二进制由同版 EXE 提取，完整素材库和制作原件随私有开发版保存。
 
-```powershell
-runtime/node.exe --experimental-loader ./tests/vendor-loader.mjs --test tests/unit-preparation.test.mjs tests/keyboard-transform.test.mjs tests/plant-unit-grid.test.mjs tests/unit-authoring.test.mjs tests/sculpt-material-response.test.mjs tests/sculpt-distribution-templates.test.mjs tests/local-endgrain.test.mjs
-```
-
-源码自带构建记录、第三方许可和原生模块源码。普通 C# 桌面重建复用经过校验的 DX12 运行库；修改原生渲染后需按构建脚本安装 Visual Studio C++、Windows SDK 和着色器翻译工具，再重建对应模块。`test:all` 包含全资产、历史夹具和桌面环境测试，不等于精简包的一键验收。
-
-材质资源包含设计/推导 PBR，来源和实际尺寸随资源登记。48 方向、60 叠加和 18 组合的功能验收与逐套展示级美术审核分开。
-
-当前 EXE 的 SHA256 见 [portable-runtime.json](../portable-runtime.json)。GitHub 源码单独下载时，将 `-RuntimeSource` 指向作者提供的同版 EXE 即可。
+对应 EXE 的 SHA256 见 [portable-runtime.json](../portable-runtime.json)。将 `-RuntimeSource` 指向同版 EXE 的文件或目录即可。

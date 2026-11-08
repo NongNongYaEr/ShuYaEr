@@ -49,7 +49,11 @@ if (!globalThis.FileReader) globalThis.FileReader = class {
 
 const doc = migrateProjectDocument(JSON.parse(sourceBytes.toString('utf8').replace(/^\uFEFF/, '')));
 const authoring = normalizeAuthoring(doc.authoring, doc.settings.seed);
+if (authoring.mesh_units?.instances.length && (!geometry || radiusVariants || args.includes('--metadata-only'))) {
+  throw Error('完整网格装配需要导出 UE/PVE 完整包');
+}
 if (authoring.vine || authoring.surface_growth?.enabled) {
+  if (authoring.mesh_units?.instances.length) throw Error('完整网格装配的 UE/PVE 导出需要整树承重枝');
   if (!geometry || radiusVariants || args.includes('--metadata-only')) throw Error('藤蔓完整包需要 --geometry，不支持半包或粗细变体模式');
   return exportVineComplete({ tool, input, document: doc, sourceBytes, output: out, progress });
 }
@@ -59,7 +63,7 @@ if (geometry && !radiusVariants && !args.includes('--metadata-only')) {
   // A sculpted/AI trunk can be a complete plant before any crown units are
   // mounted. Validate its actual geometry and sources in the final graph;
   // an empty unit library is not evidence that this is an incomplete project.
-  if (!authoring.branch_shape?.branches?.length)
+  if (!authoring.branch_shape?.branches?.length && !authoring.mesh_units?.instances.length)
     throw Error('工程缺少可导出的承重骨架，请先完成树干整理或装配整树');
   return generateFinalCompletePackage({ tool, input, document: doc, sourceBytes, output: out, progress });
 }
