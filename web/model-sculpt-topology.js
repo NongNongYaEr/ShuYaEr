@@ -1,9 +1,15 @@
-// Geometry analysis runs once in a worker. Coincident UV/hard-normal seams move
-// together, while each original vertex keeps its own UV and normal fan.
-export function sculptTopology(position,index){
+// Coincident UV/hard-normal seams move together. Groups follow vertex order.
+export function sculptVertexGroups(position){
  const count=position.length/3,groups=new Uint32Array(count),keys=new Map(),representatives=[];
  let min=Infinity,max=-Infinity;for(const n of position){min=Math.min(min,n);max=Math.max(max,n);}const epsilon=Math.max(1e-8,(max-min)*1e-7);
  for(let i=0;i<count;i++){const k=[0,1,2].map(a=>Math.round(position[i*3+a]/epsilon)).join(',');let g=keys.get(k);if(g===undefined){g=representatives.length;keys.set(k,g);representatives.push(i);}groups[i]=g;}
+ return {groups,representatives};
+}
+
+// Geometry analysis runs once in a worker; original vertices keep their own UV
+// and normal fan even when their sculpting positions are grouped.
+export function sculptTopology(position,index){
+ const {groups,representatives}=sculptVertexGroups(position),count=groups.length;
  const size=representatives.length,memberCounts=new Uint32Array(size),edgeCounts=new Uint32Array(size),faceCounts=new Uint32Array(size);
  for(const g of groups)memberCounts[g]++;
  for(let f=0;f<index.length;f+=3)for(let a=0;a<3;a++){const g=groups[index[f+a]];faceCounts[g]++;edgeCounts[g]+=2;}

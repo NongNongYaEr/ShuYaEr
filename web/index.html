@@ -669,7 +669,7 @@
             <button class="view-mode" data-view="WIND" title="风权重预览"><i data-lucide="wind"></i></button>
             <button class="view-mode" data-view="SKELETON" title="枝条骨架"><i data-lucide="share-2"></i></button>
           </div>
-          <div id="branchEditScopeBar"><label><span id="branchEditScopeLabel">裁切 / 雕刻范围</span><select id="branchEditScope" aria-label="编辑作用范围"><option value="SELECTED">选中枝条及子枝</option><option value="DIRECT">仅选中枝条</option><option value="ALL">全树</option></select></label><label id="unitBrushEffectRow" hidden>笔刷<select id="unitBrushEffect" aria-label="完整单元枝笔刷"><option value="TURN">整支转向</option><option value="ALIGN">取样对齐</option><option value="SPREAD">散开 / 收拢</option><option value="SCALE">大小刷</option><option value="JITTER">自然扰动</option></select></label><label id="unitCombOrientationRow" hidden>方向<select id="unitCombOrientation" aria-label="单元枝梳理方向"><option value="DRAG">跟随拖动</option><option value="DOWN">枝梢向下</option><option value="ROLL">沿枝翻转</option></select></label><span class="temporary-selection-hint" title="空白处 Shift 框选加选，Ctrl 框选减选；主枝干雕刻时在枝干上 Shift 拖动临时平滑">空白 Shift 加选 · Ctrl 减选</span><span id="branchEditScopeCount" aria-live="polite">请先选择枝条</span><span id="unitAssemblyScopeSummary" hidden aria-live="polite"></span></div>
+          <div id="branchEditScopeBar"><label><span id="branchEditScopeLabel">裁切 / 雕刻范围</span><select id="branchEditScope" aria-label="编辑作用范围"><option value="SELECTED">选中枝条及子枝</option><option value="DIRECT">仅选中枝条</option><option value="ALL">全树</option></select></label><label id="unitBrushEffectRow" hidden>笔刷<select id="unitBrushEffect" aria-label="完整单元枝笔刷"><option value="TURN">整支转向</option><option value="ALIGN">取样对齐</option><option value="SPREAD">散开 / 收拢</option><option value="SCALE">大小刷</option><option value="JITTER">自然扰动</option><option value="DISPERSE" hidden disabled>打散朝向</option></select></label><label id="unitCombOrientationRow" hidden>方向<select id="unitCombOrientation" aria-label="单元枝梳理方向"><option value="DRAG">跟随拖动</option><option value="DOWN">枝梢向下</option><option value="ROLL">沿枝翻转</option></select></label><span class="temporary-selection-hint" title="空白处 Shift 框选加选，Ctrl 框选减选；主枝干雕刻时在枝干上 Shift 拖动临时平滑">空白 Shift 加选 · Ctrl 减选</span><span id="branchEditScopeCount" aria-live="polite">请先选择枝条</span><span id="unitAssemblyScopeSummary" hidden aria-live="polite"></span></div>
           <div class="viewport-tools">
             <button id="toggleGridBtn" class="active" title="显示网格"><i data-lucide="grid-3x3"></i></button>
             <button id="fitViewBtn" title="适应视图并保留观察方向"><i data-lucide="maximize"></i></button>
@@ -798,5 +798,6 @@
     <div id="toast" class="toast" hidden></div>
   </div>
   <script type="module" src="/app.js"></script>
-</body>
+  <script type="module" src="/viewport-navigation-settings.js"></script>
+<script type="module" src="/v080-lights/controls.js"></script></body>
 </html>

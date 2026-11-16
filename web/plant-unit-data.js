@@ -2,8 +2,10 @@ import { normalizeLeafMaterial } from './leaf-material-data.js';
 import { normalizeFlowering } from './flowering-data.js';
 import { normalizeTreeOrgans } from './tree-organ-data.js';
 import {packageOrigins} from './asset-origins.js';
+import {validateTrunkGuides} from './imported-trunk-data.js';
 
 export const UNIT_ROLES = { LEAF: '叶片', FLOWER: '花', BUD: '花苞', FRUIT: '果实' };
+export const BASE_BRANCH_MAX_SIZE_M = 20;
 const bounded = (v, d, lo, hi) => Math.min(hi, Math.max(lo, Number.isFinite(Number(v)) ? Number(v) : d));
 const text = (v, fallback = '') => String(v || fallback).slice(0, 160);
 
@@ -18,24 +20,109 @@ export function geometryExtent(g) {
 
 // Unit geometry has a longest dimension of one. Physical size has one owner:
 // size_m. The assembly compiler converts it to the existing renderer fields.
-export function normalizePlantUnit(raw) {
+function normalizedUnitGeometry(raw) {
   const source = normalizeFlowering({ source: raw }).source;
   if (!source?.geometry.uv) throw Error('单元需要有效三角网格和 UV；请先在 Blender 中展开 UV');
   const extent = geometryExtent(source.geometry);
   if (!(extent.longest > 1e-8)) throw Error('单元网格没有有效尺寸');
-  const geometry = { ...source.geometry, position: source.geometry.position.map(v => v / extent.longest) };
+  const longest = Math.abs(extent.longest - 1) < 1e-12 ? 1 : extent.longest;
+  const geometry = longest === 1 ? source.geometry : {...source.geometry, position:source.geometry.position.map(v => v / longest)};
+  return { geometry, longest };
+}
+
+export function normalizePlantUnit(raw) {
+  const { geometry } = normalizedUnitGeometry(raw);
   return { id: text(raw.id, 'UNIT'), name: text(raw.name, '新单元'), role: UNIT_ROLES[raw.role] ? raw.role : 'LEAF',
     size_m: bounded(raw.size_m, .1, .001, 1), geometry, source_file: text(raw.source_file),
     ...(/^#[0-9a-f]{6}$/i.test(raw.colorTint || '') ? { colorTint: raw.colorTint } : {}) };
 }
 
+export function normalizePlantBaseBranch(raw) {
+  const { geometry, longest } = normalizedUnitGeometry(raw);
+  const tip = raw.tip;
+  if (!Array.isArray(tip) || tip.length !== 3 || !tip.every(Number.isFinite) || tip[1] <= 0) {
+    throw Error('基础枝缺少有效的枝尖校准点');
+  }
+  const shapeGuides = raw.shape_guides == null ? null : validateTrunkGuides(raw.shape_guides).map(guide => ({
+    id: guide.id, parent: guide.parent || '', attach: guide.attach,
+    points: guide.points.map(point => point.map(value => value / longest)),
+    start_radius: guide.start_radius / longest, end_radius: guide.end_radius / longest,
+  }));
+  const origin = raw.variant_from;
+  const variantFrom = origin && typeof origin.base_id === 'string' && origin.base_id.trim() ? {
+    base_id: text(origin.base_id), root_id: text(origin.root_id, origin.base_id),
+    ...(origin.pack_id ? {pack_id: text(origin.pack_id)} : {}),
+    ...(/^[a-f0-9]{64}$/.test(origin.topology || '') ? {topology: origin.topology} : {}),
+  } : null;
+  return { id: text(raw.id, 'BASE_BRANCH'), name: text(raw.name, '基础枝'), geometry,
+    size_m: bounded(raw.size_m, .5, .001, BASE_BRANCH_MAX_SIZE_M), source_file: text(raw.source_file),
+    tip: tip.map(value => value / longest),
+    ...(shapeGuides ? {shape_guides: shapeGuides} : {}), ...(variantFrom ? {variant_from: variantFrom} : {}) };
+}
+
+function sameValues(a, b, epsilon = 0) {
+  return a === b || Boolean(a && b && a.length === b.length && a.every((value, i) => Math.abs(value - b[i]) <= epsilon));
+}
+
+export function sameBaseBranchTopology(a, b) {
+  return a.geometry.position.length === b.geometry.position.length
+    && sameValues(a.geometry.index, b.geometry.index) && sameValues(a.geometry.uv, b.geometry.uv);
+}
+
+export function samePlantUnitAtlas(a, b) {
+  return a.color === b.color && a.normal === b.normal;
+}
+
+function sameShapeGuides(a, b) {
+  const epsilon = 1e-10;
+  return a === b || Boolean(a && b && a.length === b.length && a.every((guide, index) => {
+    const other = b[index];
+    return guide.id === other.id && guide.parent === other.parent && guide.attach === other.attach
+      && sameValues([guide.start_radius, guide.end_radius], [other.start_radius, other.end_radius], epsilon)
+      && guide.points.length === other.points.length
+      && guide.points.every((point, i) => sameValues(point, other.points[i], epsilon));
+  }));
+}
+
+export async function appendPlantBaseBranchVariant(sourcePack, latestPack, rawVariant, {
+  id = latestPack.id, name = latestPack.name, revision = latestPack.revision + 1,
+} = {}) {
+  const sourceId = rawVariant.variant_from?.base_id;
+  const source = sourcePack.base_branches?.find(branch => branch.id === sourceId);
+  const current = latestPack.base_branches?.find(branch => branch.id === sourceId);
+  if (!source || !current || !sameBaseBranchTopology(source, current)
+    || source.size_m !== current.size_m || !sameValues(source.geometry.position, current.geometry.position, 1e-10)
+    || !sameValues(source.tip, current.tip, 1e-10) || !sameShapeGuides(source.shape_guides, current.shape_guides)
+    || !samePlantUnitAtlas(sourcePack.material, latestPack.material)
+    || sourcePack.material.cutoff !== latestPack.material.cutoff || sourcePack.material.roughness !== latestPack.material.roughness) {
+    throw Error('基础枝或套装材质已更新，请读取库中新版后再调整。');
+  }
+  const variant = normalizePlantBaseBranch(rawVariant);
+  if (!rawVariant.id || !variant.shape_guides || !sameBaseBranchTopology(source, variant)) {
+    throw Error('新基础枝需保留原三角面和 UV，并包含造型曲线。');
+  }
+  const topologyBytes = new TextEncoder().encode(JSON.stringify([
+    source.geometry.position.length, source.geometry.index, source.geometry.uv,
+  ]));
+  const topology = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', topologyBytes)), value => value.toString(16).padStart(2, '0')).join('');
+  variant.variant_from = {
+    base_id: source.id, root_id: source.variant_from?.root_id || source.id,
+    pack_id: source.variant_from?.pack_id || sourcePack.id, topology,
+  };
+  return normalizePlantUnitPack({ ...latestPack, id, name, revision, base_branches: [...latestPack.base_branches, variant] });
+}
+
 export function normalizePlantUnitPack(raw) {
-  if (!raw || !Array.isArray(raw.units) || raw.units.length > 64) throw Error('每套植物素材最多 64 个单元');
+  if (!raw || !Array.isArray(raw.units) || (raw.base_branches != null && !Array.isArray(raw.base_branches))
+    || raw.units.length + (raw.base_branches?.length || 0) > 64) throw Error('每套植物素材最多 64 个单元');
   const units = raw.units.map(normalizePlantUnit);
-  if (new Set(units.map(u => u.id)).size !== units.length) throw Error('单元 ID 重复，请重新导入');
+  const baseBranches = (raw.base_branches || []).map(normalizePlantBaseBranch);
+  const ids = [...units, ...baseBranches].map(unit => unit.id);
+  if (new Set(ids).size !== ids.length) throw Error('单元 ID 重复，请重新导入');
   return { format: 'BranchForgePlantUnits', version: 1, id: text(raw.id, 'PLANT_UNITS'), name: text(raw.name, '新植物'),
     revision: Math.max(1, Math.trunc(Number(raw.revision) || 1)), species: text(raw.species), source: text(raw.source),
-    material: normalizeLeafMaterial(raw.material), units,...(raw.package_origins?.length?{package_origins:packageOrigins(raw.package_origins)}:{}) };
+    material: normalizeLeafMaterial(raw.material), units, ...(baseBranches.length ? {base_branches: baseBranches} : {}),
+    ...(raw.package_origins?.length?{package_origins:packageOrigins(raw.package_origins)}:{}) };
 }
 
 export function plantPackFromBuiltin(raw, entry) {

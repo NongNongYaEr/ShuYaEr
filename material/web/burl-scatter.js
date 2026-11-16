@@ -21,7 +21,7 @@ export function generateBurlScatter(mesh,raw,{actualHeightMeters=10,ao=null,bark
  const options=validateBurlScatter(raw);if(!Number.isInteger(candidateBudget)||candidateBudget<64||candidateBudget>16384)throw Error('树瘤候选预算无效。');const result={placements:[],summary:{algorithm:'quantity-surface-burl-scatter-v1',requested:options.count,placed:0,seed:options.seed,preference:options.preference,sourceSHA256:mesh.sourceSHA256,actualHeightMeters,candidateBudget,hasAO:!!ao,scope:'source-surface suitability heuristic; no geometry edits or semantic organ accuracy claim'}};if(!options.count)return result;
  const ctx=context||prepareBurlScatter(mesh,{actualHeightMeters,ao,recognitionMeters:Math.max(.08,(options.minSizeCm+options.maxSizeCm)/200)});if(ctx.mesh!==mesh||ctx.actualHeightMeters!==actualHeightMeters)throw Error('树瘤候选缓存不属于当前模型与尺寸。');const{faces,topology}=ctx,rng=random(options.seed),cdf=[],faceIds=[];let total=0;
  for(let f=0;f<faces.length;f++){const a=faces[f];if(a.area>1e-12&&a.center[1]>=options.minHeightMeters&&a.center[1]<=options.maxHeightMeters&&a.ao>.25&&a.concave<.75){total+=a.area;cdf.push(total);faceIds.push(f);}}
- result.summary.eligibleAreaMeters2=total;if(!total){result.summary.reason='没有符合高度、可达性与表面条件的区域。';return result;}
+ result.summary.eligibleAreaMeters2=total;if(!total){result.summary.reasonCode='no-eligible-surface';result.summary.reason='没有符合高度、可达性与表面条件的区域。';return result;}
  const candidates=[];for(let i=0;i<candidateBudget;i++){if((i&255)===0&&shouldCancel())throw Object.assign(Error('树瘤散布已取消。'),{name:'AbortError'});const value=rng()*total;let lo=0,hi=cdf.length-1;while(lo<hi){const m=(lo+hi)>>1;if(cdf[m]<value)lo=m+1;else hi=m;}const face=faceIds[lo],a=faces[face],s=Math.sqrt(rng()),t=rng(),bary=[1-s,s*(1-t),s*t],point=[0,1,2].map(k=>a.points.reduce((v,p,c)=>v+p[k]*bary[c],0)),size=(options.minSizeCm+(options.maxSizeCm-options.minSizeCm)*rng())/100,aspect=.8+rng()*.4,axis=barkFlow?nearestAxis(point,barkFlow.guides,actualHeightMeters):null,stem=axis?clamp(axis.radius/(size*.7)):clamp(1-a.convex*.8),junction=clamp(a.concave*2+a.convex*.35),exposure=.4+.6*a.ao,score=options.preference==='uniform'?1:options.preference==='stem'?(.1+stem)*exposure:options.preference==='junction'?(.12+junction)*exposure:(.35+stem*.45+junction*.6)*exposure;
   const candidate={face,bary,size,widthMeters:size,heightMeters:size*aspect,seed:Math.floor(rng()*10001),rotation:(rng()-.5)*60,rank:-Math.log(Math.max(rng(),1e-12))/Math.max(score,1e-8),point};if(point[1]<options.minHeightMeters||point[1]>options.maxHeightMeters||eligible&&!eligible(face,bary))continue;candidates.push(candidate);}
  candidates.sort((a,b)=>a.rank-b.rank||a.face-b.face);let tested=0;const occupied=new Set();for(const c of candidates){if(shouldCancel())throw Object.assign(Error('树瘤散布已取消。'),{name:'AbortError'});if(tested++>=1024)break;if(occupied.has(c.face))continue;const fit=fitsPatch(ctx,c,c.widthMeters,c.heightMeters);if(!fit.accepted||fit.limited)continue;
@@ -31,5 +31,13 @@ export function generateBurlScatter(mesh,raw,{actualHeightMeters=10,ao=null,bark
   const radius=c.size*options.spacing,queue=[c.face],seen=new Set(queue);for(let i=0;i<queue.length&&i<2048;i++){const f=queue[i];occupied.add(f);for(const e of topology.neighbors[f])if(e.opposed&&!seen.has(e.face)&&Math.hypot(...sub(faces[e.face].center,fit.center))<radius){seen.add(e.face);queue.push(e.face);}}
   const index=result.placements.length;result.placements.push({index,anchor:{face:c.face,bary:c.bary},position:fit.center,normal:fit.normal,widthMeters:c.widthMeters,heightMeters:c.heightMeters,projectionDepthMeters:fit.depth,rotation:c.rotation,seed:c.seed,supportFaces:fit.count,supportAreaMeters2:fit.area});if(result.placements.length===options.count)break;
  }
- result.summary.placed=result.placements.length;result.summary.testedCandidates=tested;result.summary.hasAO=ctx.hasAO;result.summary.curvature=ctx.metadata;if(result.summary.placed<options.count)result.summary.reason='可用表面或间距不足；可缩小树瘤尺寸、放宽高度范围或减少数量。';return result;
+ result.summary.placed=result.placements.length;result.summary.testedCandidates=tested;result.summary.hasAO=ctx.hasAO;result.summary.curvature=ctx.metadata;
+ if(result.summary.placed<options.count){
+  if(candidates.length){
+   result.summary.reasonCode='surface-or-spacing';result.summary.reason='可用表面或间距不足。可缩小贴花尺寸、放宽作用范围或减少数量。';
+  }else{
+   result.summary.reasonCode='no-eligible-centers';result.summary.reason='当前范围内没有找到可用的贴花中心。可放宽作用范围或高度。';
+  }
+ }
+ return result;
 }

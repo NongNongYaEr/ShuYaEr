@@ -1,5 +1,5 @@
 const fs=require('fs'),path=require('path'),assert=require('node:assert/strict'),crypto=require('crypto');
-const {chromium}=require(process.env.BRANCHFORGE_PLAYWRIGHT||'playwright');
+const {chromium}=require(process.env.BRANCHFORGE_PLAYWRIGHT||'C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 (async()=>{
  const artifacts=path.resolve('.runtime/pve-complete-acceptance');fs.mkdirSync(artifacts,{recursive:true});
  const origin=process.argv[2],name='二球悬铃木_真实样本装配整株_最终',project=path.resolve('导出',name+'.branch.json');

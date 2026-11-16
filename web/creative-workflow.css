@@ -5,6 +5,12 @@
 .local-assembly button{min-height:32px;white-space:normal}
 .local-assembly .wb-row{display:flex;gap:6px}.local-assembly .wb-row button{flex:1}
 #laSummary,#laImpact{line-height:1.7;color:var(--accent-text)}
+.wb-assembly-count .assembly-open-voids{grid-column:1/-1;justify-self:start}
+.assembly-void-rules{margin:8px 0;padding:8px;border:1px solid var(--line);border-radius:6px}
+.assembly-void-rules summary{cursor:pointer}
+.assembly-void-list{max-height:220px;overflow:auto;margin:6px 0}
+.assembly-void-list>div{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 0}
+.assembly-void-list button{flex:none}
 #laProtectedList{white-space:pre-line;line-height:1.8;margin:8px 0}
 #laPreviewActions{margin-top:10px;border-top:1px solid var(--line);padding-top:6px}
 #laPreviewActions[hidden],.assembly-brush-ring[hidden]{display:none!important}

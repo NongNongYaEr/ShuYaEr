@@ -51,8 +51,20 @@ class MaterialDevice{
  ComPtr<ID3DBlob> shader(const wchar_t* file,const char*){ComPtr<ID3DBlob> code;auto path=folder/file;path.replace_extension(L".cso");require(D3DReadFileToBlob(path.c_str(),&code),"read precompiled native shader");return code;}
  void initialize(){
   require(CreateDXGIFactory2(0,IID_PPV_ARGS(&factory)),"DXGI factory");DXGI_ADAPTER_DESC1 description{};
-  for(UINT n=0;factory->EnumAdapterByGpuPreference(n,DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,IID_PPV_ARGS(&adapter))!=DXGI_ERROR_NOT_FOUND;n++){adapter->GetDesc1(&description);if(!(description.Flags&DXGI_ADAPTER_FLAG_SOFTWARE)&&SUCCEEDED(D3D12CreateDevice(adapter.Get(),D3D_FEATURE_LEVEL_12_0,IID_PPV_ARGS(&device))))break;adapter.Reset();}
-  if(!device)throw std::runtime_error("No hardware DX12 feature-level 12.0 device available");D3D12_FEATURE_DATA_SHADER_MODEL model{D3D_SHADER_MODEL_6_0};require(device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL,&model,sizeof(model)),"DX12 shader model query");if(model.HighestShaderModel<D3D_SHADER_MODEL_6_0)throw std::runtime_error("DX12 Shader Model 6.0 is required for native material shaders");
+  // The material pipeline uses raster features available at 11_0. DXIL
+  // support is queried separately, so suitable older GPUs can stay on DX12.
+  for(UINT n=0;;n++){
+   adapter.Reset();
+   if(FAILED(factory->EnumAdapterByGpuPreference(n,DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,IID_PPV_ARGS(&adapter))))break;
+   if(FAILED(adapter->GetDesc1(&description))||(description.Flags&DXGI_ADAPTER_FLAG_SOFTWARE))continue;
+   ComPtr<ID3D12Device> candidate;
+   if(FAILED(D3D12CreateDevice(adapter.Get(),D3D_FEATURE_LEVEL_11_0,IID_PPV_ARGS(&candidate))))continue;
+   D3D12_FEATURE_DATA_SHADER_MODEL model{D3D_SHADER_MODEL_6_0};
+   if(FAILED(candidate->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL,&model,sizeof(model)))||model.HighestShaderModel<D3D_SHADER_MODEL_6_0)continue;
+   device=std::move(candidate);
+   break;
+  }
+  if(!device)throw std::runtime_error("No hardware DX12 device with feature level 11_0 and Shader Model 6.0 available");
   D3D12_COMMAND_QUEUE_DESC q{};q.Type=D3D12_COMMAND_LIST_TYPE_DIRECT;require(device->CreateCommandQueue(&q,IID_PPV_ARGS(&queue)),"queue");require(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,IID_PPV_ARGS(&allocator)),"allocator");require(device->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,allocator.Get(),nullptr,IID_PPV_ARGS(&commands)),"commands");require(commands->Close(),"initial list close");require(device->CreateFence(0,D3D12_FENCE_FLAG_NONE,IID_PPV_ARGS(&fence)),"fence");event=CreateEventW(nullptr,FALSE,FALSE,nullptr);if(!event)throw std::runtime_error("Fence event unavailable");
   auto heap=[&](D3D12_DESCRIPTOR_HEAP_TYPE type,UINT count,bool visible,ComPtr<ID3D12DescriptorHeap>& dest){D3D12_DESCRIPTOR_HEAP_DESC d{};d.Type=type;d.NumDescriptors=count;d.Flags=visible?D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE:D3D12_DESCRIPTOR_HEAP_FLAG_NONE;require(device->CreateDescriptorHeap(&d,IID_PPV_ARGS(&dest)),"descriptor heap");};
   heap(D3D12_DESCRIPTOR_HEAP_TYPE_RTV,1,false,rtvs);heap(D3D12_DESCRIPTOR_HEAP_TYPE_DSV,1,false,dsvs);heap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,65536,true,srvs);heap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,8192,false,sources);heap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER,2048,true,samplers);srvStep=device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);samplerStep=device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
@@ -63,7 +75,7 @@ class MaterialDevice{
   D3D12_SHADER_RESOURCE_VIEW_DESC nullView{};nullView.Format=DXGI_FORMAT_R8G8B8A8_UNORM;nullView.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D;nullView.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;nullView.Texture2D.MipLevels=1;device->CreateShaderResourceView(nullptr,&nullView,srvSource(0));
   const bool hasLegacy=std::filesystem::exists(folder/L"FRAGMENT_LEGACY.cso"),hasStack=std::filesystem::exists(folder/L"FRAGMENT_STACK.cso");if(hasLegacy!=hasStack)throw std::runtime_error("Incomplete scene material pipelines");if(hasLegacy){legacyPixel=shader(L"FRAGMENT_LEGACY.hlsl","");stackPixel=shader(L"FRAGMENT_STACK.hlsl","");}
   std::ifstream contractFile(folder/L"shader-layout.json");if(!contractFile)throw std::runtime_error("Missing shader parameter contract");Json shaderContract;contractFile>>shaderContract;if(!shaderContract.contains("sourceHashes"))throw std::runtime_error("Invalid shader parameter contract");
-  char name[512]{};WideCharToMultiByte(CP_UTF8,0,description.Description,-1,name,sizeof(name),nullptr,nullptr);std::lock_guard<std::mutex> lock(mutex);status["adapter"]=name;status["shaderSources"]=shaderContract.at("sourceHashes");status["sceneSpecialization"]=hasLegacy;status["textureStreaming"]=1;status["ready"]=true;status["featureLevel"]="12.0";status["shaderBackend"]="precompiled DXIL SM6.0";
+  char name[512]{};WideCharToMultiByte(CP_UTF8,0,description.Description,-1,name,sizeof(name),nullptr,nullptr);std::lock_guard<std::mutex> lock(mutex);status["adapter"]=name;status["shaderSources"]=shaderContract.at("sourceHashes");status["sceneSpecialization"]=hasLegacy;status["textureStreaming"]=1;status["ready"]=true;status["featureLevel"]="11.0";status["minimumFeatureLevel"]="11_0";status["shaderBackend"]="precompiled DXIL SM6.0";
  }
  void uploadTexture(const Json& item,const std::vector<uint8_t>& packet,Texture& t){
   const auto format=item.at("format").get<std::string>();const UINT channels=format.find("rgba")!=std::string::npos?4:1,component=format.find("f32")==0?4:1;DXGI_FORMAT dx=format=="u8rgba"?DXGI_FORMAT_R8G8B8A8_UNORM:format=="u8r"?DXGI_FORMAT_R8_UNORM:format=="f32rgba"?DXGI_FORMAT_R32G32B32A32_FLOAT:format=="f32r"?DXGI_FORMAT_R32_FLOAT:DXGI_FORMAT_UNKNOWN;if(dx==DXGI_FORMAT_UNKNOWN)throw std::runtime_error("Unsupported DX12 texture format");const auto& levels=item.at("levels");if(!levels.is_array()||levels.empty()||levels.size()>15)throw std::runtime_error("Invalid mip chain");const UINT w=levels[0].at("width"),h=levels[0].at("height");if(!w||!h||w>16384||h>16384)throw std::runtime_error("Texture exceeds DX12 dimensions");t.gpu=texture(w,h,UINT(levels.size()),dx,D3D12_RESOURCE_FLAG_NONE,D3D12_RESOURCE_STATE_COPY_DEST);t.format=dx;t.levels=UINT(levels.size());t.owner=item.at("owner");

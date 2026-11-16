@@ -1,4 +1,5 @@
-import { boundedProjectJson, PROJECT_SAVE_LIMIT, PROJECT_SAVE_TOO_LARGE, sendProjectSave } from './project-save-request.js';
+import { PROJECT_SAVE_LIMIT, PROJECT_SAVE_TOO_LARGE, sendProjectSaveBody } from './project-save-request.js';
+import { buildProjectRecoveryBody } from './project-recovery-save.js';
 import { createAppConfirm } from './app-confirm.js';
 import { attachSaveContext,templateContext } from './project-save-data.js';
 import { PROJECT_THUMBNAIL_VERSION } from './project-thumbnail.js';
@@ -13,7 +14,8 @@ export function createProjectSession(api) {
   document.body.append(panel);
   const button=document.createElement('button');button.id='recentProjectsBtn';button.type='button';button.textContent='我的工程';button.title='浏览已保存工程、最近打开与恢复草稿';document.querySelector('[for="projectInput"]')?.after(button);
   const homeButton=button.cloneNode(true);homeButton.id='homeRecentProjectsBtn';document.querySelector('.brand-home-actions')?.append(homeButton);homeButton.onclick=()=>{document.getElementById('brandHomeDialog')?.close();button.click();};
-  let draftId='draft-'+crypto.randomUUID().replaceAll('-',''),items=[],busy=false,pending=false,token=api.token(),savedToken=token,changedAt=Date.now(),loadedOnce=false,dismissed=false;
+  let draftId='draft-'+crypto.randomUUID().replaceAll('-',''),items=[],pending=false,token=api.token(),savedToken=token,changedAt=Date.now(),loadedOnce=false,dismissed=false;
+  let checkpointJob=null,recentSequence=0,disposed=false;
   let oversizedToken, retryAt=0;
   let files=[],templates=[],tab='saved',selected='',opening=false,refreshSequence=0;
   let previewCache=new Map(),previewWorking=false,stopPreviews=false;
@@ -86,33 +88,62 @@ export function createProjectSession(api) {
     }}finally{previewWorking=false;details();status(`${stopPreviews?'已停止；':''}已生成 ${completed} 张预览${failed?`，${failed} 张失败：${lastError}`:''}。预览已缓存，工程内容保持原样。`);}
   }
   async function removeSelected(){const item=items.find(i=>i.id===selected);if(item?.kind==='draft'&&await confirm({title:'移除恢复草稿？',name:item.name,message:'只移除自动恢复副本，正式工程不变。',accept:'移除草稿',danger:true})){await request('/api/project-session/document?id='+item.id,{method:'DELETE'});await refresh();}}
-  async function writeSnapshot(doc, metadata){
-    const projectJson=boundedProjectJson(doc);
-    return sendProjectSave('/api/project-session/document',{...metadata,name:doc.settings?.object_name||api.name(),workspace:api.mode?.(),
-      thumbnail:await api.thumbnail?.()||'',thumbnail_version:PROJECT_THUMBNAIL_VERSION},projectJson,PROJECT_SAVE_LIMIT);
+  async function writeSnapshot(doc, metadata, isCurrent){
+    if(!isCurrent())return false;
+    const header={...metadata,name:doc.settings?.object_name||api.name(),workspace:api.mode?.(),
+      thumbnail:await api.thumbnail?.()||'',thumbnail_version:PROJECT_THUMBNAIL_VERSION};
+    const body=await buildProjectRecoveryBody(doc,header,{isCurrent});
+    if(!body||!isCurrent())return false;
+    await sendProjectSaveBody('/api/project-session/document',body,PROJECT_SAVE_LIMIT);
+    return true;
   }
-  async function checkpoint(force=false){
-    const before=api.token();
-    if(busy||!api.dirty()||before===oversizedToken||(!force&&(api.blocked()||before===savedToken||Date.now()<retryAt)))return false;
-    busy=true;
+  async function writeCheckpoint(id,before){
+    const isCurrent=()=>!disposed&&id===draftId&&before===api.token()&&api.dirty();
     try{
-      await writeSnapshot(await api.capture(),{id:draftId});savedToken=before;oversizedToken=undefined;retryAt=0;button.title=homeButton.title;return true;
+      if(!await writeSnapshot(await api.capture(),{id},isCurrent)||!isCurrent())return null;
+      savedToken=before;oversizedToken=undefined;retryAt=0;button.title=homeButton.title;return true;
     }catch(e){
+      if(!isCurrent())return null;
       const message='恢复草稿未保存：'+e.message;
       status(message);button.title=message;
       if(e.code===PROJECT_SAVE_TOO_LARGE){oversizedToken=before;api.toast(message,true);}
       else retryAt=Date.now()+60000;
       return false;
-    }finally{busy=false;}
+    }
+  }
+  async function checkpoint(force=false){
+    const id=draftId;
+    while(checkpointJob){
+      if(!force)return false;
+      const previous=checkpointJob;
+      const result=await previous.promise;
+      if(id!==draftId||disposed)return false;
+      if(previous.id===draftId&&previous.token===api.token()&&result!==null)return result;
+    }
+    const before=api.token();
+    if(disposed||!api.dirty()||before===oversizedToken||(!force&&(api.blocked()||before===savedToken||Date.now()<retryAt)))return false;
+    const job={id,token:before};
+    checkpointJob=job;
+    job.promise=writeCheckpoint(id,before).finally(()=>{checkpointJob=null;});
+    return (await job.promise)===true;
   }
   async function guard(name,{confirmed=false}={}){if(pending)return false;pending=true;try{
     if(!confirmed&&needsSave()){const choice=await confirm({title:'切换工程？',name,detail:'当前工程有未保存修改',message:'保存后打开会先完成保存，再切换工程。直接打开会尝试保留自动恢复副本。',accept:'直接打开',save:true});if(!choice)return false;if(choice==='save'&&!await api.save({closeOnSuccess:true}))return false;}
     if(needsSave()){await api.prepareSwitch?.();const saved=await checkpoint(true);if(!saved)throw Error('无法保留当前恢复草稿，请先保存工程再切换');await beat(false);}
     return true;
   }finally{pending=false;}}
-  async function remember(){const doc=await api.capture(),name=doc.settings?.object_name||api.name(),origin=api.origin?.()||{};const bytes=new TextEncoder().encode(name+'|'+(doc.authoring?.workbench?.project_save?.templateId||'')+'|'+(origin.path||origin.fileName||''));const hash=await crypto.subtle.digest('SHA-256',bytes);const id='recent-'+Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('').slice(0,32);await writeSnapshot(doc,{id,fileName:origin.path||origin.fileName||''});}
+  async function remember(){
+    const activeDraft=draftId,sequence=++recentSequence;
+    const isCurrent=()=>!disposed&&activeDraft===draftId&&sequence===recentSequence;
+    const doc=await api.capture(),name=doc.settings?.object_name||api.name(),origin=api.origin?.()||{};
+    const fileName=origin.path||origin.fileName||'';
+    const bytes=new TextEncoder().encode(name+'|'+(doc.authoring?.workbench?.project_save?.templateId||'')+'|'+fileName);
+    const hash=await crypto.subtle.digest('SHA-256',bytes);
+    const id='recent-'+Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('').slice(0,32);
+    await writeSnapshot(doc,{id,fileName},isCurrent);
+  }
   async function loaded(){loadedOnce=true;draftId='draft-'+crypto.randomUUID().replaceAll('-','');token=api.token();savedToken=token;oversizedToken=undefined;retryAt=0;button.title=homeButton.title;changedAt=Date.now();try{await remember();await refresh();}catch(e){api.toast('工程已打开；最近工程记录失败：'+e.message,true);}}
-  async function openItem(item){if(busy||api.blocked()||item.missing)return;if(!await guard(item.name))return;hide();
+  async function openItem(item){if(api.blocked()||item.missing)return;if(!await guard(item.name))return;hide();
     await api.open(item.name,async progress=>{await progress(0,item.section?'读取保存的完整工程':'读取完整恢复快照');
       const url=item.section==='file'?'/api/saved-project-document?id=':item.section==='template'?'/api/project-document?id=':'/api/project-session/document?id=';
       let doc=await request(url+encodeURIComponent(item.id));
@@ -140,5 +171,16 @@ export function createProjectSession(api) {
   const showRecovery=()=>{if(!dismissed&&!panel.open&&!document.querySelector('dialog[open]')&&items.some(i=>i.kind==='draft'&&i.id!==draftId&&(!i.active||Date.now()-i.heartbeatAt>90000))){tab='draft';render();show();}};
   const timer=setInterval(()=>{const next=api.token();if(next!==token){token=next;changedAt=Date.now();}if(Date.now()-changedAt>30000&&!pending)checkpoint();beat(true).catch(()=>{});showRecovery();},5000);
   refresh().then(showRecovery).catch(()=>{});
-  return {guard,loaded,checkpoint,refresh,openItem,needsSave,get draftId(){return draftId;},async saved(){if(busy||api.dirty())return;try{await request('/api/project-session/document?id='+draftId,{method:'DELETE'});savedToken=api.token();await remember();}catch(e){api.toast('工程已保存；最近工程记录失败：'+e.message,true);}},dispose(){clearInterval(timer);}};
+  async function saved(){
+    const id=draftId,before=api.token();
+    const isCurrent=()=>!disposed&&id===draftId&&before===api.token()&&!api.dirty();
+    if(!isCurrent())return;
+    await checkpointJob?.promise;
+    if(!isCurrent())return;
+    try{
+      await request('/api/project-session/document?id='+id,{method:'DELETE'});
+      if(isCurrent()){savedToken=before;await remember();}
+    }catch(e){if(isCurrent())api.toast('工程已保存；最近工程记录失败：'+e.message,true);}
+  }
+  return {guard,loaded,checkpoint,refresh,openItem,needsSave,get draftId(){return draftId;},saved,dispose(){disposed=true;clearInterval(timer);}};
 }

@@ -7,18 +7,90 @@ import {trunkSurfaceAnchor,evaluateTrunkAnchor} from '../web/imported-trunk-data
 import {normalizeSettings} from '../web/branch-kernel.js';
 import {normalizeAuthoring} from '../web/authoring-state.js';
 import {spawnSync} from 'node:child_process';
-import {validatePackage} from '../scripts/pve-package.mjs';
+import {hash,validatePackage} from '../scripts/pve-package.mjs';
 import {validatePVESkeleton} from '../web/pve-skeleton-export.js';
+import {meshUnitFromGlb} from '../web/mesh-unit-source.js';
+import {importedTrunkFixture} from './imported-trunk-fixture.mjs';
 const tool=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 // GLTFExporter runs in the browser in the application; provide its Blob reader
 // when exercising that same exporter from this Node integration test.
 globalThis.FileReader||=class{async readAsArrayBuffer(blob){this.result=await blob.arrayBuffer();this.onloadend?.();}async readAsDataURL(blob){this.result='data:'+blob.type+';base64,'+Buffer.from(await blob.arrayBuffer()).toString('base64');this.onloadend?.();}};
 async function model(){return prepareImportedTrunk(await readImportedTrunkGlb(fs.readFileSync(path.join(tool,'web/assets/models/QiaoDunTest.glb'))));}
+function runPackage(input,output,status,...flags){
+ const run=spawnSync(process.execPath,['--no-warnings','--experimental-loader','./vendor-loader.mjs',path.join(tool,'scripts/export-pve-complete-units.mjs'),'--tool',tool,'--project',input,'--out',output,'--geometry','--status',status,...flags],{cwd:tool,encoding:'utf8',timeout:180000,maxBuffer:8*1024*1024});
+ assert.ifError(run.error);
+ return {...run,result:JSON.parse(fs.readFileSync(status,'utf8'))};
+}
 async function deliver(t,document){
  const directory=createRuntimeTestDirectory(t,'imported-trunk-pve-'),output=path.join(directory,'package'),input=path.join(directory,'input.branch.json'),status=path.join(directory,'status.json'),sourceBytes=Buffer.from(JSON.stringify({format:'ProceduralBranchProject',...document}));fs.writeFileSync(input,sourceBytes);
- const run=spawnSync(process.execPath,['--experimental-loader','./vendor-loader.mjs',path.join(tool,'scripts/export-pve-complete-units.mjs'),'--tool',tool,'--project',input,'--out',output,'--geometry','--status',status],{cwd:tool,encoding:'utf8',timeout:180000,maxBuffer:8*1024*1024});
- assert.equal(run.status,0,run.stderr+'\n'+run.stdout);const result=JSON.parse(fs.readFileSync(status,'utf8'));assert.equal(result.state,'succeeded');const checked=validatePackage(output,sourceBytes),read=name=>JSON.parse(fs.readFileSync(path.join(output,name),'utf8'));fs.writeFileSync(path.join(directory,'proof.json'),JSON.stringify({result,checked,entry:'desktop CLI --geometry'}));return {result,checked,skeleton:read('whole.pve-skeleton.json'),resolved:read('whole.resolved.json'),manifest:read('complete_units.manifest.json')};
+ const run=runPackage(input,output,status);
+ assert.equal(run.status,0,run.stderr+'\n'+run.stdout);const result=run.result;assert.equal(result.state,'succeeded');const checked=validatePackage(output,sourceBytes),read=name=>JSON.parse(fs.readFileSync(path.join(output,name),'utf8'));fs.writeFileSync(path.join(directory,'proof.json'),JSON.stringify({result,checked,entry:'desktop CLI --geometry'}));return {result,checked,skeleton:read('whole.pve-skeleton.json'),resolved:read('whole.resolved.json'),manifest:read('complete_units.manifest.json')};
 }
+
+function addZeroAreaFace(model){
+ const geometry=model.primitives[0].geometry;
+ geometry.index.splice(3,0,geometry.index[0],geometry.index[0],geometry.index[0]);
+ if(Number.isInteger(model.triangles))model.triangles++;
+}
+
+test('PVE desktop consent keeps the previous package and cleans the imported trunk and source mesh only in export',async t=>{
+ const directory=createRuntimeTestDirectory(t,'imported-trunk-pve-');
+ const input=path.join(directory,'cleanup.branch.json'),output=path.join(directory,'package'),status=path.join(directory,'status.json');
+ const trunk=await model();
+ const meshUnit=structuredClone(await meshUnitFromGlb(new File([await importedTrunkFixture()],'mesh-unit.glb')));
+ const {shape,mount}=importedTrunkShape(trunk);
+ const settings=normalizeSettings({object_name:'PVE 零面积面验收',leaf_density:0,max_leaves:0,child_count:0,buds_enabled:false,fruit_enabled:false,branch_levels:3});
+ const document={format:'ProceduralBranchProject',version:4,settings,leaf_meshes:[],authoring:{
+  branch_shape:shape,recipe:{tags:['WHOLE_PLANT','FOLIAGE_ON_INSTANCES_ONLY']},
+  imported_trunks:{version:1,assets:[trunk],mounts:[mount]},
+  mesh_units:{assets:[meshUnit],instances:[{id:'MESH_i',asset_id:meshUnit.id,parent:mount.guide_map.G0,attach:.6,scale:1,seed:1}]},
+ }};
+ const write=()=>{const source=Buffer.from(JSON.stringify(document));fs.writeFileSync(input,source);return source;};
+ const digest=()=>Object.fromEntries(fs.readdirSync(output).sort().map(name=>[name,hash(fs.readFileSync(path.join(output,name)))]));
+ write();
+ const clean=runPackage(input,output,status,'--require-cleanup-consent');
+ assert.equal(clean.status,0,clean.stderr);
+ const original=digest();
+ assert.equal(clean.result.validation.geometry_cleanup,undefined);
+
+ addZeroAreaFace(meshUnit.model);
+ const sourceOnly=write(),sourceCheck=runPackage(input,output,status,'--require-cleanup-consent');
+ assert.notEqual(sourceCheck.status,0);
+ assert.deepEqual(sourceCheck.result.geometry_cleanup_required,{label:meshUnit.id,removed_faces:1,project_path:input,source_sha256:hash(sourceOnly)});
+ assert.equal(sourceCheck.result.failed_directory,null);
+ assert(!fs.existsSync(path.join(directory,'.pve-export-work')));
+ assert.deepEqual(digest(),original);
+
+ addZeroAreaFace(trunk);
+ const both=write();
+ const changed=runPackage(input,output,status,'--expected-source-sha256',hash(sourceOnly));
+ assert.notEqual(changed.status,0);
+ assert.match(changed.result.detail,/工程副本已变化/);
+ assert.deepEqual(digest(),original);
+ const trunkCheck=runPackage(input,output,status,'--require-cleanup-consent');
+ assert.notEqual(trunkCheck.status,0);
+ assert.equal(trunkCheck.result.geometry_cleanup_required.removed_faces,1);
+ assert.equal(trunkCheck.result.geometry_cleanup_required.source_sha256,hash(both));
+ assert.equal(trunkCheck.result.failed_directory,null);
+ assert.deepEqual(digest(),original);
+
+ const approved=runPackage(input,output,status,'--expected-source-sha256',hash(both));
+ assert.equal(approved.status,0,approved.stderr);
+ assert.deepEqual(fs.readFileSync(input),both);
+ const checked=validatePackage(output,both);
+ const cleanup={assembly_removed_faces:1,source_models:[{id:meshUnit.id,removed_faces:1}],removed_faces:2};
+ assert.deepEqual(checked.geometry_cleanup,cleanup);
+ assert.deepEqual(approved.result.validation.geometry_cleanup,cleanup);
+ const exported=digest();
+ for(const name of ['whole.resolved.bin','whole.trunk-skin.bin',`${meshUnit.id}.glb`]){
+  assert(original[name]);
+  assert.equal(exported[name],original[name],name);
+ }
+ fs.writeFileSync(path.join(directory,'geometry-cleanup-proof.json'),JSON.stringify({
+  preservedBeforeConsent:true,changedSourceRejected:true,sourceUnchanged:true,cleanup,
+  geometrySha:exported['whole.resolved.bin'],skinSha:exported['whole.trunk-skin.bin'],sourceMeshSha:exported[`${meshUnit.id}.glb`],
+ },null,2));
+});
 test('desktop CLI exports a bare textured imported trunk with an empty unit library',async t=>{
  const asset=await model(),{shape,mount}=importedTrunkShape(asset),settings=normalizeSettings({object_name:'纯外部树干',leaf_density:0,max_leaves:0,child_count:0,buds_enabled:false,fruit_enabled:false,branch_levels:3}),authoring=normalizeAuthoring({branch_shape:shape,imported_trunks:{version:1,assets:[asset],mounts:[mount]},recipe:{tags:['WHOLE_PLANT','FOLIAGE_ON_INSTANCES_ONLY']}}),document={version:4,settings,authoring,leaf_meshes:[]},proof=await deliver(t,document);
  assert.equal(proof.skeleton.version,3);assert.deepEqual(proof.skeleton.foliage,[]);assert.deepEqual(proof.skeleton.foliage_sources,[]);assert.equal(proof.manifest.max_relative_radius_error,0);assert.equal(proof.manifest.p95_relative_radius_error,0);assert.equal(proof.result.sources,0);assert.equal(proof.resolved.chunks.reduce((sum,c)=>sum+c.index_count/3,0),asset.triangles);assert(proof.resolved.imported_trunk_materials.materials[0].maps.baseColor);

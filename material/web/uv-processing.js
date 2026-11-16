@@ -6,7 +6,48 @@ import {planGuidedUnwrap,packGuidedUnwrap} from './uv-guides.js';
 import {hasCutRules} from './uv-guide-rules.js';
 import {planTreeUnwrap,packTreeUnwrap,treeGuideMetadata} from './tree-uv.js';
 import {assertUvIslandsPreserved} from './uv-layout-policy.js';
+import {analyzeUV} from './uv-analysis.js';
 export const hasUvConstraints=rules=>!!(rules?.pins?.length||Object.values(rules?.weights||{}).some(v=>Math.abs(v-1)>1e-6));
+const collapsedUvError='UV input has zero-area triangles; use automatic unwrap';
+const unwrapFailed=failure=>Error('自动展开仍有零面积 UV，已保留原工程。请调整减面参数后重试，或选用分步处理检查 UV。',{cause:failure});
+export async function prepareUvWithFallback(input,options,dependencies,{isCurrent,onFallback}){
+  let failure;
+  const modes=options.mode==='tree'?['tree','unwrap']:[options.mode];
+  for(const mode of modes){
+    if(mode!==options.mode)onFallback('unwrap');
+    try{
+      return await prepareUvRevision(input,{...options,mode},dependencies);
+    }catch(error){
+      if(error.message!==collapsedUvError)throw error;
+      if(!isCurrent())throw Object.assign(Error('任务已取消。'),{name:'AbortError'});
+      failure=error;
+    }
+  }
+  if(hasUvConstraints(options.rules)||hasCutRules(options.cutRules)){
+    throw Error('自动展开仍有零面积 UV。请在 UV 精修中检查指定接缝、保护面或锁定岛后重试。',{cause:failure});
+  }
+  if(typeof dependencies.pack!=='function')throw unwrapFailed(failure);
+  const original=analyzeUV(input,{sampleSize:64});
+  if(!original.zeroUvFaces&&!original.outOfRangeFaces){
+    onFallback('repair-existing');
+    try{return await prepareUvRevision(input,{...options,mode:'unwrap',repairSourceOverlap:true},dependencies);}
+    catch(error){
+      if(error.name==='AbortError'||!isCurrent())throw error;
+      failure=error;
+    }
+  }
+  if(!dependencies.projectUv)throw unwrapFailed(failure);
+  onFallback('projection');
+  try{
+    const packed=await dependencies.projectUv(input,options);
+    if(!isCurrent())throw Object.assign(Error('任务已取消。'),{name:'AbortError'});
+    return await finishPacked(input,packed,{...options,mode:'unwrap'},dependencies.native);
+  }catch(error){
+    if(error.name==='AbortError')throw error;
+    throw Error('备用展开未通过检查。可降低扩色、提高贴图分辨率，或先保留拓扑再调整减面。'+
+      (error.message===collapsedUvError?'':error.message),{cause:error});
+  }
+}
 async function finishPacked(input,packed,{mode,revision},native){const intermediate=await applyUvResult(input,packed,{mode,revision});intermediate.tangentMethod='pending';const mikk=await native(intermediate,'tangents'),result=await applyUvResult(intermediate,mikk,{mode,revision});result.chartIds=Int32Array.from(mikk.sourceIndices,i=>packed.chartIds[i]);result.atlas=packed.atlas;result.packing={...packed.packing,requiresMikk:false,tangentMethod:'MikkTSpace'};return result;}
 export async function prepareUvRevision(input,{mode,revision,resolution=2048,padding=12,rules=null,cutRules=null,flow=null,treeOptions=null,actualHeightMeters=10,corrections=[],transition=1,structureCache=null,shapeCoverage=false,contourFill=false,densityReference=null,repairSourceOverlap=false},{native,pack,guides=null,trees=null}){
   if(repairSourceOverlap){

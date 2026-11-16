@@ -8,9 +8,10 @@ export function createSelectionCopyPreview(asset, accepts) {
   const group=new THREE.Group(),inverse=asset.group.matrixWorld.clone().invert();
   group.name='复制放置预览';
   function append(mesh,lookup=asset.lookupTexture,elements=asset.elements,prefix='',radius=1){
+    if(!mesh.isMesh||mesh.userData.category==='tree_light')return;
     const {width,height}=lookup;
     const geometry=mesh.geometry,uv=geometry?.attributes.uv1;
-    if(!mesh.isMesh||!uv)return;
+    if(!uv)return;
     const picked=i=>{const e=elements[Math.floor(uv.getX(i)*width)+Math.floor(uv.getY(i)*height)*width];return accepts(e&&prefix?{...e,id:prefix+e.id}:e);};
     const indices=[],groups=[],index=geometry.index,count=index?.count||uv.count;
     for(let i=0;i<count;i+=3){const a=index?index.getX(i):i,b=index?index.getX(i+1):i+1,c=index?index.getX(i+2):i+2;if(picked(a)&&picked(b)&&picked(c)){

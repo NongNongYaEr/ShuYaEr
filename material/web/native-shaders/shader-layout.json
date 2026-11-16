@@ -3,15 +3,15 @@
   "backend": "v040-dx12",
   "optimization": "O1 material fragment, vertex and guides; dynamic layer and local-overlay loops retained to bound shader compilation",
   "sourceHashes": {
-    "material-blend-shader.js": "b2fee5f2d5e6c6d840b4db5bf2ebbc17c46b514df3b4f6b6374f2d59034f88e6",
+    "material-blend-shader.js": "3cc671b6ab15b385b0662882aa796a6e78cf0c7390f7db30018bae1ad11e1ccf",
     "form-effects.js": "90ed3309392a208dad1e853a678c11b5ce1d43345493dbe1bfc476c24c9b2b9f",
     "material-paint-shader.js": "af94c0ef54e717178a174eb0db2146774a56671f1890dfe686a83ccc4d75dc98",
-    "surface-extra-shader.js": "d026870a5e78701cbdb4547260f70c71b6f491053e157484e2edd12bed5206dc",
+    "surface-extra-shader.js": "726b6cd234e8ca01354376dc28666ec96d9674c2f9e61e78feb39ea94fac4daf",
     "studio-lighting-shader.js": "cc1fe213c45c72fd43efea17179500c04a55058f18f6b0f90420d786811edc3d",
     "organic-layers-shader.js": "e38e78b5ef13018342bf457a37386a314d10a3c2a5a7d6b0959115a1dfd60415",
-    "renderer.js": "640af1e063a38c502605886efe7d0371b497764672d08a9cd36f8c79a56a3dec",
-    "surface-effect-shader.js": "4be21dce119bda4178e4efd0e98452b439c59af3bb4a6da60c03aa238bde8259",
-    "burl-scatter-shader.js": "f49cf0051c3b5dedb9ee15b4e9d574b565f00862e64aa38844a89eaaea4c1508",
+    "renderer.js": "9e58b9aaf854d7d28d40c669cc0bc1d0dfe290ed599c86a03b0df1a33003b7e5",
+    "surface-effect-shader.js": "5b4ce154ace916ad2d6452028853a913b10624c76221a3a741206b7ffef62ade",
+    "burl-scatter-shader.js": "9ab2bb7649e5e43d25085d898f4c412b8788d2ca90ae03745a3f8c0e83bf83e9",
     "local-patch-shader.js": "8e5453134d68242069174045f853e4c1d848bdeda1171f1d45c0101e4ad9ccc1"
   },
   "stages": {
@@ -226,9 +226,9 @@
     },
     "FRAGMENT": {
       "file": "material/native/render/generated/FRAGMENT.hlsl",
-      "sha256": "fc59cd81a8f961a1b93cf2ab035e609c29690f40776df86874633a887304791f",
+      "sha256": "80ae80e9ba7cf1689b0266f5fc9276d3d39f29e0770c7fcadc516849fadf7cbe",
       "binary": "FRAGMENT.cso",
-      "binarySHA256": "f20b8f3191d63776dcbd09d9182973a81a36bdcb52fa31c07fec1817a2707086",
+      "binarySHA256": "ff677d39ec79a8d839cf0d8eb6c234835fec65c85ada8738d6a4cfe15a50d091",
       "profile": "ps_6_0",
       "reflection": {
         "entryPoints": [
@@ -1315,17 +1315,17 @@
     "legacy": {
       "program": "tree-legacy",
       "binary": "FRAGMENT_LEGACY.cso",
-      "binarySHA256": "e88c1e2b50afd6c2aaec9c3aefe01cec19d69986188aa96316939b23635fc533",
+      "binarySHA256": "26b231c5517a992cc0d874fb4ec76043e354e939e54ba976ac8a84cd3b7773ab",
       "file": "material/native/render/generated/FRAGMENT_LEGACY.hlsl",
-      "sha256": "32f9e2cf8ee48d12dbb942749377acffdaa386940bc29598fc41762e645be9ce",
+      "sha256": "81e87c1c03e3c1f08289d91a1b8452683536fa848add5a6e154833508ca9274b",
       "uniformLayoutExact": true
     },
     "stack": {
       "program": "tree-stack",
       "binary": "FRAGMENT_STACK.cso",
-      "binarySHA256": "86126d0df52d10daebcf7fd78309c5923fa3e3264aee5aed0a11558d9ee5638a",
+      "binarySHA256": "25406d5d46dcce976b75bea01048ab95b730f9f64e3873ce8310ab6c006b4e9e",
       "file": "material/native/render/generated/FRAGMENT_STACK.hlsl",
-      "sha256": "d7babf922ad5526cb7949a845306d78e244aec993cea142959897c19d1a8e1cb",
+      "sha256": "7737f25b0990379a3634382f760dede97ee649ccb1e2d9dcad698f4c8c9499a3",
       "uniformLayoutExact": true
     }
   }

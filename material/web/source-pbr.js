@@ -99,7 +99,7 @@ function activePrimitives(doc){
   return active;
 }
 
-function readPrimitive(entry,{accessor}){
+function readPrimitive(entry,{accessor},{allowGeometryRepair}){
   const {primitive,matrix}=entry;
   if(!primitive.attributes||primitive.attributes.POSITION==null||(primitive.mode??4)!==4||
      primitive.extensions?.KHR_draco_mesh_compression||primitive.targets?.length)fail('请导入未压缩、不含形态键的静态三角网格。');
@@ -130,7 +130,7 @@ function readPrimitive(entry,{accessor}){
     for(let k=0;k<3;k++)normal[j+k]=inverseNormalScale*(cofactor[3*k]*nx+cofactor[3*k+1]*ny+cofactor[3*k+2]*nz);
   }
   if(pos.some(v=>!Number.isFinite(v)))fail('GLB 节点变换产生无效坐标。');
-  repairInvalidNormals(pos,normal,indices);
+  repairInvalidNormals(pos,normal,indices,{allowGeometryRepair});
   for(let j=0;j<normal.length;j+=3){
     const length=Math.hypot(normal[j],normal[j+1],normal[j+2]);
     for(let k=0;k<3;k++)normal[j+k]/=length;
@@ -195,7 +195,7 @@ function sourceMaterials(doc,bin,reader,entries){
   return {materials,images};
 }
 
-export async function parseSourcePbrGLB(buffer,name){
+export async function parseSourcePbrGLB(buffer,name,{allowGeometryRepair=false}={}){
   const {doc,bin}=readGlb(buffer);
   if(doc.animations?.length||doc.skins?.length)fail('保留原材质模式需要不含动画和骨骼的静态 GLB。');
   if((doc.extensionsRequired??[]).some(ext=>!['KHR_texture_transform','KHR_materials_emissive_strength'].includes(ext)))
@@ -206,7 +206,7 @@ export async function parseSourcePbrGLB(buffer,name){
   const records=[];
   let vertices=0,indexCount=0;
   for(const entry of active){
-    const data=readPrimitive(entry,reader),vertexCount=data.pos.length/3,materialIndex=entry.primitive.material??-1;
+    const data=readPrimitive(entry,reader,{allowGeometryRepair}),vertexCount=data.pos.length/3,materialIndex=entry.primitive.material??-1;
     const material=bySlot.get(materialIndex),{textures}=material;
     for(const slot of textureSlots){
       const coord=textures[slot]?.texCoord;

@@ -76,8 +76,9 @@ export function createProjectLibraryManager(api) {
     const operation=async progress=>{await progress(0,'读取完整工程数据');
     const original=await request('/api/project-document?id='+encodeURIComponent(item.id));
     const doc=attachSaveContext(editableProjectCopy(original,item.kind,{consume:true}),templateContext(item));
+    const compactTrunkControls=item.kind==='TREE'&&item.managed&&!item.userSaved&&item.batch==='ALL_PLANT_SAMPLE_V2';
     if(item.userSaved)for(const part of new Set([doc,activeProject(doc)]))part.settings.object_name=item.name;
-    await api.load(doc,progress);dialog.close();};
+    await api.load(doc,progress,{compactTrunkControls});dialog.close();};
     if(api.openFlow)await api.openFlow(item.name,operation);else await operation(async()=>{});api.toast((item.userSaved?'已打开样板版本：':'已创建可编辑副本：')+item.name);return true;
   }
   async function saveCurrent() {

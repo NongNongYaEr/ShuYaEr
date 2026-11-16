@@ -1,3 +1,5 @@
+import {getViewportNavigationMode} from './viewport-navigation.js';
+const mayaAltEdit=event=>getViewportNavigationMode()==='maya'&&event.altKey&&event.ctrlKey;
 import * as T from './vendor/three.module.min.js';
 import {sampleLine,lineTangent} from './tree-sculpt.js';
 import {skeletonBranches} from './skeleton-thickness.js';
@@ -30,7 +32,7 @@ export function createUnitDensityController(api,context){
  <div class="field-grid"><label>刷取层<select id="unitDensityLayer"><option value="THROUGH">穿透前后</option><option value="FRONT">前层挂接点</option></select></label><label>前层深度（m）<input id="unitDensityDepth" type="number" min="0.01" max="100" step="0.1" value="1.5"></label></div>
  <label class="unit-density-protection"><input id="unitDensityProtect" type="checkbox" checked>保护精修单元枝</label>
  <div class="unit-density-tally" aria-live="polite"><span>本笔新增 <b id="unitDensityAdded">0</b></span><span>本笔减少 <b id="unitDensityRemoved">0</b></span><span>保护 <b id="unitDensityProtected">0</b></span></div>
- <p class="wb-note">按挂接点刷取，少量补充或逐步疏化；每个母枝分区至少保留一支。按住 Alt 临时反向，松手后恢复。锁定家族始终保留。</p>
+ <p class="wb-note">按挂接点刷取，少量补充或逐步疏化；每个母枝分区至少保留一支。按住 Alt 临时反向（Maya 用 Ctrl＋Alt），松手后恢复。锁定家族始终保留。</p>
  <details class="companion-advanced"><summary>操作与范围说明</summary><p class="wb-note">左键拖动 · 松手确认 · Esc／右键取消整笔 · Ctrl＋Z 一步撤销。往返刷过同一处不会在一笔里反复累乘。加密保持原有实例，沿选中实例的母枝补空；新增自动加入当前选区。没有完整源模型时会明确提示；树干上全新的空白区域请使用「刷生成」。</p></details>`;
  context.register('UNIT_DENSITY','单元枝 · 密度刷',panel);
  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.id='unitDensityOverlay';svg.classList.add('unit-paint-overlay','unit-density-overlay');svg.setAttribute('hidden','');svg.innerHTML='<path class="unit-density-marks"></path><circle/><text text-anchor="middle" dominant-baseline="central">+</text>';canvas.parentElement.append(svg);
@@ -92,7 +94,7 @@ export function createUnitDensityController(api,context){
   hud.hidden=false;hud.style.left=(svg.style.left?parseFloat(svg.style.left):0)+Math.max(8,Math.min(r.width-290,p[0]+20))+'px';hud.style.top=(svg.style.top?parseFloat(svg.style.top):0)+Math.max(8,Math.min(r.height-100,p[1]+25))+'px';
   setText(hud.querySelector('strong'),stroke?'本笔 ＋'+added.length+' ／ −'+marked.size:(thin?'− 疏化':'＋ 加密')+(alt?' · Alt 临时反向':''));
   setText(hud.querySelector('span'),stroke?.reason||(hits.length?'命中 '+hits.length+' 支 · 保护 '+protectedCount+' 支':s.scope==='SELECTED'&&!data().plan.allowed.size?'当前选区为空 · 先选树上单元枝':'未命中范围内的挂接点'));
-  setText(hud.querySelector('small'),(s.scope==='SELECTED'?'当前选区':'全部可见')+' · '+Math.round(s.strength*100)+'% / 笔 · '+(stroke?'松手确认 · Esc 恢复':'Alt 临时反向'));
+  setText(hud.querySelector('small'),(s.scope==='SELECTED'?'当前选区':'全部可见')+' · '+Math.round(s.strength*100)+'% / 笔 · '+(stroke?'松手确认 · Esc 恢复':'Alt 临时反向（Maya 用 Ctrl＋Alt）'));
  }
  function hover(e){last={clientX:e.clientX,clientY:e.clientY};if(!enabled()||blocked()||workflow.adjusting)return;const p=point(e),hits=hitsAt(p);if(!thinning())for(const e of hits.filter(e=>!e.growReason))previewFor(e.item);render(p,hits);}
  function addRecord(template,t,attempt,d){
@@ -146,7 +148,7 @@ export function createUnitDensityController(api,context){
   api.setTool('UNIT_DENSITY');workflow.switchTool('UNIT_DENSITY');if(!localStorage.getItem('treeDuck.unitDensityBrush.v1'))$('sculptStrength').value='.2';context.setMode('UNIT_DENSITY');sync();refresh();
  }
  function refresh(){if(stroke&&(stroke.data.asset!==api.getAsset()||stroke.data.authoring!==api.getAuthoring()))cancel();cache=modelCache=layoutCache=null;if(!enabled()){hide();return;}const d=data(),s=settings();message(!d.plan.allowed.size&&s.scope==='SELECTED'?'当前选区为空：先选择树上单元枝，或切换为「全部可见」':'范围内 '+d.plan.entries.length+' 支 · 加密沿用局部素材，疏化按本笔比例减少');sync();}
- canvas.addEventListener('pointerdown',e=>{if(!enabled())return;if(e.button===1){if(stroke)cancel();return;}if(e.button===2){consume(e);cancel();return;}if(e.button!==0||e.ctrlKey||e.shiftKey||e.metaKey)return;consume(e);canvas.focus({preventScroll:true});alt=e.altKey;sync();if(blocked()||workflow.adjusting)return;if(!$('unitDensityDepth').checkValidity()){message('请填写有效的前层深度');return;}
+ canvas.addEventListener('pointerdown',e=>{if(!enabled())return;if(e.button===1){if(stroke)cancel();return;}if(e.button===2){consume(e);cancel();return;}if(e.button!==0||(e.ctrlKey&&!mayaAltEdit(e))||e.shiftKey||e.metaKey)return;consume(e);canvas.focus({preventScroll:true});alt=e.altKey&&(getViewportNavigationMode()!=='maya'||mayaAltEdit(e));sync();if(blocked()||workflow.adjusting)return;if(!$('unitDensityDepth').checkValidity()){message('请填写有效的前层深度');return;}
   const d=data(),p=point(e);stroke={data:d,settings:settings(),pointerId:e.pointerId,controls:controls.enabled,thin:thinning(),selection:[...api.getSelections()],ledger:createDensityLedger(d.plan,settings().strength),erasePreview:null,searches:new Map(),previewRecords:new Map(),samplePoint:p,last:p,branchCount:d.asset.masterBranches.length,reason:''};controls.enabled=false;canvas.setPointerCapture(e.pointerId);measure('down',()=>{dab(p);render(p);});
  },true);
  canvas.addEventListener('pointermove',e=>{inside=true;if(!enabled())return;if(stroke){consume(e);if(e.pointerId!==stroke.pointerId)return;}else if(e.buttons)return;else if(alt!==e.altKey){alt=e.altKey;sync();}last={clientX:e.clientX,clientY:e.clientY};moves.push(last);if(!raf)raf=requestAnimationFrame(()=>measure('frame',process));},true);

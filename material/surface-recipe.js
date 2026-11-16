@@ -1,4 +1,5 @@
 import {validateSurface,appendPaintRule} from './surface-effects.js';
+import {SCENE_OVERLAY_RULE} from './scene-overlay-rules.js';
 export function packSurfaceRecipe(document){
  const value={version:5,sourceSHA256:document.resources.source,partIds:document.parts.groups.map(p=>p.id),surface:structuredClone(document.surface)};
  for(const e of value.surface.effects)delete e.legacyBinding;
@@ -13,7 +14,12 @@ export function importSurfaceRecipe(raw,document){
  for(const a of s.areas){if(!same&&a.kind==='surface'||a.partId&&!parts.has(a.partId)){removed.add(a.id);continue;}a.sourceSHA256=document.resources.source;}
  if(removed.size)warnings.push(same?'配方中不属于当前命名部位的选区已略过。':'不同模型：配方仅复用可重算规则，源面组与手绘笔触已略过。');
  s.areas=s.areas.filter(a=>!removed.has(a.id));for(const m of s.masks)m.items=m.items.filter(r=>![r.areaRef,r.addRef,r.eraseRef].some(id=>removed.has(id)));
- for(const e of s.effects){delete e.legacyBinding;if(e.manualDecal&&!same){delete e.manualDecal;e.params.burlCount=0;warnings.push('不同模型：手动贴花需重新点击表面定位，外观参数已保留。');}if(e.paint&&!same){e.paint.strokes=[];e.paint.sourceSHA256=document.resources.source;warnings.push('不同模型：保留材质绘制层，已清空源面笔触。');}if(removed.has(e.scopeRef))e.scopeRef=null;}
+ if(!same){
+  const scenes=s.masks.flatMap(mask=>mask.items).filter(rule=>rule.type===SCENE_OVERLAY_RULE).map(rule=>rule.scene);
+  if(scenes.some(scene=>scene.points.length))warnings.push('不同模型：已清空场景叠加点位和路径，可在原效果上重新放置。');
+  for(const scene of scenes){scene.points=[];scene.source=null;}
+ }
+ for(const e of s.effects){delete e.legacyBinding;if(!same&&(e.manualDecal||e.manualDecals?.length)){delete e.manualDecal;if(e.manualDecals)e.manualDecals=[];e.params.burlCount=0;warnings.push('不同模型：手动贴花需重新点击表面定位，外观参数已保留。');}if(e.paint&&!same){e.paint.strokes=[];e.paint.sourceSHA256=document.resources.source;warnings.push('不同模型：保留材质绘制层，已清空源面笔触。');}if(removed.has(e.scopeRef))e.scopeRef=null;}
  for(const e of s.effects)if(e.manualBrush&&!s.masks.find(m=>m.id===e.maskRef)?.items.some(r=>r.type==='paint')){s=appendPaintRule(s,e.id,document.resources.source).s;warnings.push('不同模型：已保留材质画笔，清空旧模型笔触。');}
  if(!same)delete s.analysis.curvature.preparedFor;s.active=true;return{surface:validateSurface(s,document),warnings};
 }

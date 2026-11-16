@@ -1,5 +1,5 @@
 import {validateEmission} from './emission-rules.js';
-import {validateManualDecal} from './manual-decal-rules.js';
+import {validateManualDecal,validateManualDecals} from './manual-decal-rules.js';
 import {validateManualMaterialBrush} from './material-brush-rules.js';
 import {burlSettings} from './burl-effect.js';
 import {validateEdgeTreatment} from './edge-treatment.js';
@@ -13,6 +13,7 @@ import {leafLayer,migrateLayerTree,validateLayerTree,duplicateLayer} from './sur
 // Surface authoring schema. IDs identify instances; type names never identify instances.
 import {LAYER_IDS,LAYER_NAMES,LAYER_CHANNELS} from './material-layers.js';
 import {validateScope} from './region-scope.js';
+import {SCENE_OVERLAY_RULE,validateSceneOverlay} from './scene-overlay-rules.js';
 export const SURFACE_VERSION=8,MAX_EFFECTS=16,MAX_MASKS=48,MAX_AREAS=64,MAX_RULES=16;
 const number=(label,min,max,step,value,unit='',group='material')=>({kind:'number',label,min,max,step,value,unit,group});
 const color=(label,value)=>({kind:'color',label,value,group:'material'});
@@ -30,6 +31,7 @@ export const EFFECT_IDS=[...LAYER_IDS,...Object.keys(EXTRA_EFFECT_TYPES)];
 export const effectChannels=type=>EFFECT_TYPES[type].channels||LAYER_CHANNELS[type];
 export const effectLayerKind=type=>EFFECT_TYPES[type].layerKind||(['wet','aging'].includes(type)?'adjustment':'material');
 export const RULE_TYPES={
+ [SCENE_OVERLAY_RULE]:{name:'场景叠加范围',source:true,fields:{}},
  distribution:{name:'统一自动分布',source:true,fields:DISTRIBUTION_FIELDS},
  treeauto:{name:'稳定形体分布',source:true,dependency:'stable',fields:STABLE_FIELDS},
  treeweather:{name:'老树形体分布',source:true,dependency:'weathering',fields:{role:number('分布角色',0,5,1,0),scale:number('识别尺度',.25,4,.05,1),rootHeightMeters:number('根部附着高度',.1,20,.05,1.85,'m'),density:number('覆盖强度',0,2,.05,1),seed:number('随机种子',0,10000,1,0)}},
@@ -72,6 +74,8 @@ export function validateSurface(raw,document,{allowLegacy=false}={}){
  const effectIds=ids(s.effects),maskIds=ids(s.masks),areaIds=ids(s.areas),parts=new Set(document.parts.groups.map(p=>p.id));
  for(const a of s.areas){a.name=checkName(a.name);if(a.presetOwned!=null&&typeof a.presetOwned!=='boolean')fail('区域预设归属标记无效。');if(!['surface','height','part'].includes(a.kind)||a.sourceSHA256!==document.resources.source)fail('区域来源与当前模型不一致。');a.scope=validateScope(a.scope);if(a.partId!=null&&!parts.has(a.partId))fail('区域引用的部位不存在。');if(a.ownedBy!=null&&!effectIds.has(a.ownedBy))fail('局部区域缺少所属效果。');if(a.kind==='surface'){if(!['all','painted'].includes(a.mode)||!Array.isArray(a.strokes)||a.strokes.length>512)fail('手绘区域结构无效。');a.strokes=a.strokes.map(validateStroke);if(a.legacyPrecision!=null&&!['vertex','pixel'].includes(a.legacyPrecision))fail('原区域精度无效。');}else{a.strokes=[];if(a.kind==='height'&&!a.scope)fail('高度区域缺少范围。');if(a.kind==='part'&&!a.partId)fail('部位区域缺少源面组。');}}
  for(const m of s.masks){m.name=checkName(m.name);if(!Number.isFinite(m.initial)||m.initial<0||m.initial>1||!Array.isArray(m.items)||m.items.length>MAX_RULES)fail('分布规则结构无效。');for(const r of m.items){checkId(r.id);if(all.has(r.id))fail('分布规则标识重复。');all.add(r.id);const d=RULE_TYPES[r.type];if(!d||typeof r.enabled!=='boolean'||!Number.isFinite(r.strength)||r.strength<0||r.strength>1||!object(r.params))fail('分布规则参数无效。');if(d.source?!MASK_COMBINES.includes(r.combine):r.combine!==(r.type==='paint'?'paint':'filter'))fail('分布组合方式无效。');const p=defaults(d.fields);for(const[k,v]of Object.entries(r.params)){const f=d.fields[k];if(!f||!Number.isFinite(v)||v<f.min||v>f.max)fail('分布参数超出范围。');p[k]=v;}r.params=r.type==='distribution'?validateDistributionParams(p):p;
+   if(r.type===SCENE_OVERLAY_RULE)r.scene=validateSceneOverlay(r.scene,document.resources.source);
+   if(r.openRootFallback!==undefined&&(r.type!=='treeauto'||typeof r.openRootFallback!=='boolean'))fail('根部补充分布参数无效。');
    if(r.type==='legacy'||r.type==='area'){if(!areaIds.has(r.areaRef))fail('分布引用区域不存在。');}
    if(r.type==='paint'&&(!areaIds.has(r.addRef)||!areaIds.has(r.eraseRef)))fail('手绘修正缺少增加/擦除区域。');
    if(r.type==='ao'&&!['cavity','open'].includes(r.polarity)||r.type==='curvature'&&!['convex','concave'].includes(r.polarity))fail('AO或曲率选取意图无效。');
@@ -80,6 +84,11 @@ export function validateSurface(raw,document,{allowLegacy=false}={}){
    if(r.type==='height'&&p.maxMeters<p.minMeters)fail('高度范围终点小于起点。');
  }}
  const legacyBindings=new Set();for(const e of s.effects){e.name=checkName(e.name);if(!EFFECT_IDS.includes(e.type)||!maskIds.has(e.maskRef)||e.scopeRef!=null&&!areaIds.has(e.scopeRef)||!['legacy','rules'].includes(e.coverageMode)||typeof e.enabled!=='boolean'||typeof e.locked!=='boolean'||!Number.isFinite(e.opacity)||e.opacity<0||e.opacity>1||!Number.isInteger(e.seed)||e.seed<0||e.seed>10000||!object(e.channels)||['color','roughness','height'].some(c=>typeof e.channels[c]!=='boolean')||e.channels.ao!=null&&typeof e.channels.ao!=='boolean')fail('效果实例参数无效。');e.params=validateEffectParams(e.type,e.params);if(e.emission!=null)e.emission=validateEmission(e.emission);if(e.edgeTreatment!=null)e.edgeTreatment=validateEdgeTreatment(e.edgeTreatment);if(e.blend!=null)e.blend=validateBlend(e.blend);if(e.distribution!=null)e.distribution=validateDistributionState(e.distribution);if(e.publicDistribution!=null)e.publicDistribution=validatePublicDistribution(e.publicDistribution);if(e.manualDecal!=null){e.manualDecal=validateManualDecal(e.manualDecal,document.resources.source);if(e.type!=='burl'||e.params.burlCount!==1)fail('手动贴花需要单个表面贴花实例。');}if(e.manualBrush!=null){e.manualBrush=validateManualMaterialBrush(e.manualBrush,e.type);if(e.paint||e.distribution||!s.masks.find(m=>m.id===e.maskRef)?.items.some(r=>r.type==='paint'))fail('材质绘制层缺少笔触或混用了自动分布。');}if(e.paint!=null){if(e.type!=='moss'||e.legacyBinding)fail('材质绘制层不能绑定自动效果。');e.paint=validateMaterialPaint(e.paint,document.resources.source);}if(e.legacyBinding!=null){if(e.legacyBinding!==e.type||legacyBindings.has(e.type))fail('旧版效果绑定重复或无效。');legacyBindings.add(e.type);}}
+ for(const e of s.effects)if(e.manualDecals!==undefined){
+  if(e.type!=='burl'||e.manualDecal!=null)fail('手动贴花点位只能使用一种定位格式。');
+  e.manualDecals=validateManualDecals(e.manualDecals,document.resources.source);
+  if(e.params.burlCount!==e.manualDecals.length)fail('手动贴花数量与点位列表不一致。');
+ }
  if(s.effects.filter(e=>e.type==='burl').reduce((n,e)=>n+e.params.burlCount,0)>8)fail('表面贴花总数量最多8个（包括隐藏图层），请减少其他树瘤层数量。');
  const c=s.analysis?.curvature;if(!c||!Number.isFinite(c.radiusMeters)||c.radiusMeters<.001||c.radiusMeters>20)fail('模型曲率分析尺度无效。');
  if(c.preparedFor!=null){const p=c.preparedFor;if(!object(p)||p.sourceSHA256!==document.resources.source||!Number.isFinite(p.actualHeightMeters)||p.actualHeightMeters<.1||p.actualHeightMeters>200||!Number.isFinite(p.radiusMeters)||p.radiusMeters<.001||p.radiusMeters>20)fail('曲率准备记录无效。');}

@@ -6,8 +6,22 @@ import {normalizeAuthoring} from '../web/authoring-state.js';
 import {controlCurveOperation,writeControlCurve} from '../web/branch-control-curve.js';
 import {prepareBackgroundSkeleton} from '../web/skeleton-background-geometry.js';
 import {computeTrunkGeometry} from '../web/trunk-geometry-compute.js';
+import {BASE_BRANCH_GUIDE, baseBranchShape, createBaseBranchAssembly} from '../web/base-branch-assembly.js';
 const input=JSON.parse(fs.readFileSync(new URL('../assets/tree-template-library/template-c75273b48abc49fbbfa602525f57c083.branch.json',import.meta.url),'utf8').replace(/^\uFEFF/,''));
 const snap=(settings,authoring)=>({settings,authoring,leaf_sources:[]});
+test('the structural worker omits the base branch atlas and uses its carrier curve for attached branches',async()=>{
+ const fixture=JSON.parse(fs.readFileSync(new URL('../assets/plant-unit-library/5ea361caa1bafd3eecae12733d39f80793519b9a5b9399a8f62e8434199df61a.plantunits.json',import.meta.url),'utf8'));
+ const assembly=createBaseBranchAssembly(fixture,fixture.base_branches[0].id),shape=baseBranchShape(assembly);
+ shape.branches.push({id:'ATTACHED_TEST',parent:BASE_BRANCH_GUIDE,attach:.6,points:[[.5,0,0],[.6,0,.25]],start_radius:.016,end_radius:.006});
+ const settings=normalizeSettings({child_count:0,leaf_density:0}),authoring=normalizeAuthoring({base_branch_assembly:assembly,branch_shape:shape});
+ const original=createStructuralSweepJobs(settings,authoring,0,{continuousBark:false});
+ let received;
+ const client={run:async job=>{received=job;const jobs=createStructuralSweepJobs(job.settings,job.authoring,job.lodIndex,job.options);assert.deepEqual(jobs,original);return {geometry:{version:2,branches:[]}};}};
+ await prepareBackgroundSkeleton(client,null,null,snap(settings,authoring),{reuseUnchanged:true});
+ assert.equal(received.authoring.base_branch_assembly,undefined);
+ assert.equal(received.options.hasBaseBranchAssembly,true);
+ assert.deepEqual(original.map(branch=>branch.id),['ATTACHED_TEST']);
+});
 test('initial procedural skeleton and changed topology/LOD are fully prepared without an existing asset or source payload',async()=>{
  const a=normalizeAuthoring({}),first=normalizeSettings({seed:812,branch_levels:2,child_count:3,leaf_density:0,main_segments:8});
  const client={run:async job=>({geometry:{version:2,branches:createStructuralSweepJobs(job.settings,job.authoring,job.lodIndex,job.options).map(input=>({id:input.id,geometry:computeTrunkGeometry(input)}))}})};

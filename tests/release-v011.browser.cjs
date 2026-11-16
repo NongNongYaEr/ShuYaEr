@@ -1,5 +1,5 @@
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
-const { chromium } = require(process.env.BRANCHFORGE_PLAYWRIGHT || 'playwright');
+const { chromium } = require(process.env.BRANCHFORGE_PLAYWRIGHT || 'C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 
 (async () => {
   const [app, origin, output] = process.argv.slice(2);

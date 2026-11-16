@@ -14,6 +14,7 @@ export function normalizeShapeOperation(raw) {
   if(raw.type==='CONTROL_CURVE'){
     if(!raw.root||!Array.isArray(raw.knots)||raw.knots.length<2||raw.knots.length>64||!raw.knots.every(p=>Array.isArray(p)&&p.length===3&&p.every(Number.isFinite)))return null;
     Object.assign(result,{root:String(raw.root),targets:[String(raw.root)],knots:raw.knots.map(p=>p.map(v=>Math.max(-1000,Math.min(1000,v)))),protect_units:true});
+    if(Number.isInteger(raw.edit_knot_limit)&&raw.edit_knot_limit>=2&&raw.edit_knot_limit<raw.knots.length)result.edit_knot_limit=raw.edit_knot_limit;
   }else if (raw.type === 'RADIUS') {
     result.factor=number(raw.factor,.05,20,1);
     result.point=Math.round(number(raw.point,0,63,0));

@@ -91,7 +91,7 @@ export function createBranchInstanceEditor(api, context) {
   function hitOwner(e){
     const asset=api.getAsset();if(!asset)return null;cast(e);asset.group.updateWorldMatrix(true,true);
     const ownerAt=id=>branchInstanceOwner(api.getAuthoring(),id,asset)||boundary().ownerOf(id);
-    const meshes=[],bindings=new Map(),batches=new Map();asset.group.traverse(mesh=>{if(!mesh.isMesh||!mesh.visible)return;meshes.push(mesh);const b=asset.editPreviewBindings?.(mesh);if(b?.instances){batches.set(mesh,b.instances);for(const descriptor of b.instances)bindings.set(descriptor.object(),descriptor);}});
+    const meshes=[],bindings=new Map(),batches=new Map();asset.group.traverse(mesh=>{if(!mesh.isMesh||!mesh.visible||mesh.userData.category==='tree_light')return;meshes.push(mesh);const b=asset.editPreviewBindings?.(mesh);if(b?.instances){batches.set(mesh,b.instances);for(const descriptor of b.instances)bindings.set(descriptor.object(),descriptor);}});
     for(const h of ray.intersectObjects(meshes,false)){
       const descriptor=bindings.get(h.object)||batches.get(h.object)?.[h.instanceId];if(descriptor){const found=unitInstances().find(i=>i.id===descriptor.id);if(found)return found;}
       const data=h.object.userData,known=ownerAt(data.stable_id||data.branch_id);if(known)return known;

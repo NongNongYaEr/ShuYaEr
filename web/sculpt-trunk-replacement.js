@@ -9,5 +9,8 @@ export function planSculptTrunkReplacement(authoring,model,targetId){
  const data=next.imported_trunks,mounts=new Set(data.mounts.filter(m=>m.asset_id===old.id).map(m=>m.id));data.assets=data.assets.filter(m=>m.id!==id);data.assets.push(copy);if(data.assets.length>16)throw Error('项目树干素材已满，请先整理未使用素材');
  for(const m of data.mounts)if(mounts.has(m.id)){m.asset_id=id;m.revision=copy.revision;}
  let anchors=0;const walk=value=>{if(!value||typeof value!=='object')return;if(value.asset_id===old.id&&mounts.has(value.mount_id)){value.asset_id=id;value.revision=copy.revision;anchors++;}for(const [key,item]of Object.entries(value))if(key!=='imported_trunks')walk(item);};walk(next);normalizeImportedTrunks(data);
- return {authoring:next,sourceId:old.id,targetId:id,mounts:mounts.size,anchors,units:authoring.branch_instances?.length||0,retainsSkeleton:true};
+ const lights=next.tree_lights;
+ const lightsToRefit=lights?.asset===old.id&&lights.revision===old.revision&&mounts.has(lights.mount)
+  ?{...lights,asset:id,revision:copy.revision}:null;
+ return {authoring:next,sourceId:old.id,targetId:id,mounts:mounts.size,anchors,units:authoring.branch_instances?.length||0,retainsSkeleton:true,lightsToRefit};
 }

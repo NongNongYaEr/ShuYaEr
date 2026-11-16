@@ -36,6 +36,9 @@ static D3D12_RESOURCE_BARRIER barrier(ID3D12Resource* resource,D3D12_RESOURCE_ST
 struct Resource {ComPtr<ID3D12Resource> gpu;UINT count=0,stride=0;UINT64 offset=0;std::string generation;D3D12_GPU_VIRTUAL_ADDRESS address()const{return gpu->GetGPUVirtualAddress()+offset;}};
 struct Geometry {Resource vertices,indices;UINT count=0;};
 struct Texture {ComPtr<ID3D12Resource> gpu;UINT descriptor=0;};
+struct ChunkedResource {
+ std::string id;Json metadata;std::vector<uint8_t> bytes;size_t received=0;
+};
 struct Instance {std::array<float,16> current,previous;std::array<float,4> parameters;std::array<float,16> normal;};
 struct alignas(16) FrameConstants {
  std::array<float,16> vp=identity(),previous=identity(),light=identity();
@@ -55,7 +58,7 @@ struct CompiledDraw {
 class Viewport {
  HWND window;std::filesystem::path folder,logFolder;std::thread thread;std::mutex mutex;std::condition_variable changed;
  std::vector<uint8_t> pending;bool stopping=false;std::atomic<int> requestedWidth{1},requestedHeight{1};std::atomic<bool> paused{true},resumeReset{true};
- Json status={{"backend","D3D12"},{"material_table_protocol",1},{"gltf_pbr_protocol",1},{"weighted_edit_protocol",1},{"retained_scene_protocol",1},{"ready",false},{"frames",0},{"dlss_evaluations",0}};
+ Json status={{"backend","D3D12"},{"material_table_protocol",1},{"gltf_pbr_protocol",1},{"weighted_edit_protocol",1},{"retained_scene_protocol",1},{"resource_chunk_protocol",1},{"ready",false},{"frames",0},{"dlss_evaluations",0}};
  std::wstring capturePath;bool capturePending=false;
  ComPtr<IDXGIFactory6> factory;ComPtr<IDXGIAdapter1> adapter;ComPtr<ID3D12Device> device;ComPtr<ID3D12CommandQueue> queue;
  ComPtr<IDXGISwapChain3> swap;std::array<ComPtr<ID3D12Resource>,2> backBuffers;
@@ -68,6 +71,7 @@ class Viewport {
  std::unordered_map<std::string,Geometry> geometries;std::unordered_map<std::string,Texture> textures;std::unordered_map<std::string,Resource> buffers;
  std::vector<CompiledDraw> compiledDraws;std::unordered_map<std::string,std::string> bufferBindings;std::unordered_map<std::string,size_t> logicalUses,physicalUses;std::vector<std::string> stagedResourceIds;UINT64 bufferVersion=1,rootVersion=1,frameBindingResolves=0,frameRootEvaluations=0;UINT64 graphRevision=0,lastPresentedRevision=UINT64_MAX;double submittedAtMs=0,receiveMs=0,recordMs=0,presentMs=0,lastLatencyMs=0,fenceWaitMs=0,queueSubmitMs=0,postPresentWaitMs=0,dxgiPresentMs=0,occlusionSleepMs=0,packetAgeMs=0;HRESULT lastPresentResult=S_OK;std::vector<UINT> recycledDescriptors;
  std::vector<ComPtr<ID3D12Resource>> uploadKeepAlive;
+ ChunkedResource chunkedResource;UINT64 resourceChunks=0,completedChunkedResources=0;
  ComPtr<ID3D12Resource> packetArena,packetStaging;uint8_t* packetArenaCpu=nullptr;size_t packetArenaSize=0,packetArenaCursor=0;UINT64 bufferBatches=0,logicalBufferUploads=0;
  Resource identityInstance,zeroLookup,identityFrames;
  Json scene;FrameConstants frame;std::array<float,16> oldVP=identity();
@@ -154,16 +158,16 @@ class Viewport {
  }
  void uploadTexture(const Json& item,const std::vector<uint8_t>& packet) {
   UINT w=item.at("width"),h=item.at("height");if(!w||!h||w>16384||h>16384||(nextDescriptor>=8192&&recycledDescriptors.empty()))throw std::runtime_error("Native texture capacity");
-  const auto* source=section(packet,item.at("data"),size_t(w)*h*4);std::vector<std::vector<uint8_t>> levels;levels.emplace_back(source,source+size_t(w)*h*4);
+   const auto* source=section(packet,item.at("data"),size_t(w)*h*4);std::vector<std::vector<uint8_t>> levels(1);
   const bool srgb=item.value("srgb",false),normal=item.value("normal",false);float linear[256];for(int i=0;i<256;i++){float c=float(i)/255;linear[i]=c<=.04045f?c/12.92f:std::pow((c+.055f)/1.055f,2.4f);}
-  for(UINT pw=w,ph=h;pw>1||ph>1;){UINT nw=std::max(1u,pw/2),nh=std::max(1u,ph/2);const auto& old=levels.back();std::vector<uint8_t> next(size_t(nw)*nh*4);
+   for(UINT pw=w,ph=h;pw>1||ph>1;){UINT nw=std::max(1u,pw/2),nh=std::max(1u,ph/2);const auto* old=levels.size()==1?source:levels.back().data();std::vector<uint8_t> next(size_t(nw)*nh*4);
    for(UINT y=0;y<nh;y++)for(UINT x=0;x<nw;x++){float color[4]={};for(UINT dy=0;dy<2;dy++)for(UINT dx=0;dx<2;dx++){auto at=(size_t(std::min(ph-1,y*2+dy))*pw+std::min(pw-1,x*2+dx))*4;for(int c=0;c<4;c++)color[c]+=(srgb&&c<3?linear[old[at+c]]:float(old[at+c])/255)*.25f;}
     if(normal){float nx=color[0]*2-1,ny=color[1]*2-1,nz=color[2]*2-1,length=std::sqrt(nx*nx+ny*ny+nz*nz);if(length>.0001f){color[0]=nx/length*.5f+.5f;color[1]=ny/length*.5f+.5f;color[2]=nz/length*.5f+.5f;}}
     for(int c=0;c<4;c++){float value=color[c];if(srgb&&c<3)value=value<=.0031308f?value*12.92f:1.055f*std::pow(value,1.f/2.4f)-.055f;next[(size_t(y)*nw+x)*4+c]=uint8_t(std::clamp(value*255+.5f,0.f,255.f));}
    }levels.push_back(std::move(next));pw=nw;ph=nh;
   }
   Texture t;t.gpu=texture(w,h,DXGI_FORMAT_R8G8B8A8_UNORM,D3D12_RESOURCE_FLAG_NONE,D3D12_RESOURCE_STATE_COPY_DEST,UINT(levels.size()));auto desc=t.gpu->GetDesc();std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> layouts(levels.size());UINT64 size=0;device->GetCopyableFootprints(&desc,0,UINT(levels.size()),0,layouts.data(),nullptr,nullptr,&size);auto staging=buffer(size,D3D12_HEAP_TYPE_UPLOAD,D3D12_RESOURCE_STATE_GENERIC_READ);uint8_t* dest=nullptr;D3D12_RANGE empty{0,0};require(staging->Map(0,&empty,reinterpret_cast<void**>(&dest)),"texture map");
-  for(UINT i=0;i<levels.size();i++){const auto& layout=layouts[i];for(UINT y=0;y<layout.Footprint.Height;y++)memcpy(dest+layout.Offset+size_t(y)*layout.Footprint.RowPitch,levels[i].data()+size_t(y)*layout.Footprint.Width*4,size_t(layout.Footprint.Width)*4);}staging->Unmap(0,nullptr);
+   for(UINT i=0;i<levels.size();i++){const auto& layout=layouts[i];const auto* pixels=i?levels[i].data():source;for(UINT y=0;y<layout.Footprint.Height;y++)memcpy(dest+layout.Offset+size_t(y)*layout.Footprint.RowPitch,pixels+size_t(y)*layout.Footprint.Width*4,size_t(layout.Footprint.Width)*4);}staging->Unmap(0,nullptr);
   for(UINT i=0;i<levels.size();i++){D3D12_TEXTURE_COPY_LOCATION a{},b{};a.pResource=staging.Get();a.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;a.PlacedFootprint=layouts[i];b.pResource=t.gpu.Get();b.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;b.SubresourceIndex=i;commands->CopyTextureRegion(&b,0,0,0,&a,nullptr);}auto transition=barrier(t.gpu.Get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);commands->ResourceBarrier(1,&transition);uploadKeepAlive.push_back(staging);uploadKeepAlive.push_back(t.gpu);const std::string id=item.at("id");auto old=textures.find(id);t.descriptor=old==textures.end()?(recycledDescriptors.empty()?nextDescriptor++:recycledDescriptors.back()):old->second.descriptor;if(old==textures.end()&&!recycledDescriptors.empty())recycledDescriptors.pop_back();srv(t.gpu.Get(),t.descriptor,DXGI_FORMAT_R8G8B8A8_UNORM);textures[id]=std::move(t);resetHistory=true;
  }
  const Json& materialFor(const Json& draw) const {
@@ -178,17 +182,57 @@ class Viewport {
   if(!total)return;packetArenaSize=total;packetArenaCursor=0;packetArena=buffer(total,D3D12_HEAP_TYPE_DEFAULT,D3D12_RESOURCE_STATE_COPY_DEST);packetStaging=buffer(total,D3D12_HEAP_TYPE_UPLOAD,D3D12_RESOURCE_STATE_GENERIC_READ);D3D12_RANGE empty{0,0};require(packetStaging->Map(0,&empty,reinterpret_cast<void**>(&packetArenaCpu)),"batch upload map");bufferBatches++;
  }
  void finishUploadBatch(){if(!packetArena)return;packetStaging->Unmap(0,nullptr);packetArenaCpu=nullptr;commands->CopyBufferRegion(packetArena.Get(),0,packetStaging.Get(),0,packetArenaSize);auto state=barrier(packetArena.Get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_GENERIC_READ);commands->ResourceBarrier(1,&state);uploadKeepAlive.push_back(packetStaging);uploadKeepAlive.push_back(packetArena);resetUploadBatch();}
- void receive(const std::vector<uint8_t>& packet) {
-  const auto receiveStarted=std::chrono::steady_clock::now();
-  if(packet.size()<8)throw std::runtime_error("Truncated native packet");uint32_t head=0;memcpy(&head,packet.data(),4);if(size_t(head)>packet.size()-4)throw std::runtime_error("Invalid native packet header");lastHeaderBytes=head;auto data=Json::parse(packet.data()+4,packet.data()+4+head);if(data.at("version")!=1)throw std::runtime_error("Unsupported native packet version");if((data.contains("scene")||data.contains("scenePatch"))&&data.value("submittedAtMs",0.0)>0)packetAgeMs=std::max(0.0,std::chrono::duration<double,std::milli>(std::chrono::system_clock::now().time_since_epoch()).count()-data.at("submittedAtMs").get<double>());
-  try{beginUploadBatch(data,packet);
-  for(const auto& item:data.value("resources",Json::array())) {
+  void storeResource(const Json& item,const std::vector<uint8_t>& packet){
    const std::string id=item.at("id"),type=item.at("type");stagedResourceIds.push_back(id);
    if(type=="geometry") {const auto& v=item.at("vertices"),&ix=item.at("indices");Geometry g;auto bytes=v.at("bytes").get<size_t>();if(bytes%72)throw std::runtime_error("Native vertex stride");g.vertices=upload(section(packet,v),bytes,72);bytes=ix.at("bytes").get<size_t>();if(bytes%4)throw std::runtime_error("Native index stride");g.indices=upload(section(packet,ix),bytes,4);g.count=g.indices.count;geometries[id]=std::move(g);resetHistory=true;}
    else if(type=="buffer") {auto bytes=item.at("data").at("bytes").get<size_t>();auto uploaded=upload(section(packet,item.at("data")),bytes,item.value("stride",4));uploaded.generation=id;buffers[id]=std::move(uploaded);bufferVersion++;resetHistory=true;}
    else if(type=="texture") uploadTexture(item,packet);
   }
-  finishUploadBatch();}catch(...){resetUploadBatch();throw;}
+  size_t chunkedResourceSize(const Json& resource){
+   const std::string type=resource.at("type");size_t total=0;
+   const auto add=[&](const char* name,size_t stride,size_t limit){
+    const auto& part=resource.at(name);const size_t bytes=part.at("bytes");
+    if(part.at("offset").get<size_t>()!=total||!stride||!bytes||bytes%stride||bytes>limit-total)throw std::runtime_error("Invalid chunked resource layout");
+    total+=bytes;
+   };
+   constexpr size_t bufferLimit=512ULL*1024*1024;
+   if(type=="geometry"){add("vertices",72,bufferLimit);add("indices",4,bufferLimit);}
+   else if(type=="buffer")add("data",resource.value("stride",4u),bufferLimit);
+   else if(type=="texture"){
+    const UINT w=resource.at("width"),h=resource.at("height");
+    if(!w||!h||w>16384||h>16384)throw std::runtime_error("Native texture dimensions exceed DX12 limits");
+    const size_t expected=size_t(w)*h*4;add("data",4,expected);
+    if(total!=expected)throw std::runtime_error("Invalid chunked texture size");
+   }else throw std::runtime_error("Unknown chunked resource type");
+   return total;
+  }
+  void receiveChunk(const Json& chunk,const std::vector<uint8_t>& packet,size_t payloadStart){
+   const std::string id=chunk.at("id");const size_t offset=chunk.at("offset");const auto& data=chunk.at("data");
+   const size_t count=data.at("bytes");
+   if(!count||data.at("offset").get<size_t>()<payloadStart)throw std::runtime_error("Invalid native resource chunk payload");
+   const auto* source=section(packet,data);
+   if(!offset){
+    const auto& resource=chunk.at("resource");const size_t total=chunkedResourceSize(resource);
+    if(id.empty()||resource.at("id")!=id||chunk.at("total").get<size_t>()!=total||count>total)throw std::runtime_error("Invalid native resource chunk start");
+    chunkedResource={};chunkedResource.id=id;chunkedResource.metadata=resource;chunkedResource.bytes.resize(total);
+   }
+   auto& staged=chunkedResource;
+   if(id!=staged.id||offset!=staged.received||count>staged.bytes.size()-staged.received)throw std::runtime_error("Invalid native resource chunk sequence");
+   memcpy(staged.bytes.data()+offset,source,count);staged.received+=count;resourceChunks++;
+   if(staged.received==staged.bytes.size()){storeResource(staged.metadata,staged.bytes);chunkedResource={};completedChunkedResources++;}
+  }
+ void receive(const std::vector<uint8_t>& packet) {
+  const auto receiveStarted=std::chrono::steady_clock::now();
+  if(packet.size()<8)throw std::runtime_error("Truncated native packet");uint32_t head=0;memcpy(&head,packet.data(),4);if(size_t(head)>packet.size()-4)throw std::runtime_error("Invalid native packet header");lastHeaderBytes=head;auto data=Json::parse(packet.data()+4,packet.data()+4+head);if(data.at("version")!=1)throw std::runtime_error("Unsupported native packet version");if((data.contains("scene")||data.contains("scenePatch"))&&data.value("submittedAtMs",0.0)>0)packetAgeMs=std::max(0.0,std::chrono::duration<double,std::milli>(std::chrono::system_clock::now().time_since_epoch()).count()-data.at("submittedAtMs").get<double>());
+   if(data.contains("resourceChunk")){
+    if(data.contains("scene")||data.contains("scenePatch")||data.contains("resources"))throw std::runtime_error("Native resource chunk must be submitted separately");
+    receiveChunk(data.at("resourceChunk"),packet,(size_t(head)+7)&~size_t(3));
+   }else{
+    // An ordinary submission supersedes an abandoned partial upload.
+    if(!chunkedResource.id.empty())chunkedResource={};
+    try{beginUploadBatch(data,packet);for(const auto& item:data.value("resources",Json::array()))storeResource(item,packet);finishUploadBatch();}
+    catch(...){resetUploadBatch();throw;}
+  }
   if(data.contains("scene")){const std::string incoming=data.value("sceneSession",std::string());if(incoming!=sceneSession||data["scene"].value("assetIdentity",std::string())!=scene.value("assetIdentity",std::string())){resetHistory=true;sceneSession=incoming;compiledDraws.clear();}scene=data["scene"];revision=data.value("revision",UINT64(0));graphRevision=data.value("graphRevision",revision);submittedAtMs=data.value("submittedAtMs",0.0);bufferBindings.clear();bufferVersion++;if(scene.contains("bufferBindings"))for(const auto& binding:scene.at("bufferBindings").items())bufferBindings[binding.key()]=binding.value().get<std::string>();
    compileDraws();pruneResources();stagedResourceIds.clear();{std::lock_guard<std::mutex> lock(mutex);status["requires_full_scene"]=false;}
   }
@@ -206,7 +250,7 @@ class Viewport {
    revision=data.value("revision",revision);submittedAtMs=data.value("submittedAtMs",0.0);
    retireResources(retired);retireResources(stagedResourceIds);stagedResourceIds.clear();
   }}
-  {std::lock_guard<std::mutex> lock(mutex);status["received_packets"]=status.value("received_packets",UINT64(0))+1;}
+   {std::lock_guard<std::mutex> lock(mutex);status["received_packets"]=status.value("received_packets",UINT64(0))+1;status["resource_chunks"]=resourceChunks;status["chunked_resources"]=completedChunkedResources;}
   receiveMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-receiveStarted).count();
  }
  std::array<UINT,7> descriptorSources(const Json& material,UINT display=0){std::array<UINT,7> sources{0,1,2,3,0,0,0};const char* names[7]={"map","normalMap","roughnessMap","","metalnessMap","aoMap","emissiveMap"};for(UINT n=0;n<7;n++){if(display)sources[n]=display;else if(n!=3){auto t=textures.find(material.value(names[n],std::string()));if(t!=textures.end())sources[n]=t->second.descriptor;}}return sources;}
@@ -273,7 +317,8 @@ class Viewport {
   // resume and explicit capture still wakes the renderer immediately.
   try {initialize();bool repeatFrame=false;while(true){std::vector<uint8_t> packet;{std::unique_lock<std::mutex> lock(mutex);changed.wait(lock,[&]{return stopping||!pending.empty()||(!paused.load()&&!scene.empty()&&(repeatFrame||resumeReset.load()||capturePending||UINT(requestedWidth.load())!=width||UINT(requestedHeight.load())!=height));});if(stopping)break;packet.swap(pending);}begin();if(!packet.empty())receive(packet);if(resumeReset.exchange(false))resetHistory=true;if(!scene.empty()&&!paused.load()){render();repeatFrame=dlssActive;}else{flush();repeatFrame=false;}}}
   catch(const std::exception& error){std::lock_guard<std::mutex> lock(mutex);status["ready"]=false;status["error"]=error.what();if(device){ComPtr<ID3D12InfoQueue> info;if(SUCCEEDED(device.As(&info))){Json messages=Json::array();const auto count=info->GetNumStoredMessagesAllowedByRetrievalFilter();for(UINT64 i=count>64?count-64:0;i<count;i++){SIZE_T size=0;if(SUCCEEDED(info->GetMessage(i,nullptr,&size))){std::vector<uint8_t> bytes(size);auto message=reinterpret_cast<D3D12_MESSAGE*>(bytes.data());if(SUCCEEDED(info->GetMessage(i,message,&size)))messages.push_back({{"severity",int(message->Severity)},{"id",int(message->ID)},{"description",message->pDescription?message->pDescription:""}});}}status["validation_messages"]=messages;}ComPtr<ID3D12DeviceRemovedExtendedData1> dred;if(SUCCEEDED(device.As(&dred))){D3D12_DRED_PAGE_FAULT_OUTPUT1 fault{};if(SUCCEEDED(dred->GetPageFaultAllocationOutput1(&fault))){status["gpu_fault_address"]=fault.PageFaultVA;auto allocations=[&](const D3D12_DRED_ALLOCATION_NODE1* node){Json result=Json::array();for(unsigned n=0;node&&n<64;n++,node=node->pNext)result.push_back({{"type",node->AllocationType},{"name",node->ObjectNameA?node->ObjectNameA:""}});return result;};status["gpu_fault_existing"]=allocations(fault.pHeadExistingAllocationNode);status["gpu_fault_freed"]=allocations(fault.pHeadRecentFreedAllocationNode);}D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT1 crumbs{};if(SUCCEEDED(dred->GetAutoBreadcrumbsOutput1(&crumbs))){Json result=Json::array();auto node=crumbs.pHeadAutoBreadcrumbNode;for(unsigned n=0;node&&n<16;n++,node=node->pNext){const UINT completed=node->pLastBreadcrumbValue?*node->pLastBreadcrumbValue:0;Json operations=Json::array();for(UINT i=completed>8?completed-8:0;i<std::min(node->BreadcrumbCount,completed+8);i++)operations.push_back(int(node->pCommandHistory[i]));result.push_back({{"count",node->BreadcrumbCount},{"completed",completed},{"operations",operations}});}status["gpu_breadcrumbs"]=result;}}}std::ofstream out(logFolder/L"viewport-error.json");out<<status.dump(2,' ',false,Json::error_handler_t::replace);}
-  // SL releases its GPU resources while the device is still valid.
+   chunkedResource={};
+   // SL releases its GPU resources while the device is still valid.
   if(streamline&&streamline->initialized){streamline->shutdown();streamline->initialized=false;}swap.Reset();for(auto& b:backBuffers)b.Reset();geometries.clear();textures.clear();buffers.clear();uploadKeepAlive.clear();identityInstance.gpu.Reset();zeroLookup.gpu.Reset();identityFrames.gpu.Reset();hdr.Reset();motion.Reset();depth.Reset();shadow.Reset();upscaled.Reset();constantBuffer.Reset();commands.Reset();allocator.Reset();timestamps.Reset();queries.Reset();solid.Reset();doubleSide.Reset();line.Reset();transparent.Reset();shadowSolid.Reset();shadowDouble.Reset();screen.Reset();root.Reset();rtvHeap.Reset();dsvHeap.Reset();srvHeap.Reset();srvSourceHeap.Reset();queue.Reset();fence.Reset();streamline.reset();device.Reset();adapter.Reset();factory.Reset();if(event){CloseHandle(event);event=nullptr;}CoUninitialize();
  }
 public:

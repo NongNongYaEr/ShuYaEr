@@ -30,7 +30,11 @@ const metas=relative=>fs.existsSync(inside(root,relative))?fs.readdirSync(inside
 const sourceRelease=read(inside(root,'release-config.json')),release={...sourceRelease,version:flag('--version')||sourceRelease.version,entry:flag('--entry')||sourceRelease.entry,channel:'professional'};
 if(!/^\d+\.\d+\.\d+$/.test(release.version)||!/^V\d{3}$/.test(delivery)||!/^树鸭儿V\d+\.exe$/.test(release.entry))throw Error('Invalid release identity');
 const classes=[['TREE','CAMPHOR','香樟','tree-camphor-v1.json'],['SHRUB','AZALEA','杜鹃','tree-azalea-v1.json'],['POTTED','FIDDLE_FIG','琴叶榕','tree-fiddle_fig-v1.json'],['VINE','IVY','常春藤','ivy-v1.json'],['FLOWERING_VINE','BOUGAINVILLEA','三角梅','bougainvillea-v1.json'],['GRASS','SCENE_GRASS','草叶','scene-grass-v1.json'],['HERB','SCENE_BROADLEAF','大叶草本','scene-broadleaf-v1.json'],['FLOWER','SCENE_FLOWER','黄色小花','scene-flower-v1.json']].map(([category,species,name,file])=>({category,species,name,file}));
-const trees=metas('assets/tree-template-library'),branches=metas('assets/branch-asset-library'),units=metas('assets/plant-unit-library'),prefabs=metas('assets/branch-prefab-library');
+const localBranchIds=new Set([
+ 'ASSET_3313363ce7794441892e64c16a74de1e', // AI成品梧桐树树枝A
+ 'ASSET_e1ec6cb27dd24097ae70d0ddf9c8e987', // AI成品梧桐树树枝B
+]);
+const trees=metas('assets/tree-template-library'),branches=metas('assets/branch-asset-library').filter(row=>!localBranchIds.has(row.meta.id)),units=metas('assets/plant-unit-library'),prefabs=metas('assets/branch-prefab-library');
 const selectedTrees=classes.map(c=>{const row=trees.find(v=>v.meta.species===c.species&&v.meta.batch==='ALL_PLANT_SAMPLE_V2');if(!row)throw Error('No representative template: '+c.species);return row;});
 const requiredBranches=new Set(),embedded=new Map();
 for(const row of selectedTrees){const doc=read(inside(root,row.meta.path));for(const entry of doc.authoring?.branch_library||[]){requiredBranches.add(entry.id);embedded.set(entry.id,entry);}}
@@ -38,8 +42,12 @@ for(const row of prefabs){const doc=read(inside(root,row.file.replace('.meta.jso
 const selectedBranches=branches.filter(v=>requiredBranches.has(v.meta.id));
 const embeddedOnly=[...requiredBranches].filter(id=>!selectedBranches.some(v=>v.meta.id===id));
 for(const id of embeddedOnly){const asset=embedded.get(id);if(!asset?.shape?.branches?.length||!asset.sample)throw Error('Representative branch dependency is incomplete: '+id);}
-const selectedUnits=units.filter(v=>classes.some(c=>v.meta.id===c.species+'_FINISHED_V1'));
-if(selectedUnits.length!==classes.length)throw Error('Representative calibrated packs are missing');
+const platanusPackId='prepared-902baf08-123e-49ef-918f-37f45bead87c';
+const requiredUnitIds=new Set([...classes.map(c=>c.species+'_FINISHED_V1'),platanusPackId]);
+const selectedUnits=units.filter(row=>requiredUnitIds.has(row.meta.id));
+for(const id of requiredUnitIds){
+ if(selectedUnits.filter(row=>row.meta.id===id).length!==1)throw Error('Expected one bundled plant unit pack: '+id);
+}
 const localUnitIds=new Set(['prepared-aca902b0-b643-4bfb-9881-6eefd4d9621e','prepared-38f2336e-adcf-406d-a4a1-15bf5fd91dc1']);
 const variants=[{folder:'01_精简EXE',lite:true,source:false},{folder:'02_精简公开源码',lite:true,source:true,public:true},{folder:'03_全资产EXE',lite:false,source:false},{folder:'04_全资产开发',lite:false,source:true}];
 const selection={release,sourceRelease,delivery,classes,requiredBranches:[...requiredBranches],embeddedOnlyDependencies:embeddedOnly,counts:{lite:{trees:selectedTrees.length,branches:selectedBranches.length,units:selectedUnits.length,prefabs:prefabs.length},full:{trees:trees.length,branches:branches.length,units:units.filter(v=>!localUnitIds.has(v.meta.id)).length,prefabs:prefabs.length}},variants};
@@ -66,11 +74,19 @@ for(const variant of variants){
  fs.mkdirSync(dir,{recursive:true});console.log('START '+variant.folder);
  for(const f of rootFiles)await copyRelative(dir,f);
  await copyRelative(dir,'web',relative=>!relative.startsWith('web/assets/plant-unit-thumbnails/')&&!relative.startsWith('web/assets/plants/')&&(!variant.lite||!relative.startsWith('web/assets/references/')));
- if(variant.source){await copyRelative(dir,'native',relative=>!variant.public||publicSourcePathAllowed(relative));await copyRelative(dir,'tests');await copyRelative(dir,'UnrealPlugin');}
+ if(variant.source){await copyRelative(dir,'native',relative=>!variant.public||publicSourcePathAllowed(relative));await copyRelative(dir,'tests');}
  // Runtime services have acquired transitive tree preparation/export modules.
  // Ship the current small tool set instead of a historical fixed dependency list.
- await copyRelative(dir,'scripts',relative=>!legacyScript.test(path.basename(relative)));
- await copyRelative(dir,'UEWorkbench');
+ await copyRelative(dir,'scripts',relative=>!legacyScript.test(path.basename(relative))&&relative!=='scripts/prepare-distributions.mjs');
+ if(variant.source){
+  const assembler=fileURLToPath(import.meta.url);
+  const target=inside(dir,'scripts/prepare-distributions.mjs');
+  const sha256=await digest(assembler);
+  if(fs.existsSync(target)){
+   if(await digest(target)!==sha256)throw Error('Existing distribution assembler differs');
+  }else fs.copyFileSync(assembler,target,fs.constants.COPYFILE_EXCL);
+ }
+ if(fs.existsSync(inside(root,'UEWorkbench')))await copyRelative(dir,'UEWorkbench');
  if(integratedRelease)await copyV050Material(root,dir,variant,{copyRelative,copyFile,writeJSON:json},integrated);
  for(const f of ['LICENSE.txt','ASSETS_LICENSE.md','BRAND_NOTICE.md','THIRD_PARTY_NOTICES.md'])await copyRelative(dir,f);
  const plantFiles=variant.lite?new Set(classes.map(c=>c.file)):null;
@@ -92,7 +108,7 @@ for(const name of ['trunk-presets','trunk-section-presets','tree-recipe-library'
  else{for(const f of ['runtime/NOTICE.txt','runtime/NODE-LICENSE.txt'])await copyRelative(dir,f);for(const f of walk(inside(root,'runtime/native')).filter(f=>/license|notice/i.test(path.basename(f))))await copyFile(f,dir,slash(path.relative(root,f)));}
  if(variant.source&&!variant.public){
   for(const f of ['BlenderAsset','次枝资产','初始样本','植物图片素材库','测试树干']){const original=originals&&path.join(path.resolve(originals),f);if(integratedRelease&&original&&fs.existsSync(original)){for(const file of walk(original))await copyFile(file,dir,slash(path.relative(path.resolve(originals),file)));}else await copyRelative(dir,f);if(integratedRelease&&fs.existsSync(inside(root,f)))await copyRelative(dir,f);}
-  for(const f of ['assets/references','design','交付说明'])if(fs.existsSync(inside(root,f)))await copyRelative(dir,f);
+  for(const f of ['assets/references','design','交付说明','示例工程'])if(fs.existsSync(inside(root,f)))await copyRelative(dir,f);
   for(const f of fs.readdirSync(root).filter(f=>/\.(md|bat)$/.test(f)&&!['AGENTS.md','README_从这里开始.md','启动树鸭儿.bat'].includes(f)))await copyRelative(dir,f);
   await copyRelative(dir,'AGENTS.md');if(integratedRelease){const file=inside(dir,'AGENTS.md'),history=fs.readFileSync(file,'utf8');fs.writeFileSync(file,'# '+delivery+' 正式全资产开发目录\n\n后续开发入口为 '+path.join(installedRoot,variant.folder)+'。下方旧路径仅作历史记录。先读 README_从这里开始.md。植物格式4、材质格式25、ABI1及13槽保持兼容。\n\n'+history);}
  }
@@ -107,7 +123,7 @@ for(const name of ['trunk-presets','trunk-section-presets','tree-recipe-library'
  const pkg={name:variant.public?'shuyaer-source-available':'shuyaer-'+delivery.toLowerCase(),version:release.version,private:!variant.public,type:'module',license:'LicenseRef-ShuYaEr-Free-Use-Source-Available-1.0',...(variant.source?{scripts:{test:'node --experimental-loader ./tests/vendor-loader.mjs --test '+coreTests.map(f=>'tests/'+f).join(' '),'test:all':'node --experimental-loader ./tests/vendor-loader.mjs --test tests/*.test.mjs'}}:{})};json(dir,'package.json',pkg);
  json(dir,'release.json',{...release,delivery,variant:variant.folder,sampleClasses:variant.lite?classes:null,sourceAvailable:!!variant.source,publicSource:!!variant.public,materialProjectFormatVersion:integratedRelease?25:undefined,license:pkg.license,commercialCreativeOutput:true,commercialRedistributionRequiresWrittenPermission:true});
  const counts=selection.counts[variant.lite?'lite':'full'];
- json(dir,'资产清单.json',{...counts,samples:variant.lite?classes:null,requiredBranchIds:variant.lite?[...requiredBranches]:null,excludedLocalAssets:[...localUnitIds]});
+ json(dir,'资产清单.json',{...counts,samples:variant.lite?classes:null,requiredBranchIds:variant.lite?[...requiredBranches]:null,requiredPlantUnitPackIds:variant.lite?[...requiredUnitIds]:[platanusPackId],excludedLocalAssets:[...localUnitIds,...localBranchIds]});
  if(variant.public){
   const resources=walk(dir).filter(f=>slash(path.relative(dir,f)).startsWith('assets/')||slash(path.relative(dir,f)).startsWith('web/assets/')||slash(path.relative(dir,f)).startsWith('material/web/assets/'));const packed=packSampleResources(dir,resources);for(const file of resources)fs.unlinkSync(file);console.log('Sample blocks: '+packed.blocks.length+' for '+resources.length+' files');
   write(dir,'.gitignore','.runtime/\n导出/\n恢复资料/\nnode_modules/\n*.exe\n*.dll\n*.cso\n*.obj\n*.pdb\nmaterial/projects/\nmaterial/exports/\nmaterial/runtime/\nmaterial/web/assets/\n*.blend1\nassets/\nweb/assets/\n!web/assets/.gitkeep\nruntime/native/*.json\nruntime/native/*.hlsl\n');

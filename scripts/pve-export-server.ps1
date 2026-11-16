@@ -29,13 +29,18 @@ function Start-PveExport($Body, [string]$Kind = 'pve') {
     $project = [IO.Path]::GetFullPath([string]$Body.project_path)
     if (-not $project.EndsWith('.branch.json', [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $project -PathType Leaf)) { throw '完整枝工程路径无效' }
     $isStatic = $Kind -eq 'static'
+    $expected = ''
+    if (!$isStatic -and $Body.expected_source_sha256) {
+        $expected = [string]$Body.expected_source_sha256
+        if ($expected -cnotmatch '^[A-F0-9]{64}$') { throw '工程副本校验码无效' }
+    }
     $suffix = if ($isStatic) { '_UE_Static' } else { '_PVE_Complete' }
     $output = $project.Substring(0,$project.Length - 12) + $suffix
     if ([IO.Path]::GetFullPath([string]$Body.output_dir) -ne $output) { throw '完整包目录必须与工程名称对应' }
     foreach ($key in @($script:PveJobs.Keys)) {
         if (-not $script:PveJobs[$key].HasExited) {
             $existing = Read-PveJob $key
-            if ($existing.output_dir -eq $output) { return $existing }
+            if ($existing.output_dir -eq $output -and $existing.state -in @('queued','running')) { return $existing }
         }
     }
     [IO.Directory]::CreateDirectory($script:PveJobDir) | Out-Null
@@ -46,6 +51,10 @@ function Start-PveExport($Body, [string]$Kind = 'pve') {
     # Arguments are passed directly to Node, without shell evaluation.
     $exportScript = if ($isStatic) { 'scripts/export-static-vegetation.mjs' } else { 'scripts/export-pve-complete-units.mjs' }
     $arguments = @('--experimental-loader', './vendor-loader.mjs', ('"'+(Join-Path $script:AppDir $exportScript)+'"'), '--project', ('"'+$project+'"'), '--out', ('"'+$output+'"'), '--geometry', '--status', ('"'+$status+'"'))
+    if (!$isStatic) {
+        if ($Body.allow_geometry_cleanup -isnot [bool] -or !$Body.allow_geometry_cleanup) { $arguments += '--require-cleanup-consent' }
+        if ($expected) { $arguments += @('--expected-source-sha256', $expected) }
+    }
     if ($Body.keep_history -is [bool] -and $Body.keep_history) { $arguments += '--keep-history' }
     $script:PveJobs[$id] = Start-Process -FilePath (Join-Path $script:AppDir 'runtime/node.exe') -ArgumentList $arguments -WorkingDirectory $script:AppDir -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $script:PveJobDir ($id+'.log')) -RedirectStandardError (Join-Path $script:PveJobDir ($id+'.stderr.log'))
     Write-ServerLog "Complete-unit PVE started: $id; $project; $output"

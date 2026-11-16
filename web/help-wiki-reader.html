@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>使用手册 · 树鸭儿</title>
+  <link rel="icon" href="./brand/tree-duck-v5.ico" sizes="any">
+  <link rel="stylesheet" href="./brand-palettes.css">
+  <link rel="stylesheet" href="./help-wiki.css">
+  <script src="./vendor/lucide.min.js" defer></script>
+  <script type="importmap">
+    {"imports":{"three":"./vendor/three.module.min.js"}}
+  </script>
+</head>
+<body class="wiki-reader-window">
+  <script type="module">
+    import { mountHelpWikiReader } from './help-wiki.js';
+
+    const paletteKey = 'tree-duck-palette';
+    function applyPalette(palette) {
+      document.documentElement.dataset.palette = ['graphite', 'cream', 'forest'].includes(palette) ? palette : 'graphite';
+    }
+    try { applyPalette(localStorage.getItem(paletteKey)); } catch {}
+    window.addEventListener('storage', event => {
+      if (event.key === paletteKey) applyPalette(event.newValue);
+    });
+    mountHelpWikiReader();
+  </script>
+</body>
+</html>

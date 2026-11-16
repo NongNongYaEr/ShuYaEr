@@ -7,82 +7,95 @@ import { spawnSync } from 'node:child_process';
 import * as THREE from 'three';
 import * as kernel from '../web/branch-kernel.js';
 import { normalizeAuthoring } from '../web/authoring-state.js';
-import { applyBarkMaterialAssignments, BARK_PRESETS, DEFAULT_BARK_PRESET,ensureDefaultTreeBark,barkTextureFiles,createBarkSurfaceMaterial,generateBarkTextureMaps,barkBytesToBase64 } from '../web/bark-materials.js';
-import {generateBarkCompanionMaps} from '../web/bark-map-generator.js';
+import { applyBarkMaterialAssignments, BARK_PRESETS, createBarkSurfaceMaterial } from '../web/bark-materials.js';
+import { lightPoseKey, packLightTrack } from '../web/tree-light-data.js';
+import { proceduralLightCarriers } from '../web/tree-light-carriers.js';
+import { treeLightSurfaceInput } from '../web/v080-lights/surface-input.js';
+import { trunkSurfaceIndex } from '../web/v080-lights/surface.js';
+import { wrapImportedGuide } from '../web/v080-lights/wrap.js';
 import { createPveBarkExporter, snapshotPveBarkBinding } from '../scripts/pve-bark-materials.mjs';
 import { validatePackage } from '../scripts/pve-package.mjs';
 import { hashPveUnitGeometry, equalPveUnitGeometry } from '../scripts/pve-final-geometry.mjs';
 
 const read = file => JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
-const names = ['紧凑侧枝_深绿','紧凑侧枝_混合','紧凑侧枝_嫩绿','短弯细梢_深绿','短弯细梢_混合','短弯细梢_嫩绿'];
-test('PVE real PNGs and physical bindings preserve six complete models; source workbench bark changes only its own complete version', { timeout: 180000 }, t => {
-  const library = names.map(name => read(path.join('次枝资产/全植物次枝成品V1/香樟', `香樟_${name}_成品V1.branchasset.json`)).asset);
-  const sources = [...new Map(library.flatMap(item => item.sample.leaf_meshes).map(item => [item.id, item])).values()];
-  const authoring = normalizeAuthoring({ branch_shape: { branches: [
-    { id:'ROOT',parent:'',points:[[0,0,0],[0,0,4],[.3,0,8]],length:8,start_radius:.15,end_radius:.08 },
-    { id:'HOST',parent:'ROOT',attach:.5,points:[[0,0,4],[1,1,4.3],[3,1,5]],length:3,start_radius:.08,end_radius:.03 }] },
-    branch_library:library,branch_instances:library.map((item,index) => ({ id:'I'+index,asset_id:item.id,linked:true,pinned_revision:item.revision,parent:'ROOT',attach:.1+index*.13,scale:1,variation:0,roll:index*17 })),
-    leaf_material:library[0].sample.authoring.leaf_material,recipe:{tags:['SAMPLE_FOLIAGE_FROM_LIBRARY','FOLIAGE_ON_INSTANCES_ONLY']} });
-  const settings = kernel.normalizeSettings({ ...library[0].sample.settings,object_name:'树皮完整模型验收',leaf_density:0,max_triangles:8000000,preview_lod:0 });
+test('PVE shares one 2K bark across carrier and reusable branches and preserves light binding', { timeout: 180000 }, t => {
+  const unit = read(new URL('../assets/branch-asset-library/6c964da368bd799f7d84c6200c1d38bd607d65829affe754784888996d83079a.branchasset.json', import.meta.url));
+  const second = { ...structuredClone(unit), id: 'ALT_BARK_SOURCE' };
+  applyBarkMaterialAssignments(second.sample.authoring, BARK_PRESETS[3], [], { all: true });
+  const library = [unit, second], sources = unit.sample.leaf_meshes;
+  const authoring = normalizeAuthoring({
+    branch_shape: { branches: [
+      { id:'ROOT', parent:'', points:[[0,0,0],[0,0,4],[.3,0,8]], length:8, start_radius:.15, end_radius:.08 },
+      { id:'HOST', parent:'ROOT', attach:.5, points:[[0,0,4],[1,1,4.3],[3,1,5]], length:3, start_radius:.08, end_radius:.03 },
+    ] },
+    branch_library: library,
+    branch_instances: library.map((item, index) => ({ id:'I'+index, asset_id:item.id, linked:true,
+      pinned_revision:item.revision, parent:'ROOT', attach:.1+index*.13, scale:1, variation:0, roll:index*17 })),
+    leaf_material: unit.sample.authoring.leaf_material,
+    recipe: { tags:['SAMPLE_FOLIAGE_FROM_LIBRARY','FOLIAGE_ON_INSTANCES_ONLY'] },
+  });
+  applyBarkMaterialAssignments(authoring, { ...BARK_PRESETS[1], direction:'HORIZONTAL', scale_v_m:.5 }, [], { all:true });
+  const settings = kernel.normalizeSettings({ ...unit.sample.settings, object_name:'共用树皮验收', leaf_density:0,
+    max_triangles:8000000, preview_lod:0 });
+  const leaves = sources.map(source => ({ ...source, geometry:kernel.deserializeGeometry(source.geometry) }));
+  const tree = kernel.buildBranchAsset(settings, null, leaves, 0, authoring);
+  try {
+    tree.group.updateMatrixWorld(true, true);
+    const { wood, branches } = proceduralLightCarriers(tree);
+    const guides = branches.map(branch => ({ id:branch.stableId, branch }));
+    const surface = treeLightSurfaceInput({ tree, wood, guides, ground:0 });
+    const guide = surface.guides.find(guide => guide.id === 'ROOT');
+    const params = { bottom:.4, top:1.2, pitch:.2, radius:.002, gap:.002, color:'#ffc777', intensity:1.5, scope:'main', direction:1 };
+    const { tracks } = wrapImportedGuide(THREE, trunkSurfaceIndex(THREE, surface.mesh), guide,
+      { ...params, from:0, to:1, range:[.402,1.198], phase:0, textureRepeat:.25, sections:[] });
+    assert.ok(tracks.length, 'valid track projected onto actual carrier bark');
+    authoring.tree_lights = { version:1, kind:'procedural', pose:lightPoseKey(surface.guides,0), ground:0, params, replaces:[],
+      tracks:tracks.map(track => ({
+        guide:guide.id, turns:(track.at(-1).station-track[0].station)/params.pitch,
+        points:packLightTrack(Float32Array.from(track.flatMap(sample => [...sample.point, ...sample.radial]))),
+      })),
+    };
+  } finally {
+    kernel.disposeBranchAsset(tree);
+    leaves.forEach(leaf => leaf.geometry.dispose());
+  }
   const folder = createRuntimeTestDirectory(t, 'pve-bark-');
-  function run(name) {
-    const file = path.join(folder,name+'.branch.json'), output = path.join(folder,name+'_PVE_Complete');
-    fs.writeFileSync(file,JSON.stringify({format:'ProceduralBranchProject',version:4,settings,authoring,leaf_meshes:sources}));
-    const result = spawnSync(process.execPath,['--experimental-loader','./tests/vendor-loader.mjs','./scripts/export-pve-complete-units.mjs','--tool','.','--project',file,'--out',output,'--geometry'],{encoding:'utf8',timeout:120000,maxBuffer:2000000,windowsHide:true});
-    fs.writeFileSync(path.join(folder,name+'.log'),result.stdout+result.stderr);
-    assert.equal(result.status,0,result.stderr || result.stdout);
-    assert.equal(validatePackage(output,fs.readFileSync(file)).valid,true);
-    return {file,output,manifest:read(path.join(output,'complete_units.manifest.json')),resolved:read(path.join(output,'whole.resolved.json')),skeleton:read(path.join(output,'whole.pve-skeleton.json'))};
-  }
-  const baseline = run('legacy');
-  assert.equal(baseline.resolved.bark_materials,undefined);
-  assert.ok(!fs.readdirSync(baseline.output).some(name => name.startsWith('bark-') || name.endsWith('.py')));
-  ensureDefaultTreeBark(authoring);const libraryDefault=run('library_default');
-  assert.equal(libraryDefault.resolved.bark_materials.length,1);
-  for(const unit of libraryDefault.manifest.units)assert.equal(unit.glb_sha256,baseline.manifest.units.find(old=>old.id===unit.id).glb_sha256);
-  const libraryMaps=libraryDefault.resolved.bark_materials[0].maps;
-  for(const image of barkTextureFiles(DEFAULT_BARK_PRESET)){const map=libraryMaps[image.key];assert.equal(map.width,512);assert.equal(map.height,512);assert.deepEqual(fs.readFileSync(path.join(libraryDefault.output,map.file)),Buffer.from(image.bytes));}
-  const paired=generateBarkCompanionMaps(generateBarkTextureMaps(DEFAULT_BARK_PRESET,512).color),generatedRecipe={...DEFAULT_BARK_PRESET,maps:Object.fromEntries(Object.entries(paired).map(([slot,m])=>[slot,{width:m.width,height:m.height,pixels:barkBytesToBase64(m.data),name:'生成 · '+slot}]))};
-  applyBarkMaterialAssignments(authoring,generatedRecipe,[],{all:true});const generated=run('color_derived');
-  for(const unit of generated.manifest.units)assert.equal(unit.glb_sha256,baseline.manifest.units.find(old=>old.id===unit.id).glb_sha256);
-  for(const image of barkTextureFiles(generatedRecipe)){const map=generated.resolved.bark_materials[0].maps[image.key];assert.equal(map.width,512);assert.equal(map.height,512);assert.deepEqual(fs.readFileSync(path.join(generated.output,map.file)),Buffer.from(image.bytes));assert.equal(map.color_space,image.key==='color'?'srgb':'linear');}
-  delete authoring.workbench.bark_materials;
-  const sourceSnapshot = JSON.stringify(authoring.branch_library), instancesSnapshot = JSON.stringify(authoring.branch_instances);
-  applyBarkMaterialAssignments(authoring,{...BARK_PRESETS[1],direction:'HORIZONTAL'},[],{all:true});
-  const changed = run('carrier');
-  assert.equal(JSON.stringify(authoring.branch_library),sourceSnapshot); assert.equal(JSON.stringify(authoring.branch_instances),instancesSnapshot);
-  assert.equal(changed.manifest.units.length,6); assert.equal(changed.skeleton.complete_unit_assembly.leaf_instances,0); assert.equal(changed.skeleton.complete_unit_assembly.organ_instances,0);
-  for (const unit of changed.manifest.units) { assert.equal(unit.glb_sha256,baseline.manifest.units.find(old => old.id === unit.id).glb_sha256); assert.equal(unit.bark_material_bindings,undefined); }
-  assert.equal(changed.resolved.bark_materials.length,1);
-  const carrierChunks = changed.resolved.chunks.filter(chunk => chunk.material_role === 'bark' && chunk.instance_index < 0);
-  assert.ok(carrierChunks.length >= 2); assert.ok(carrierChunks.every(chunk => chunk.bark_material_binding));
-  assert.ok(changed.resolved.chunks.filter(chunk => chunk.instance_index >= 0).every(chunk => !chunk.bark_material_binding), 'tree default does not override complete source wood');
-  const repeats = carrierChunks.map(chunk => chunk.bark_material_binding.texture_transforms.color.repeat[0]);
-  assert.ok(new Set(repeats).size >= 2,'physical repeats differ across carrier radius');
-  for (const chunk of carrierChunks) {
-    const t = chunk.bark_material_binding.texture_transforms.color;
-    assert.equal(t.rotation,Math.PI/2); assert.deepEqual(t.center,[.5,.5]);
-    const uv = new THREE.Vector2(.3,.67), expected = new THREE.Vector3(uv.x,uv.y,1).applyMatrix3(new THREE.Matrix3().fromArray(t.matrix));
-    const texture = new THREE.Texture(); texture.repeat.fromArray(t.repeat); texture.offset.fromArray(t.offset); texture.center.fromArray(t.center); texture.rotation=t.rotation; texture.updateMatrix();
-    const actual = new THREE.Vector3(.3,.67,1).applyMatrix3(texture.matrix); assert.ok(actual.distanceTo(expected)<1e-12); texture.dispose();
-  }
-  const ref = changed.resolved.bark_materials[0].maps.normal, pngPath = path.join(changed.output,ref.file), original = fs.readFileSync(pngPath);
-  fs.appendFileSync(pngPath,'tampered'); assert.throws(() => validatePackage(changed.output,fs.readFileSync(changed.file)),/树皮 PNG 哈希/); fs.writeFileSync(pngPath,original);
-  const dataPath = path.join(changed.output,'whole.resolved.json'), resolvedBytes = fs.readFileSync(dataPath), broken = structuredClone(changed.resolved);
-  broken.chunks.find(chunk => chunk.bark_material_binding).bark_material_binding.texture_transforms.color.repeat[0] *= 2;
-  fs.writeFileSync(dataPath,JSON.stringify(broken)); assert.throws(() => validatePackage(changed.output,fs.readFileSync(changed.file)),/铺贴矩阵与重复/); fs.writeFileSync(dataPath,resolvedBytes);
-  assert.equal(validatePackage(changed.output,fs.readFileSync(changed.file)).valid,true);
-  applyBarkMaterialAssignments(authoring.branch_library[0].sample.authoring,BARK_PRESETS[3],[],{all:true});
-  const sourceChanged = run('source_version');
-  assert.equal(sourceChanged.manifest.units.length,6);
-  const edited = sourceChanged.manifest.units.find(unit => unit.id === library[0].id);
-  assert.notEqual(edited.glb_sha256,baseline.manifest.units.find(unit => unit.id === edited.id).glb_sha256); assert.ok(edited.bark_material_bindings.length > 0);
-  for (const unit of sourceChanged.manifest.units.filter(unit => unit.id !== edited.id)) assert.equal(unit.glb_sha256,baseline.manifest.units.find(old => old.id === unit.id).glb_sha256);
-  assert.ok(sourceChanged.resolved.chunks.some(chunk => chunk.instance_index === 0 && chunk.bark_material_binding));
-  assert.equal(sourceChanged.resolved.bark_material_setup.ue_material_application_verified,false);
-  assert.ok(fs.readFileSync(path.join(sourceChanged.output,'树皮材质说明.txt'),'utf8').includes('未在本轮启动 UE 实际验证'));
-  fs.writeFileSync(path.join(folder,'验收.json'),JSON.stringify({passed:true,source_classes:6,whole_units:6,legacy:baseline.manifest.units,carrier:changed.manifest.units,source_version:sourceChanged.manifest.units},null,2));
-  console.log('真实树皮 PVE 包验收：'+folder);
+  const file = path.join(folder,'source.branch.json'), output = path.join(folder,'package');
+  const source = Buffer.from(JSON.stringify({ format:'ProceduralBranchProject', version:4, settings, authoring, leaf_meshes:sources }));
+  fs.writeFileSync(file, source);
+  const result = spawnSync(process.execPath, [
+    '--experimental-loader','./tests/vendor-loader.mjs','./scripts/export-pve-complete-units.mjs',
+    '--tool','.','--project',file,'--out',output,'--geometry',
+  ], { encoding:'utf8', timeout:120000, maxBuffer:2000000, windowsHide:true });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(validatePackage(output, source).valid, true);
+  assert.deepEqual(fs.readFileSync(file), source);
+
+  const resolved = read(path.join(output,'whole.resolved.json'));
+  const manifest = read(path.join(output,'complete_units.manifest.json'));
+  const materials = resolved.imported_trunk_materials.materials;
+  const shared = materials.find(material => material.tree_bark_role === 'shared');
+  const light = materials.find(material => material.flow);
+  assert.equal(materials.length, 2);
+  assert.equal(shared.id, manifest.shared_tree_bark.material_id);
+  assert.equal(manifest.units.length, 2);
+  assert.ok(resolved.chunks.some(chunk => chunk.material_role === 'foliage'));
+  assert.ok(resolved.chunks.some(chunk => chunk.material_role === 'light'
+    && chunk.imported_trunk_material.material_id === light.id && chunk.light_uv && chunk.imported_trunk_skin));
+  assert.equal(resolved.tree_light_uv.stride, 8);
+  const wood = resolved.chunks.filter(chunk => chunk.material_role === 'bark');
+  assert.ok(wood.some(chunk => chunk.instance_index === -1) && wood.some(chunk => chunk.instance_index >= 0));
+  assert.ok(wood.every(chunk => chunk.imported_trunk_material.material_id === shared.id));
+  const binary = fs.readFileSync(path.join(output, resolved.binary));
+  const carrier = wood.find(chunk => chunk.host_branch_id === 'ROOT' && chunk.instance_index === -1);
+  const u = Array.from({ length: carrier.vertex_count }, (_, index) => binary.readFloatLE(carrier.vertex_offset + index * 48 + 24));
+  assert.ok(Math.max(...u) - Math.min(...u) > 1, 'horizontal physical repeat is baked into carrier UV0');
+  const pngPath = path.join(output,shared.maps.normal.file), original = fs.readFileSync(pngPath);
+  assert.equal(original.readUInt32BE(16), 2048);
+  assert.equal(original.readUInt32BE(20), 2048);
+  fs.appendFileSync(pngPath,'tampered');
+  assert.throws(() => validatePackage(output,source), /实际材质贴图校验失败/);
+  fs.writeFileSync(pngPath,original);
 });
 
 test('historical complete variants retain bark transform and distinguish same-color recipes without changing legacy fingerprints', t => {

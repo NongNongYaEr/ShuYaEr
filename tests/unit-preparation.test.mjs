@@ -1,10 +1,61 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import * as THREE from '../web/vendor/three.module.min.js';
+import {baseBranchShape,createBaseBranchAssembly} from '../web/base-branch-assembly.js';
+import {buildBranchAsset,createProjectDocument,disposeBranchAsset} from '../web/branch-kernel.js';
+import {syncLeafMaterialVariants} from '../web/leaf-material-data.js';
+import {bindLeafExportTextures} from '../web/leaf-material-export.js';
+import {isSharedTreeBarkMaterial} from '../web/whole-tree-shared-bark.js';
 import {changePreparationFrame,rotatePreparationCalibration} from '../web/unit-preparation-data.js';
 import {extractPreparationGeometry,calibratePreparationUnit,centerPreparationBase,preparationPack,preparationSelection,projectedTriangleInRect,validatePreparationDraft,preparationDimensions,preparationSizeFromLength,preparationSizeFromReference,preparationReferenceLength,preparationSizeCheckpoint,preparationSizeFeedback} from '../web/unit-preparation-data.js';
 const source={position:[4,2,0,5,2,0,4,4,0,9,2,0,10,2,0,9,4,0],normal:Array(6).fill([0,0,1]).flat(),uv:[.1,.2,.2,.2,.1,.4,.6,.2,.7,.2,.6,.4],index:[0,1,2,3,4,5],source_name:'whole.glb'};
 const unit={id:'U',name:'叶片',role:'LEAF',faces:[0],base:[4,2,0],tip:[4,4,0],front:[0,0,1],roll:0,size_m:.1,approved:true};
+
+test('prepared base branch keeps source UV and atlas through empty assembly, foliage placement and reload', () => {
+  const pack = JSON.parse(readFileSync(new URL('../web/assets/models/base-branch-sample.plantunits.json', import.meta.url), 'utf8'));
+  const assembly = createBaseBranchAssembly(pack, pack.base_branches[0].id);
+  const settings = { leaf_density: 0, marker_mode: 'NONE', preview_lod: 0 };
+  const authoring = { base_branch_assembly: assembly, branch_shape: baseBranchShape(assembly), leaf_material: assembly.material };
+  const assets = [];
+  const build = raw => {
+    const asset = buildBranchAsset(settings, null, null, 0, raw);
+    assets.push(asset);
+    return asset;
+  };
+  const findWood = asset => {
+    let wood;
+    asset.group.traverse(mesh => { if (mesh.userData.base_branch_mesh) wood = mesh; });
+    return wood;
+  };
+  try {
+    const empty = build(authoring);
+    const record = { id: 'PLACEMENT', unit_id: assembly.units[0].id, face: 0, barycentric: [1, 0, 0], scale: 1 };
+    const populated = build({ ...authoring, base_branch_assembly: { ...assembly, placements: [record] } });
+    const saved = JSON.parse(JSON.stringify(createProjectDocument(populated, [], populated.authoring)));
+    for (const asset of [empty, populated, build(saved.authoring)]) {
+      const wood = findWood(asset);
+      assert.deepEqual(wood.geometry.attributes.uv.array, new Float32Array(assembly.base.geometry.uv));
+      assert.equal(wood.material.sampleLeafMaterial.color, pack.material.color);
+      assert.equal(wood.material.sampleLeafMaterial.normal, assembly.material.normal);
+      assert.equal(isSharedTreeBarkMaterial(wood.material), false);
+      let attached = 0;
+      asset.group.traverse(mesh => {
+        if (mesh.userData.base_branch_unit_id !== record.id) return;
+        assert.equal(mesh.material, wood.material);
+        attached++;
+      });
+      assert.equal(attached, asset === empty ? 0 : 1);
+      const files = syncLeafMaterialVariants(asset, (material, raw) => bindLeafExportTextures(material, raw, 'base-test')).flat();
+      assert.equal(files.find(file => file.key === 'color')?.base64, pack.material.color.split(',')[1]);
+      assert.ok(wood.material.map?.isTexture);
+    }
+    const fallback = findWood(build({ ...authoring, base_branch_assembly: { ...assembly, material: {} } }));
+    assert.equal(isSharedTreeBarkMaterial(fallback.material), true);
+  } finally {
+    assets.forEach(disposeBranchAsset);
+  }
+});
 test('rotating calibration changes the saved frame rigidly around its base without changing UV or physical distances',()=>{for(const old of [unit,{...unit,roll:37,tip:[5,4,1],front:[.1,.3,1]}])for(const axis of [new THREE.Vector3(1,0,0),new THREE.Vector3(0,1,0),new THREE.Vector3(0,0,1)]){const before=calibratePreparationUnit(source,old),delta=new THREE.Quaternion().setFromAxisAngle(axis,.7),next=rotatePreparationCalibration(source,old,delta),after=calibratePreparationUnit(source,next);assert.deepEqual(next.base,old.base);assert.deepEqual(after.geometry.uv,before.geometry.uv);for(let i=0;i<before.geometry.position.length;i+=3){const expected=new THREE.Vector3().fromArray(before.geometry.position,i).multiplyScalar(before.size_m).applyQuaternion(delta),actual=new THREE.Vector3().fromArray(after.geometry.position,i).multiplyScalar(after.size_m);assert(expected.distanceTo(actual)<1e-8);}const feedback=preparationSizeFeedback(source,{...next,size_checkpoint:preparationSizeCheckpoint(source,old)});assert(Math.abs(feedback.ratio-1)<1e-8);assert.equal(feedback.scaleChanged,false);validatePreparationDraft({version:1,units:[next]},2);}});
 test('point frame edits preserve the physical scale, reject coincident directions and rotation bounds, and leave source data immutable',()=>{const saved=JSON.stringify(source),next=changePreparationFrame(source,unit,{tip:[5,4,.4]}),a=calibratePreparationUnit(source,unit),b=calibratePreparationUnit(source,next);const length=v=>new THREE.Vector3().fromArray(v.geometry.position,0).distanceTo(new THREE.Vector3().fromArray(v.geometry.position,3))*v.size_m;assert(Math.abs(length(a)-length(b))<1e-9);assert.throws(()=>changePreparationFrame(source,unit,{tip:unit.base}),/重合/);const large={...unit,size_m:1};assert.throws(()=>rotatePreparationCalibration(source,large,new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-.3)),/最大边/);assert.equal(JSON.stringify(source),saved);});
 test('extraction compacts only selected vertices, preserves exact UVs and leaves original geometry immutable',()=>{const before=JSON.stringify(source),g=extractPreparationGeometry(source,[1]);assert.deepEqual(g.position,source.position.slice(9));assert.deepEqual(g.uv,source.uv.slice(6));assert.deepEqual(g.index,[0,1,2]);assert.equal(JSON.stringify(source),before);assert.throws(()=>extractPreparationGeometry(source,[0,0]),/无效/);});

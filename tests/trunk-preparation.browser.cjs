@@ -1,6 +1,6 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 require('node:module').register('./vendor-loader.mjs',require('node:url').pathToFileURL(__filename));
-const {chromium}=require(process.env.BRANCHFORGE_PLAYWRIGHT||'playwright');
+const {chromium}=require(process.env.BRANCHFORGE_PLAYWRIGHT||'C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 const url=process.argv[2],out=path.resolve('.runtime/external-trunk/ui-'+Date.now());fs.mkdirSync(out,{recursive:true});
 (async()=>{
  const {importedTrunkFixture}=await import('./imported-trunk-fixture.mjs'),file=path.join(out,'雕刻树洞测试.glb');fs.writeFileSync(file,await importedTrunkFixture());

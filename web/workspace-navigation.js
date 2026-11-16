@@ -9,9 +9,14 @@ export function createWorkspaceNavigation() {
   const directoryButton = document.createElement('button'); directoryButton.id = 'parameterDirectoryOpen';
   directoryButton.type = 'button'; directoryButton.textContent = '分组目录';
   directoryButton.setAttribute('aria-expanded', 'false'); directoryButton.setAttribute('aria-controls', 'parameterDirectory'); scope.append(directoryButton);
-  const directory = document.createElement('div'); directory.id = 'parameterDirectory'; directory.setAttribute('popover', 'auto');
+  const directory = document.createElement('div'); directory.id = 'parameterDirectory';
+  const hasNativePopover = typeof directory.showPopover === 'function' && typeof directory.hidePopover === 'function'
+    && window.CSS?.supports?.('selector(:popover-open)');
+  if (hasNativePopover) directory.setAttribute('popover', 'auto');
+  else directory.hidden = true;
   directory.innerHTML = '<div class="directory-heading"><strong>当前分类 · 分组目录</strong><button type="button" aria-label="关闭分组目录" data-directory-close>×</button></div><input type="search" id="parameterDirectorySearch" placeholder="查找分组…" aria-label="查找分组"><div class="directory-actions"><button type="button" data-directory-expand>全部展开</button><button type="button" data-directory-collapse>全部收起</button></div><nav id="parameterDirectoryList" aria-label="跳转到参数分组"></nav><p class="directory-empty" hidden>当前分类没有匹配分组</p>';
   document.body.append(directory);
+  const directorySearch = $('parameterDirectorySearch');
   const search = $('parameterSearch'); search.placeholder = '搜索参数 / 分组';
   const clear = document.createElement('button'); clear.id = 'parameterSearchClear'; clear.type = 'button'; clear.textContent = '×';
   clear.title = '清除搜索与收藏筛选'; clear.setAttribute('aria-label', clear.title); clear.hidden = true; search.after(clear);
@@ -56,7 +61,7 @@ export function createWorkspaceNavigation() {
     node.animate([{backgroundColor:'var(--brand-soft)'},{backgroundColor:'transparent'}], {duration:1100});
   }
   function renderDirectory() {
-    const query = $('parameterDirectorySearch').value.trim().toLowerCase();
+    const query = directorySearch.value.trim().toLowerCase();
     const list = $('parameterDirectoryList'); list.replaceChildren();
     for (const item of entries().filter(item => item.text.toLowerCase().includes(query))) {
       const button = document.createElement('button'); button.type = 'button'; button.textContent = item.text;
@@ -64,18 +69,42 @@ export function createWorkspaceNavigation() {
     }
     directory.querySelector('.directory-empty').hidden = Boolean(list.childElementCount);
   }
-  function closeDirectory() { if (directory.matches(':popover-open')) directory.hidePopover(); }
+  function isDirectoryOpen() { return hasNativePopover ? directory.matches(':popover-open') : !directory.hidden; }
+  function syncDirectoryExpanded() { directoryButton.setAttribute('aria-expanded', String(isDirectoryOpen())); }
+  function closeDirectory() {
+    if (!isDirectoryOpen()) return;
+    if (hasNativePopover) directory.hidePopover();
+    else directory.hidden = true;
+    syncDirectoryExpanded();
+  }
   directoryButton.onclick = () => {
-    if (directory.matches(':popover-open')) { closeDirectory(); return; }
+    if (isDirectoryOpen()) { closeDirectory(); return; }
     const rect = scope.getBoundingClientRect();
     directory.style.left = `${rect.left + 8}px`; directory.style.top = `${rect.bottom + 4}px`;
     directory.style.width = `${Math.min(350, rect.width - 16)}px`;
     directory.style.maxHeight = `${Math.max(160, innerHeight - rect.bottom - 20)}px`;
-    $('parameterDirectorySearch').value = ''; renderDirectory(); directory.showPopover(); $('parameterDirectorySearch').focus();
+    directorySearch.value = ''; renderDirectory();
+    if (hasNativePopover) directory.showPopover();
+    else directory.hidden = false;
+    syncDirectoryExpanded();
+    directorySearch.focus();
   };
-  directory.addEventListener('toggle', () => directoryButton.setAttribute('aria-expanded', String(directory.matches(':popover-open'))));
-  directory.querySelector('[data-directory-close]').onclick = closeDirectory;
-  $('parameterDirectorySearch').oninput = renderDirectory;
+  if (hasNativePopover) directory.addEventListener('toggle', syncDirectoryExpanded);
+  else {
+    document.addEventListener('pointerdown', event => {
+      if (!directory.contains(event.target) && !directoryButton.contains(event.target)) closeDirectory();
+    }, true);
+    document.addEventListener('keydown', event => {
+      if (event.key !== 'Escape' || !isDirectoryOpen()) return;
+      event.preventDefault(); event.stopPropagation();
+      closeDirectory(); directoryButton.focus();
+    }, true);
+  }
+  directory.querySelector('[data-directory-close]').onclick = () => {
+    closeDirectory();
+    if (!hasNativePopover) directoryButton.focus();
+  };
+  directorySearch.oninput = renderDirectory;
   for (const [selector, expand] of [['[data-directory-expand]',true],['[data-directory-collapse]',false]]) {
     directory.querySelector(selector).onclick = () => {
       for (const {node} of entries()) {

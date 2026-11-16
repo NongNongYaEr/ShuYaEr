@@ -1,4 +1,6 @@
 // Snapshot explicitly selected by the user. Keep the personal library record untouched.
+import {layerIndex} from './surface-layers.js';
+
 export const DEFAULT_STYLE_A_ID="cfe50509-6bef-4e35-84b1-22fc86ca53b4";
 export const DEFAULT_STYLE_A_SHA256="72d82526cdc4ccb24e58f6ca65b06d202ad5cbd42bf60723a44ec538193ed3d3";
 export const DEFAULT_STYLE_A_THUMBNAIL="/assets/effect-library/style-a-72d82526cdc4ccb2.png";
@@ -635,3 +637,38 @@ export const DEFAULT_STYLE_A_PRESET={
     }
   }
 };
+
+const defaultSurface=DEFAULT_STYLE_A_PRESET.surfaceRecipe.surface;
+const defaultRootMasks=new Map();
+for(const effect of defaultSurface.effects){
+ const mask=defaultSurface.masks.find(item=>item.id===effect.maskRef);
+ const rule=mask.items[0];
+ if([2,4,5].includes(rule.params.role))defaultRootMasks.set(effect.name,{type:effect.type,mask,rule});
+}
+
+// Upgrade the bundled automatic masks while preserving custom rules and strokes.
+export function withDefaultRootFallback(surface,groupId=null){
+ const index=layerIndex(surface),upgrades=new Set();
+ for(const {node:group,ancestors} of index.values()){
+  if(group.kind!=='group'||group.name!==DEFAULT_STYLE_A_PRESET.name||(groupId&&group.id!==groupId))continue;
+  if(group.locked||ancestors.some(id=>index.get(id).node.locked))continue;
+  for(const node of group.children){
+   if(node.kind!=='effect')continue;
+   const effect=surface.effects.find(item=>item.id===node.effectId);
+   const template=defaultRootMasks.get(effect?.name);
+   if(!template||effect.type!==template.type||effect.locked||effect.scopeRef||effect.distribution||
+      surface.effects.some(other=>other!==effect&&other.maskRef===effect.maskRef))continue;
+   const mask=surface.masks.find(item=>item.id===effect.maskRef);
+   if(!mask||mask.name!==template.mask.name||mask.initial!==template.mask.initial||mask.items.length!==1)continue;
+   const rule=mask.items[0],original=template.rule;
+   if(rule.type===original.type&&rule.enabled===original.enabled&&rule.combine===original.combine&&
+      rule.strength===original.strength&&rule.openRootFallback===undefined&&
+      Object.keys(rule.params).length===Object.keys(original.params).length&&
+      Object.entries(original.params).every(([key,value])=>rule.params[key]===value))upgrades.add(rule.id);
+  }
+ }
+ if(!upgrades.size)return surface;
+ const next=structuredClone(surface);
+ for(const mask of next.masks)for(const rule of mask.items)if(upgrades.has(rule.id))rule.openRootFallback=true;
+ return next;
+}

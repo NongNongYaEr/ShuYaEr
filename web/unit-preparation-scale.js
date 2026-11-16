@@ -17,16 +17,16 @@ export function createPreparationScaleControl({host,camera,controls,getMesh,begi
   }
   function pointerOnPlane(pointer,plane){const r=host.getBoundingClientRect(),ray=new THREE.Raycaster();ray.setFromCamera(new THREE.Vector2((pointer.x-r.left)/r.width*2-1,1-(pointer.y-r.top)/r.height*2),camera);return ray.ray.intersectPlane(plane,new THREE.Vector3());}
   function render(){
-    frame=0;if(!active)return;if(!active.adapter.valid()||!getMesh()){finish(false);return;}const a=active;let amount=1,invalid=false,limited=false;
+    frame=0;if(!active)return;if(!active.adapter.valid()||!getMesh()){finish(false);return;}const a=active,maximum=a.adapter.maxSize;let amount=1,invalid=false,limited=false;
     if(a.kind==='handle'){
       const hit=a.plane&&pointerOnPlane(a.pointer,a.plane);amount=hit&&a.grab!=null?1+hit.clone().sub(a.origin).dot(a.axis)/a.height-a.grab/a.height:1+((a.pointer.x-a.start.x)*a.screenAxis.x+(a.pointer.y-a.start.y)*a.screenAxis.y)/a.screenAxis.lengthSq();
     }else{
       const numeric=a.numeric.trim()?Number(a.numeric):null;invalid=!!a.numeric.trim()&&(!Number.isFinite(numeric)||numeric<=0);
-      if(!invalid)amount=keyboardTransformDelta({mode:'scale',numeric:a.numeric,start:a.start,pointer:a.pointer,center:new THREE.Vector3(),camera,modelRoot:getMesh(),bounds:host.getBoundingClientRect(),uniform:true,scaleRange:[.001/a.adapter.initialSize,1/a.adapter.initialSize]}).amount;
+      if(!invalid)amount=keyboardTransformDelta({mode:'scale',numeric:a.numeric,start:a.start,pointer:a.pointer,center:new THREE.Vector3(),camera,modelRoot:getMesh(),bounds:host.getBoundingClientRect(),uniform:true,scaleRange:[.001/a.adapter.initialSize,maximum/a.adapter.initialSize]}).amount;
       else amount=a.amount;
     }
-    const rawSize=a.adapter.initialSize*amount,size=THREE.MathUtils.clamp(rawSize,.001,1);limited=Math.abs(size-rawSize)>1e-10||(a.kind==='keyboard'&&a.numeric.trim()&&!invalid&&Math.abs(Number(a.numeric)-size/a.adapter.initialSize)>1e-8);a.invalid=invalid;a.amount=size/a.adapter.initialSize;
-    if(!invalid)a.adapter.update(size);refresh();hud.textContent=(a.kind==='handle'?'拖动等比缩放':'S 等比缩放')+' · 本次 ×'+a.amount.toFixed(3)+' · 最大边 '+(size*100).toFixed(2)+' cm\n'+(invalid?'请输入大于 0 的倍率；Esc 取消':a.kind==='handle'?'松开确认 · Esc／右键取消':'移动鼠标或输入倍率 · 左键／Enter 确认 · Esc／右键取消')+(limited?'\n已到大小边界：0.1～100 cm':'');hud.classList.toggle('invalid',invalid);
+    const rawSize=a.adapter.initialSize*amount,size=THREE.MathUtils.clamp(rawSize,.001,maximum);limited=Math.abs(size-rawSize)>1e-10||(a.kind==='keyboard'&&a.numeric.trim()&&!invalid&&Math.abs(Number(a.numeric)-size/a.adapter.initialSize)>1e-8);a.invalid=invalid;a.amount=size/a.adapter.initialSize;
+    if(!invalid)a.adapter.update(size);refresh();hud.textContent=(a.kind==='handle'?'拖动等比缩放':'S 等比缩放')+' · 本次 ×'+a.amount.toFixed(3)+' · 最大边 '+(size*100).toFixed(2)+' cm\n'+(invalid?'请输入大于 0 的倍率；Esc 取消':a.kind==='handle'?'松开确认 · Esc／右键取消':'移动鼠标或输入倍率 · 左键／Enter 确认 · Esc／右键取消')+(limited?'\n已到大小边界：0.1～'+maximum*100+' cm':'');hud.classList.toggle('invalid',invalid);
   }
   function finish(commit){
     if(!active)return false;if(commit){render();if(!active)return true;if(active.invalid)return true;}cancelAnimationFrame(frame);frame=0;const a=active;active=null;controls.enabled=a.controlsEnabled;

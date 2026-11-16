@@ -1,3 +1,4 @@
+import {VIEWPORT_NAVIGATION_HINT} from './viewport-navigation.js';
 import * as T from './vendor/three.module.min.js';
 import {normalizeTrunkRoute,trunkRoutePlan} from './trunk-import-route.js';
 import {createTrunkStartScreen} from './trunk-start-screen.js';
@@ -14,6 +15,8 @@ import {createTrunkPreparationView} from './trunk-preparation-view.js';
 import {normalizeGuideSelection,combineGuideSelection,guidePointKey,guideSelectionCenter,transformGuideSelection} from './trunk-guide-selection.js';
 import {guideEditPoints,subdivideTrunkSegments,interiorSegmentPoints,segmentDeletionPoints,planTrunkPointDeletion,dissolveTrunkPoints,trunkBranchFamily,removeTrunkBranches,reattachTrunkBranch} from './trunk-guide-topology.js';
 import {createTrunkWeightTools} from './trunk-weight-tools.js';
+import {createAppConfirm} from './app-confirm.js';
+import {createDirectTrunkCleanCopy,inspectDirectTrunkGeometry} from './trunk-geometry-cleanup.js';
 
 export function createTrunkPreparation(api){
  const style=document.createElement('link');style.rel='stylesheet';style.href='/trunk-preparation.css';document.head.append(style);const flowStyle=document.createElement('link');flowStyle.rel='stylesheet';flowStyle.href='/trunk-flow.css';document.head.append(flowStyle);
@@ -21,7 +24,7 @@ export function createTrunkPreparation(api){
  dialog.innerHTML=`<header class="trunk-heading"><img src="/brand/category-plant-v1.png" width="76" height="76" alt=""><div><small>雕刻 / AI 模型 → 可装配树干</small><h2 id="trunkPreparationTitle">树干整理</h2><p>保留原始网格与材质，建立可复用的承重结构。</p></div><div class="trunk-header-actions"><button data-import>${icon('import')}导入树干 GLB</button><button data-close>${icon('arrow-left')}返回资源中心</button><button data-cancel-import hidden>取消读取</button></div></header>
  <div class="trunk-namebar"><label>素材名称<input data-name maxlength="80" placeholder="例如：老樟树 · 树洞主干"></label><span data-source></span><span data-autosave role="status">草稿随整理自动保存</span></div>
  <div class="trunk-layout"><aside class="trunk-sidebar"><button data-overview class="trunk-overview">${icon('layout-grid')}<span><strong>树干总览</strong><small>原模、网格与控制骨架</small></span>${icon('arrow-left')}</button><nav class="trunk-steps" aria-label="树干整理步骤"><button data-step="1"><i>01</i><span><strong>方向与尺寸</strong><small>底点、朝向、真实米制尺寸</small></span></button><button data-step="2"><i>02</i><span><strong>控制骨架</strong><small>布置控制枝与网格归属</small></span></button><button data-step="3"><i>03</i><span><strong>检查与保存</strong><small>原材质、弯曲测试、固定版本</small></span></button></nav><div class="trunk-structure"><header><strong>控制枝 <span data-guide-count>0</span></strong><button data-add-guide aria-label="添加子控制枝">${icon('plus')}</button></header><div data-guides></div></div><details class="trunk-draft-list" open><summary>${icon('history')}整理草稿</summary><select data-drafts aria-label="选择树干整理草稿"></select><button data-resume>继续整理</button></details></aside>
- <main class="trunk-main"><div class="trunk-viewbar"><div role="group" aria-label="模型显示"><button data-display="source">${icon('box')}原始模型</button><button data-display="result">${icon('axis-3d')}整理结果</button></div><button data-material title="用当前造型制作新的树皮材质，保留原始树干与控制骨架">${icon('palette')}制作树皮材质</button><button data-sculpt class="trunk-sculpt-entry">${icon('brush')}模型雕刻</button><span data-view-note>检查方向与尺寸</span><select data-representation aria-label="显示模型与骨架"><option value="overlay">模型＋骨架</option><option value="model">只看模型</option><option value="bones">只看骨架</option></select><button data-fit>${icon('maximize')}适应模型</button><button data-front>正视</button></div><div class="trunk-host" data-host><div class="trunk-empty" data-empty><img src="/brand/category-plant-v1.png" alt=""><h3>从一段有造型的树干开始</h3><p>导入雕刻或 AI 生成的静态 GLB，保留树洞、根部、UV 和内嵌贴图。</p><button data-empty-import>${icon('plus')}选择树干 GLB</button><small>原始文件随草稿和素材保留 · 可随时返回修改</small></div></div><footer class="trunk-viewfooter"><span>中键旋转 · Shift＋中键平移 · 滚轮缩放</span><span data-dimensions></span><button data-undo aria-label="撤销">${icon('undo-2')}</button><button data-redo aria-label="重做">${icon('redo-2')}</button></footer></main>
+ <main class="trunk-main"><div class="trunk-viewbar"><div role="group" aria-label="模型显示"><button data-display="source">${icon('box')}原始模型</button><button data-display="result">${icon('axis-3d')}整理结果</button></div><button data-material title="用当前造型制作新的树皮材质，保留原始树干与控制骨架">${icon('palette')}制作树皮材质</button><button data-sculpt class="trunk-sculpt-entry">${icon('brush')}模型雕刻</button><span data-view-note>检查方向与尺寸</span><select data-representation aria-label="显示模型与骨架"><option value="overlay">模型＋骨架</option><option value="model">只看模型</option><option value="bones">只看骨架</option></select><button data-fit>${icon('maximize')}适应模型</button><button data-front>正视</button></div><div class="trunk-host" data-host><div class="trunk-empty" data-empty><img src="/brand/category-plant-v1.png" alt=""><h3>从一段有造型的树干开始</h3><p>导入雕刻或 AI 生成的静态 GLB，保留树洞、根部、UV 和内嵌贴图。</p><button data-empty-import>${icon('plus')}选择树干 GLB</button><small>原始文件随草稿和素材保留 · 可随时返回修改</small></div></div><footer class="trunk-viewfooter"><span data-viewport-navigation-hint>${VIEWPORT_NAVIGATION_HINT}</span><span data-dimensions></span><button data-undo aria-label="撤销">${icon('undo-2')}</button><button data-redo aria-label="重做">${icon('redo-2')}</button></footer></main>
  <aside class="trunk-properties"><header><span data-step-number>01</span><div><small>树干整理</small><h3 data-step-title>方向与真实尺寸</h3></div></header><div class="trunk-property-scroll">
  <section data-section="1"><p class="trunk-guide">确定树干底点与生长方向，再输入真实长度。原始网格始终保留。</p><div class="trunk-point-actions"><button data-point="base">${icon('map-pin')}重定底点</button><button data-point="tip">${icon('move-up')}重定朝向</button></div><label>底点到朝向点的真实长度（m）<input type="number" data-length min=".001" max="1000" step="any"></label><div data-size-feedback class="trunk-size-feedback"></div><dl data-size-facts></dl><details><summary>校准点坐标</summary>${['base','tip','front'].map(key=>'<fieldset><legend>'+({base:'底点',tip:'朝向点',front:'正面方向'}[key])+'</legend>'+['X','Y','Z'].map((axis,i)=>'<label>'+axis+'<input type="number" step="any" data-coordinate="'+key+'" data-axis="'+i+'"></label>').join('')+'</fieldset>').join('')}</details><button data-face-camera>${icon('scan-eye')}以当前视角设置正面</button><small>整理后底点为原点，Z 轴向上，Y 轴为正面。</small></section>
  <section data-section="2" hidden><p class="trunk-guide">把控制枝放在对应木干内部。这里设置原始骨架；弯曲测试在下一步进行。</p><label>当前控制枝<select data-guide-select></select></label><div class="trunk-point-navigator"><header><strong data-point-title>当前控制点</strong><span data-point-count></span></header><div class="trunk-point-jump"><button data-previous-point aria-label="上一个控制点">${icon('chevron-left')}</button><select data-point-select aria-label="当前控制点"></select><button data-next-point aria-label="下一个控制点">${icon('chevron-right')}</button></div><div class="trunk-selection-actions"><button data-guide-all>本枝全选</button><button data-guide-clear>清空选区</button></div><div data-point-strip class="trunk-point-strip" aria-label="选择控制点"></div><small data-selection-note>仅编辑明确选中的点</small></div><small data-coordinate-title>控制点坐标（m）</small><div class="trunk-point-inputs">${['X','Y','Z'].map((axis,i)=>'<label>'+axis+'（m）<input type="number" data-control-axis="'+i+'" step="any"></label>').join('')}</div><div class="trunk-point-actions"><button data-insert-point>${icon('plus')}插入控制点</button><button data-remove-point>${icon('minus')}删除控制点</button></div><p class="trunk-guide">空白处拖框多个点，Shift 补选、Ctrl 减选。G／R／S 编辑选区，轴心为选区中心；未选点不连带。F 聚焦选区。</p><div class="trunk-point-actions"><button data-add-child>添加子控制枝</button><button data-remove-guide>删除当前控制枝</button></div><label>网格归属<div data-regions></div></label><small>相邻但不连通的木干，可指定对应控制枝，避免错误连带。</small></section>
@@ -31,7 +34,7 @@ export function createTrunkPreparation(api){
  const modelTools=document.createElement('div');modelTools.className='trunk-transformbar';modelTools.innerHTML='<span data-transform-kind>模型校准</span><div role="group" aria-label="模型变换" data-model-toolbar><button data-model-tool="observe">'+icon('mouse-pointer-2')+'观察</button><button data-model-tool="translate">'+icon('move')+'移动网格 <kbd>G</kbd></button><button data-model-tool="rotate">'+icon('rotate-3d')+'旋转 <kbd>R</kbd></button><button data-model-tool="scale">'+icon('scaling')+'等比缩放 <kbd>S</kbd></button></div><div data-guide-toolbar hidden><div role="group" aria-label="点选择方式"><button data-point-mode="box" title="拖动框选一个新选区">'+icon('mouse-pointer-2')+'框选 <kbd>B</kbd></button></div><span class="trunk-edit-target" data-edit-target>选择控制点</span><button data-guide-move>'+icon('move')+'移动 <kbd>G</kbd></button><button data-guide-rotate>'+icon('rotate-3d')+'旋转 <kbd>R</kbd></button><button data-guide-scale>'+icon('scaling')+'缩放 <kbd>S</kbd></button><select data-axis-view aria-label="布点视角"><option value="">布点视角</option><option value="front">正视 · X/Z</option><option value="side">侧视 · Y/Z</option><option value="top">俯视 · X/Y</option></select><button data-guide-focus>'+icon('focus')+'聚焦 <kbd>F</kbd></button></div><label><input type="checkbox" data-human-reference checked>人物 1.75 m</label><small data-transform-help>拖动手柄；或按快捷键输入数值</small>';dialog.querySelector('[data-host]').before(modelTools);
  document.body.append(dialog);trapResourceDialogFocus(dialog);const q=s=>dialog.querySelector(s),all=s=>dialog.querySelectorAll(s),store=createTrunkPreparationStore(),library=createTrunkModelStore();
  const flow=document.createElement('nav');flow.className='trunk-flow';flow.setAttribute('aria-label','树干整理流程');flow.innerHTML='<button data-flow="model">01 模型准备</button><button data-flow="material">02 表面材质</button><button data-flow="export">03 检查与保存</button><button data-flow="rig">04 自动骨架与绑定</button>';q('.trunk-heading').after(flow);
- const strategy=document.createElement('div');strategy.className='trunk-material-options';strategy.innerHTML='<select data-material-policy hidden aria-label="处理方式"><option value="new">高模完整处理</option><option value="material">保留模型，只制作材质</option><option value="overlay">保留原材质 · 叠加效果</option><option value="keep">直接绑定骨骼</option></select><label>目标三角面<select data-material-target><option value="15000">1.5 万</option><option value="30000">3 万</option><option value="50000" selected>5 万</option></select></label><label>贴图规格<select data-material-resolution><option value="1024">1K</option><option value="2048" selected>2K</option><option value="4096">4K</option></select></label>';q('[data-section="1"]').prepend(strategy);
+ const strategy=document.createElement('div');strategy.className='trunk-material-options';strategy.innerHTML='<select data-material-policy hidden aria-label="处理方式"><option value="new">高模完整处理</option><option value="staged">高模分步处理</option><option value="material">保留模型，只制作材质</option><option value="overlay">保留原材质 · 叠加效果</option><option value="keep">直接绑定骨骼</option></select><label>目标三角面<select data-material-target><option value="15000">1.5 万</option><option value="30000">3 万</option><option value="50000" selected>5 万</option></select></label><label>贴图规格<select data-material-resolution><option value="1024">1K</option><option value="2048" selected>2K</option><option value="4096">4K</option></select></label>';q('[data-section="1"]').prepend(strategy);
  const summary=document.createElement('div');summary.className='trunk-current-route';summary.innerHTML='<div><small>当前处理方式</small><strong data-route-title></strong></div><button type="button" data-route-change>更改</button><p data-route-flow></p>';strategy.prepend(summary);
  const draftList=q('.trunk-draft-list'),draftHome=draftList.parentElement,strategyHome=strategy.parentElement;
  let pendingImportRoute=null,picker={open:false,purpose:'import',route:'full',target:'50000',resolution:'2048'};
@@ -264,14 +267,33 @@ export function createTrunkPreparation(api){
  }
  async function acceptMaterial(next,{sessionId}={}){
   if(busy||gesture||repair||!draft||draft.id!==sessionId||next.id!==model?.id)throw Error('树干草稿已改变，材质检查点未写入');
-  await flush();const previous={model,draft,step,history,future,selected,selection};busy=true;render();
+  busy=true;render();
+  let previous=null,listRefreshFailed=false;
   try{
+   await flush();
+   previous={model,draft,step,history,future,selected,selection};
    const edits=trunkEditable(model);if(edits.material_workflow)delete edits.material_workflow.previous;
    next.material_workflow.previous={sourceId:draft.sourceId,sourceRevision:draft.sourceRevision,edits};
    const record={...next,id:'TRUNK_MAT_'+next.source.sha256.slice(0,32)+next.material_editable.sha256.slice(0,16)},source=await store.source(record);
-   await view.setModel(next);model=next;draft={...draft,sourceId:source.id,sourceRevision:source.revision,materialResult:{sourceId:source.id,sourceRevision:source.revision,edits:trunkEditable(next)}};step=2;history=[];future=[];selected=null;selection=[];clearRepairTools();auto.reset();view.setEditMode('guide');view.setDisplay('result');await flush();await drafts();
-  }catch(error){({model,draft,step,history,future,selected,selection}=previous);await view.setModel(model);throw error;}finally{busy=false;render();}
-  if(model.material_workflow.needsSkeleton){auto.open();auto.start();}else status('材质GLB已更新；几何一致，原控制骨架与绑定保留。');
+   await view.setModel(next);
+   model=next;
+   draft={...draft,sourceId:source.id,sourceRevision:source.revision,materialResult:{sourceId:source.id,sourceRevision:source.revision,edits:trunkEditable(next)}};
+   step=2;history=[];future=[];selected=null;selection=[];
+   clearRepairTools();auto.reset();view.setEditMode('guide');view.setDisplay('result');
+   await flush();
+   // The checkpoint is committed. Refreshing the selector cannot undo it.
+   await drafts().catch(()=>{listRefreshFailed=true;});
+  }catch(error){
+   if(previous){
+    ({model,draft,step,history,future,selected,selection}=previous);
+    await view.setModel(model);
+    view.setEditMode(editModeForStep(step));
+    q('[data-autosave]').textContent='草稿已保存';
+   }
+   throw error;
+  }finally{busy=false;render();}
+  if(model.material_workflow.needsSkeleton){if(await auto.open())await auto.start();}else status('材质GLB已更新；几何一致，原控制骨架与绑定保留。');
+  if(listRefreshFailed)api.toast('材质结果已保存。草稿列表暂未刷新，重新打开树干整理可查看。');
  }
  async function restoreMaterialVersion(){
   if(busy||gesture||repair)return;auto.reset();await flush();const target=model?.material_workflow?.previous||draft?.materialResult;if(!target)return;
@@ -320,11 +342,54 @@ export function createTrunkPreparation(api){
  }
  async function open({model:existing=null,...options}={}){if(dialog.open)return;context=options;opener=document.activeElement;busy=true;dialog.showModal();syncResourceOverlay();render();try{if(existing||model)await ensureView();if(existing){if(draft)await flush();model={...existing,...trunkEditable(existing)};validateTrunkReady(model);const source=await store.source(model);draft={version:1,id:crypto.randomUUID(),sourceId:source.id,sourceRevision:source.revision,revision:0};history=[];future=[];selected=null;selection=[];clearRepairTools();step=1;await view.setModel(model);await flush();}else if(model)await view.setModel(model);if(model){view.setEditMode(editModeForStep(step));if(step===2&&selected)view.selectControl(selected.guide,selected.index);}await drafts();render();q('[data-import]').focus({preventScroll:true});}finally{busy=false;render();}}
  async function close({resume=true,finishing=false}={}){if(component.active)await component.command('leave');if(busy&&!finishing){status('当前操作尚未完成，请稍候。');return;}if(gesture){status('请先松开当前手柄。');return;}if(repair){if(model.guides!==repair.initialGuides||model.binding!==repair.initialBinding){status('请先确认绑定，或放弃本次修整后退出。');return;}discardRepair();}await flush();weightTools.leave();deleteReview=null;deletePopup.hidden=true;lastPointer=null;view?.dispose();view=null;dialog.close();syncResourceOverlay();if(resume)await context.onReturn?.();opener?.isConnected&&opener.focus({preventScroll:true});}
+ let confirmGeometryCleanup;
+ async function ensureDirectGeometry(){
+  if(!model||normalizeTrunkRoute(q('[data-material-policy]').value)!=='rig')return true;
+  if(busy||gesture||repair)return false;
+  const source=model,plan=inspectDirectTrunkGeometry(source);
+  if(!plan.faces)return true;
+  if(plan.faces===plan.total)throw Error('树干的三角面在三维空间里全部没有面积，请换一个模型。');
+  confirmGeometryCleanup||=createAppConfirm('trunkGeometryConfirm');
+  busy=true;render();
+  let viewChanged=false;
+  try{
+   const allowed=await confirmGeometryCleanup({title:'清理零面积三角面后绑定？',name:source.name,
+    detail:`${plan.faces.toLocaleString()} 个零面积三角面 · ${(plan.total-plan.faces).toLocaleString()} 个有效面`,
+    message:'在新草稿中清理这些面。有效面的网格、原 UV、材质与对应顶点权重保留。原 GLB 和当前草稿保留。',
+    accept:'清理并继续绑定'});
+   if(!allowed){status('已取消本次绑定，当前草稿保留。');return false;}
+   await flush();
+   const cleaned=createDirectTrunkCleanCopy(source,plan);
+   cleaned.name=source.name.slice(0,71)+' · 几何清理';
+   validateTrunkReady(cleaned);
+   const record=await store.source(cleaned);
+   viewChanged=true;
+   await view.setModel(cleaned,{fit:false});
+   const saved=await store.put({version:1,id:crypto.randomUUID(),sourceId:record.id,sourceRevision:record.revision,
+    revision:0,preparationRoute:'rig',edits:trunkEditable(cleaned),step,selected,selection:selection.map(p=>({...p}))});
+   model=cleaned;draft=saved;history=[];future=[];savedStamp='';saveError=null;viewChanged=false;
+   clearRepairTools();
+   view.setEditMode(editModeForStep(step));
+   if(step===2&&selected)view.selectControl(selected.guide,selected.index);
+   q('[data-autosave]').textContent='清理副本已保存';
+   await drafts().catch(()=>{});
+   status(`已清理 ${plan.faces.toLocaleString()} 个零面积面，原草稿保留。`);
+   return true;
+  }catch(error){
+   if(viewChanged){await view.setModel(source,{fit:false});if(step===2&&selected)view.selectControl(selected.guide,selected.index);}
+   throw error;
+  }finally{busy=false;render();}
+ }
+ async function requestRigStep(next){
+  if(next>1&&!await ensureDirectGeometry())return false;
+  setStep(next);return step===next;
+ }
  async function ensureRig({automatic=false}={}){
   if(busy)throw Error('当前操作尚未完成，请稍候。');
   if(!rigAllowed())throw Error('请先完成材质保存，或选择直接绑定骨骼');
   if(repair)throw Error('请先应用候选骨架，或选择保留原骨架。');
   if(gesture)throw Error('请先确认或取消当前点位调整。');
+  if(!await ensureDirectGeometry())return false;
   weightTools.leave();
   const source=model,session=draft;busy=true;render();status('正在检查弯曲与绑定…');
   try{
@@ -334,7 +399,7 @@ export function createTrunkPreparation(api){
     try{view.showPose(8);}finally{view.restoreOriginal();if(display!=='result')view.setDisplay(display);q('[data-pose]').value=0;q('[data-pose-label]').textContent='0°';}
    }});
    if(checked!==model){model=checked;savedStamp='';view.sync(model);await flush();}
-   status('弯曲与绑定检查通过，可以直接开始创作或保存。');
+   status('弯曲与绑定检查通过，可以直接开始创作或保存。');return true;
   }finally{busy=false;render();}
  }
  function clearRepairTools(){
@@ -521,7 +586,7 @@ export function createTrunkPreparation(api){
   if(repair?.comparing){q('[data-repair-compare]').click();return true;}
   return false;
  }
- repairEntry.onclick=safe(()=>startRepair());
+ repairEntry.onclick=safe(async()=>{if(await ensureDirectGeometry())startRepair();});
  all('[data-guide-target]').forEach(b=>b.onclick=()=>setTargetMode(b.dataset.guideTarget));
  q('[data-guide-through]').onchange=()=>{through=q('[data-guide-through]').checked;view.sync(model);};
  q('[data-subdivide]').onclick=safe(()=>applySubdivide(targets,Number(q('[data-subdivide-count]').value)));
@@ -566,11 +631,11 @@ export function createTrunkPreparation(api){
  });
  function repairBaseline(){return q('[data-repair-baseline]').value==='original'?repair.original.guides:repair.initialGuides;}
  q('[data-repair-baseline]').onchange=()=>{if(repair?.comparing)view.showCandidateGuides(repairBaseline());};
- async function save(kind){if(!model||busy)return;await ensureRig();if(savedStamp===stamp()){status('内容未变，沿用已保存素材。');return;}busy=true;render();try{view.restoreOriginal();model.thumbnail=view.thumbnail();await flush();if(kind==='library'){const existing=(await library.list()).find(r=>r.id===model.id),item=await library.put(model,{expectedRevision:existing?.revision||0,thumbnail:model.thumbnail});model={...model,revision:item.revision};await flush();status('已收入本机内容库 · V'+item.revision+'；原版本保留。');}else{await api.saveProject({...model});status('树干素材已保存到当前项目。保存工程文件后会随工程一起保留。');}savedStamp=stamp();}finally{busy=false;render();}}
+ async function save(kind){if(!model||busy||!await ensureRig())return;if(savedStamp===stamp()){status('内容未变，沿用已保存素材。');return;}busy=true;render();try{view.restoreOriginal();model.thumbnail=view.thumbnail();await flush();if(kind==='library'){const existing=(await library.list()).find(r=>r.id===model.id),item=await library.put(model,{expectedRevision:existing?.revision||0,thumbnail:model.thumbnail});model={...model,revision:item.revision};await flush();status('已收入本机内容库 · V'+item.revision+'；原版本保留。');}else{await api.saveProject({...model});status('树干素材已保存到当前项目。保存工程文件后会随工程一起保留。');}savedStamp=stamp();}finally{busy=false;render();}}
  function inspectImage(index,title){const image=document.createElement('dialog');image.className='trunk-image-dialog';image.innerHTML='<header><strong>'+esc(title)+' · 原始贴图</strong><button aria-label="关闭贴图检视">'+icon('x')+'</button></header><div><img src="'+esc(model.images[index].data)+'" alt="'+esc(title)+'"></div>';document.body.append(image);image.querySelector('button').onclick=()=>image.close();image.addEventListener('close',()=>image.remove(),{once:true});trapResourceDialogFocus(image);image.showModal();paintIcons();}
  q('[data-replace-sculpt]').onclick=safe(async()=>{await flush();if(await api.replace(model))await close({resume:false});});q('[data-confirm-sculpt-review]').onclick=safe(()=>change(()=>{model={...model,physical_size_confirmed:true,sculpt:{...model.sculpt,needs_review:false}};},'已确认雕刻后的骨架与尺寸'));q('[data-sculpt]').onclick=safe(async()=>{if(!model||busy||gesture||repair)throw Error('请先结束当前调整');await api.sculpt(model,context);});q('[data-cancel-import]').onclick=()=>{if(!worker)return;importSequence++;worker.terminate();worker=null;status('已取消读取，原有树干和草稿保留。');rejectImport?.(new DOMException('已取消读取','AbortError'));render();};q('[data-import]').onclick=q('[data-empty-import]').onclick=chooseImport;q('[data-file]').onchange=safe(async()=>{const file=q('[data-file]').files[0];q('[data-file]').value='';const route=pendingImportRoute||q('[data-material-policy]').value;pendingImportRoute=null;await importFile(file,{route});});q('[data-close]').onclick=safe(close);dialog.addEventListener('cancel',event=>{event.preventDefault();safe(close)();});q('[data-name]').onchange=safe(()=>change(()=>{model={...model,name:q('[data-name]').value.trim()};},'名称已更新',{keepRig:true}));q('[data-length]').onchange=safe(()=>change(()=>{model=resizeTrunk(model,Number(q('[data-length]').value));},'真实尺寸已更新'));all('[data-coordinate]').forEach(input=>input.onchange=safe(()=>change(()=>{const key=input.dataset.coordinate,value=[...model.calibration[key]];value[Number(input.dataset.axis)]=Number(input.value);model=recalibrateTrunk(model,{...model.calibration,[key]:value});},'校准已更新')));
  all('[data-model-tool]').forEach(button=>button.onclick=()=>{view.chooseTransform(button.dataset.modelTool);render();status('模型校准：G 只移动网格，竖直骨架固定；R 旋转、S 校准尺寸。');});all('[data-point-mode]').forEach(b=>b.onclick=()=>setSelectionMode(b.dataset.pointMode));q('[data-guide-all]').onclick=()=>{const g=model.guides.find(g=>g.id===(selected?.guide||model.guides[0].id));selectPoints(g.points.map((_,index)=>({guide:g.id,index})));};q('[data-guide-clear]').onclick=()=>selectPoints([]);for(const [name,mode]of [['guide-rotate','rotate'],['guide-scale','scale']])q('[data-'+name+']').onclick=()=>{q('[data-host] canvas').focus({preventScroll:true});view.beginGuideMove(mode);};q('[data-guide-move]').onclick=()=>{q('[data-host] canvas').focus({preventScroll:true});view.beginGuideMove();};q('[data-axis-view]').onchange=()=>{if(q('[data-axis-view]').value)view.fit(q('[data-axis-view]').value,false);};q('[data-guide-focus]').onclick=()=>view.focusControl();q('[data-previous-point]').onclick=()=>chooseGuide(selected.guide,Math.max(0,selected.index-1));q('[data-next-point]').onclick=()=>{const g=model.guides.find(g=>g.id===selected.guide);chooseGuide(g.id,Math.min(g.points.length-1,selected.index+1));};q('[data-human-reference]').onchange=()=>view.setReference(q('[data-human-reference]').checked);
- all('[data-point]').forEach(button=>button.onclick=()=>{view.choosePoint(button.dataset.point);render();status('在原始网格上点击'+(button.dataset.point==='base'?'底点':'朝向点')+'；也可直接拖动两个点。');});all('[data-display]').forEach(button=>button.onclick=()=>{view.setDisplay(button.dataset.display);render();});all('[data-step]').forEach(button=>button.onclick=()=>setStep(Number(button.dataset.step)));q('[data-overview]').onclick=()=>{if(gesture||busy)return;selected=null;setStep(1);view?.fit();};q('[data-representation]').onchange=()=>view?.setRepresentation(q('[data-representation]').value);q('[data-fit]').onclick=()=>view?.fit();q('[data-front]').onclick=()=>view?.fit('front');q('[data-next]').onclick=()=>setStep(step+1);
+ all('[data-point]').forEach(button=>button.onclick=()=>{view.choosePoint(button.dataset.point);render();status('在原始网格上点击'+(button.dataset.point==='base'?'底点':'朝向点')+'；也可直接拖动两个点。');});all('[data-display]').forEach(button=>button.onclick=()=>{view.setDisplay(button.dataset.display);render();});all('[data-step]').forEach(button=>button.onclick=safe(()=>requestRigStep(Number(button.dataset.step))));q('[data-overview]').onclick=()=>{if(gesture||busy)return;selected=null;setStep(1);view?.fit();};q('[data-representation]').onchange=()=>view?.setRepresentation(q('[data-representation]').value);q('[data-fit]').onclick=()=>view?.fit();q('[data-front]').onclick=()=>view?.fit('front');
  q('[data-face-camera]').onclick=safe(()=>change(()=>{const direction=view.camera.getWorldDirection(new T.Vector3()).negate();if(view.mode==='result')direction.transformDirection(trunkCalibrationMatrix(model.calibration).invert());model=recalibrateTrunk(model,{...model.calibration,front:direction.toArray()});},'正面方向已按当前观察方向设置'));
  q('[data-guide-select]').onchange=()=>chooseGuide(q('[data-guide-select]').value,0);q('[data-point-select]').onchange=()=>chooseGuide(selected?.guide||model.guides[0].id,Number(q('[data-point-select]').value));all('[data-control-axis]').forEach(input=>input.onchange=safe(()=>change(()=>{const center=guideSelectionCenter(model,selection),delta=new T.Vector3().setComponent(Number(input.dataset.controlAxis),Number(input.value)-center.getComponent(Number(input.dataset.controlAxis)));model=transformGuideSelection(model,selection,{translation:delta});},'控制点已更新')));
  const addGuide=safe(()=>change(()=>{model=addTrunkGuide(model,{parent:selected?.guide||model.guides[0].id});step=2;selected={guide:model.guides.at(-1).id,index:1};selection=[selected];view.sync(model);view.selectControl(selected.guide,selected.index);},'子控制枝已添加，请放到对应木干内部'));q('[data-add-guide]').onclick=q('[data-add-child]').onclick=addGuide;q('[data-remove-guide]').onclick=safe(event=>reviewDeletion(selected?[selected.guide]:[],{event}));
@@ -592,13 +657,13 @@ export function createTrunkPreparation(api){
   q('[data-weight-open]').click();
  };
  function undo(redo=false){if(!model||editLocked()||attaching)return;const from=redo?future:history,to=redo?history:future;if(!from.length)return;to.push(captureEditState());const entry=from.pop(),ui=selectionHistory.get(entry);model=restoreTrunkEdits(model,entry);if(ui){selection=ui.selection.map(p=>({...p}));selected=ui.selected&&{...ui.selected};targetMode=ui.targetMode;targets=ui.targets;}if(selected){const g=model.guides.find(g=>g.id===selected.guide)||model.guides[0];selected={guide:g.id,index:Math.min(selected.index,g.points.length-1)};}view.sync(model);view.restoreOriginal();changed(redo?'已重做':'已撤销',{keepRig:true});}q('[data-undo]').onclick=()=>undo();q('[data-redo]').onclick=()=>undo(true);
- q('[data-resume]').onclick=safe(async()=>{const id=q('[data-drafts]').value;if(!id||busy||repair)return;auto?.reset();busy=true;render();try{if(model)await flush();const restored=await store.get(id);draft=restored.draft;selectRoute(draft.preparationRoute||(draft.step>=2&&!draft.edits?.material_workflow?'rig':'full'));model=restoreTrunkEdits(restored.model,draft.edits);step=draft.step||1;selected=draft.selected||null;selection=normalizeGuideSelection(model,draft.selection||selected&&[selected]||[]);repairSelection();history=[];future=[];clearRepairTools();await ensureView();picker.open=false;await view.setModel(model);view.setEditMode(editModeForStep(step));if(step===2&&selected)view.selectControl(selected.guide,selected.index);render();status('整理草稿已恢复，原始网格和校准均已保留。');}finally{busy=false;render();}});q('[data-project]').onclick=safe(()=>save('project'));q('[data-library]').onclick=safe(()=>save('library'));q('[data-use]').onclick=safe(async()=>{await ensureRig();busy=true;render();try{view.restoreOriginal();model.thumbnail=view.thumbnail();await flush();const value={...model};await close({resume:false,finishing:true});await api.use(value);}finally{busy=false;render();}});
+ q('[data-resume]').onclick=safe(async()=>{const id=q('[data-drafts]').value;if(!id||busy||repair)return;auto?.reset();busy=true;render();try{if(model)await flush();const restored=await store.get(id);draft=restored.draft;selectRoute(draft.preparationRoute||(draft.step>=2&&!draft.edits?.material_workflow?'rig':'full'));model=restoreTrunkEdits(restored.model,draft.edits);step=draft.step||1;selected=draft.selected||null;selection=normalizeGuideSelection(model,draft.selection||selected&&[selected]||[]);repairSelection();history=[];future=[];clearRepairTools();await ensureView();picker.open=false;await view.setModel(model);view.setEditMode(editModeForStep(step));if(step===2&&selected)view.selectControl(selected.guide,selected.index);render();status('整理草稿已恢复，原始网格和校准均已保留。');}finally{busy=false;render();}});q('[data-project]').onclick=safe(()=>save('project'));q('[data-library]').onclick=safe(()=>save('library'));q('[data-use]').onclick=safe(async()=>{if(!await ensureRig())return;busy=true;render();try{view.restoreOriginal();model.thumbnail=view.thumbnail();await flush();const value={...model};await close({resume:false,finishing:true});await api.use(value);}finally{busy=false;render();}});
  for(const type of ['keydown','keyup'])dialog.addEventListener(type,event=>{if(event.target.closest('dialog')!==dialog)return;if(type==='keydown'&&(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();safe(()=>save('project'))();}else if(type==='keydown'&&(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='z'&&!event.target.matches('input,textarea')){event.preventDefault();undo(event.shiftKey);}event.stopPropagation();});
  q('[data-material]').onclick=safe(()=>material());
  q('[data-material-policy]').onchange=()=>{picker.route=normalizeTrunkRoute(q('[data-material-policy]').value);if(draft){draft={...draft,preparationRoute:normalizeTrunkRoute(q('[data-material-policy]').value)};scheduleSave();}render();};
- q('[data-next]').onclick=safe(async()=>{if(step!==1){setStep(3);return;}if(normalizeTrunkRoute(q('[data-material-policy]').value)==='rig'){setStep(2);auto.open();auto.start();}else await material();});
- all('[data-flow]').forEach(button=>button.onclick=safe(async()=>{const stage=button.dataset.flow;if(component.active){await component.command(stage==='rig'?'next':'stage',stage);return;}if(stage==='model')setStep(1);else if(stage==='rig')setStep(2);else await material(stage); }));
- q('[data-rig-inspect]').onclick=()=>setStep(3);
+ q('[data-next]').onclick=safe(async()=>{if(step!==1){await requestRigStep(3);return;}if(normalizeTrunkRoute(q('[data-material-policy]').value)==='rig'){if(await auto.open())await auto.start();}else await material();});
+ all('[data-flow]').forEach(button=>button.onclick=safe(async()=>{const stage=button.dataset.flow;if(component.active){await component.command(stage==='rig'?'next':'stage',stage);return;}if(stage==='model')setStep(1);else if(stage==='rig')await requestRigStep(2);else await material(stage); }));
+ q('[data-rig-inspect]').onclick=safe(()=>requestRigStep(3));
  q('[data-rig-back]').onclick=()=>{
   if(step!==3)return;
   setStep(2);
@@ -609,6 +674,7 @@ export function createTrunkPreparation(api){
  rebuild.onclick=safe(async()=>{const prompt=document.createElement('dialog');prompt.className='trunk-image-dialog';prompt.innerHTML='<header><strong>建立新的材质工作版本？</strong></header><p style="padding:0 20px">当前材质与原模型保留；新几何重新准备UV和走势，原笔触不直接套用新面号。</p><div><button data-cancel>取消</button><button data-confirm>保留当前版本并重新准备</button></div>';document.body.append(prompt);const allowed=await new Promise(resolve=>{prompt.querySelector('[data-cancel]').onclick=()=>{prompt.close();resolve(false);};prompt.querySelector('[data-confirm]').onclick=()=>{prompt.close();resolve(true);};prompt.oncancel=()=>resolve(false);prompt.showModal();});prompt.remove();if(allowed)await material('material',true);});
  auto=createTrunkAutoController({dialog,icon,getModel:()=>model,
   canStart:()=>rigAllowed()&&!busy&&!gesture&&!repair&&!weightTools.active,
+  prepare:ensureDirectGeometry,
   enterGuides:()=>setStep(2),setBusy:value=>{busy=value;},refresh:render,
   preview:(guides,locked=!!guides)=>view?.showCandidateGuides(guides,locked),
   stage:startRepair,status

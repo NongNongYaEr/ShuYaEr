@@ -165,6 +165,10 @@ export function prepareUnitCombEntries({ authoring, branches, settings, selectio
 // One continuous dab. The caller advances entries between dabs, so each drag
 // turns the current pose gradually towards the drag direction around its root.
 export function unitCombOrientationState(entry, { orientation = 'DRAG', downDirection = new THREE.Vector3(0, 0, -1) } = {}) {
+  if (orientation === 'TWIST') {
+    const axis = actualAxis(entry);
+    return axis ? { orientation, axis } : { orientation, skipReason: 'MISSING_AXIS' };
+  }
   if (orientation !== 'DOWN' && orientation !== 'ROLL') return { orientation: 'DRAG' };
   const down = vector(downDirection).clone();
   if (down.lengthSq() < 1e-12 || !down.toArray().every(Number.isFinite)) return { orientation, skipReason: 'INVALID_GRAVITY' };
@@ -189,7 +193,9 @@ export function unitCombOrientationState(entry, { orientation = 'DRAG', downDire
   return { orientation, axis, down, reference, targetRotation: new THREE.Quaternion().setFromAxisAngle(axis, angle) };
 }
 
-const effects = new Set(['TURN', 'ALIGN', 'SPREAD', 'SCALE', 'JITTER']);
+const effects = new Set(['TURN', 'ALIGN', 'SPREAD', 'SCALE', 'JITTER', 'DISPERSE']);
+const parallelDirection = Math.cos(THREE.MathUtils.degToRad(20));
+const maxDisperseDegrees = 60;
 const effectOf = options => effects.has(options.effect) ? options.effect : 'TURN';
 const validVector = value => {
   if (value == null) return null;
@@ -209,6 +215,80 @@ function hashFraction(value) {
   return (hash >>> 0) / 4294967296;
 }
 
+function perpendicularAxes(axis) {
+  const helper = Math.abs(axis.z) < .9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+  const first = new THREE.Vector3().crossVectors(axis, helper).normalize();
+  return [first, new THREE.Vector3().crossVectors(axis, first)];
+}
+
+function jitterRotation(id, axis, radians, seed) {
+  const azimuth = hashFraction(`${id}:${seed}:axis`) * Math.PI * 2;
+  const [first, second] = perpendicularAxes(axis);
+  const rotationAxis = first.multiplyScalar(Math.cos(azimuth)).addScaledVector(second, Math.sin(azimuth));
+  const angle = radians * (.5 + hashFraction(`${id}:${seed}:angle`) * .5);
+  return new THREE.Quaternion().setFromAxisAngle(rotationAxis, angle);
+}
+
+// Plan one set of targets from the rest pose. Only the existing brush hit test
+// decides which instances actually receive an edit as the stroke travels.
+export function prepareUnitDispersion(entries, { angleLimitDegrees = 30, seed = 1, worldRadius = 1 } = {}) {
+  const targets = new Map(), degrees = Number(angleLimitDegrees);
+  if (!Number.isFinite(degrees) || degrees <= 0) return targets;
+  const radians = THREE.MathUtils.degToRad(Math.min(maxDisperseDegrees, degrees));
+  const radius = Number(worldRadius);
+  const neighborDistanceSquared = (1.25 * (Number.isFinite(radius) && radius > 0 ? radius : 1)) ** 2;
+  const sorted = entries.flatMap(entry => {
+    const axis = actualAxis(entry), position = entry.frame?.position;
+    return axis && position?.isVector3 ? [{id:entry.id, axis, position}] : [];
+  }).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+  for (const leader of sorted) {
+    if (targets.has(leader.id)) continue;
+    const group = sorted.filter(member => !targets.has(member.id)
+      && leader.position.distanceToSquared(member.position) <= neighborDistanceSquared
+      && leader.axis.dot(member.axis) >= parallelDirection);
+    if (group.length < 2) {
+      targets.set(leader.id, jitterRotation(leader.id, leader.axis, radians * .32, seed));
+      continue;
+    }
+
+    const direction = group.reduce((sum, member) => sum.add(member.axis), new THREE.Vector3()).normalize();
+    const [right, up] = perpendicularAxes(direction), groupKey = `${leader.id}:${seed}:disperse`;
+    let maxInclination = 0;
+    const ordered = group.map(member => {
+      const inclination = direction.angleTo(member.axis);
+      maxInclination = Math.max(maxInclination, inclination);
+      const tie = hashFraction(`${groupKey}:${member.id}:order`);
+      let bearing = Math.atan2(up.dot(member.axis), right.dot(member.axis));
+      if (inclination < .005) bearing = tie * 2 * Math.PI - Math.PI;
+      return {member, inclination, bearing, tie};
+    }).sort((a, b) => a.bearing - b.bearing || a.tie - b.tie);
+
+    const step = 2 * Math.PI / ordered.length;
+    // Align angular slots to existing directions where there is a clear trend.
+    // Nearly parallel members contribute no phase so the seed selects a layout.
+    let sumX = 0, sumY = 0;
+    ordered.forEach(({bearing, inclination}, index) => {
+      const weight = Math.max(0, inclination - .005), phase = bearing - index * step;
+      sumX += Math.cos(phase) * weight;
+      sumY += Math.sin(phase) * weight;
+    });
+    const phase = Math.hypot(sumX, sumY) > 1e-8 ? Math.atan2(sumY, sumX) : 2 * Math.PI * hashFraction(groupKey);
+    ordered.forEach(({member}, index) => {
+      const azimuth = phase + (index + .28 * (hashFraction(`${groupKey}:${member.id}:bearing`) - .5)) * step;
+      const inclination = Math.min(THREE.MathUtils.degToRad(65), maxInclination
+        + radians * (.70 + .18 * hashFraction(`${groupKey}:${member.id}:tilt`)));
+      const radial = Math.sin(inclination);
+      const destination = direction.clone().multiplyScalar(Math.cos(inclination))
+        .addScaledVector(right, Math.cos(azimuth) * radial).addScaledVector(up, Math.sin(azimuth) * radial).normalize();
+      const turn = new THREE.Quaternion().setFromUnitVectors(member.axis, destination);
+      const angle = turn.angleTo(new THREE.Quaternion());
+      targets.set(member.id, angle > radians ? new THREE.Quaternion().slerp(turn, radians / angle) : turn);
+    });
+  }
+  return targets;
+}
+
 // These targets describe a complete instance, never a wood/leaf/fruit part.
 // A controller can also call this for hover eligibility without starting a pen.
 export function unitCombEffectState(entry, options = {}) {
@@ -218,8 +298,9 @@ export function unitCombEffectState(entry, options = {}) {
     const percent = Number(options.sizeLimitPercent ?? 20);
     if (!Number.isFinite(percent) || percent < 0) return { effect, skipReason: 'INVALID_SIZE_LIMIT' };
     const scales = entry.familyScales || [entry.instance.scale];
-    const minRatio = Math.max(...scales.map(scale => INSTANCE_SCALE_MIN / scale));
-    const maxRatio = Math.min(...scales.map(scale => INSTANCE_SCALE_MAX / scale));
+    const [minimum, maximum] = entry.scaleRange || [INSTANCE_SCALE_MIN, INSTANCE_SCALE_MAX];
+    const minRatio = Math.max(...scales.map(scale => minimum / scale));
+    const maxRatio = Math.min(...scales.map(scale => maximum / scale));
     const desired = options.sizeMode === 'SHRINK' ? 1 - percent / 100 : 1 + percent / 100;
     return { effect, targetScaleRatio: clamp(desired, minRatio, maxRatio) };
   }
@@ -230,7 +311,7 @@ export function unitCombEffectState(entry, options = {}) {
     if (!sample || sample.lengthSq() < 1e-12) return { effect, skipReason: 'MISSING_SAMPLE_DIRECTION' };
     return { effect, axis, targetRotation: new THREE.Quaternion().setFromUnitVectors(axis, sample.normalize()) };
   }
-  const degrees = Number(options.angleLimitDegrees ?? 25);
+  const degrees = Number(options.angleLimitDegrees ?? (effect === 'DISPERSE' ? 30 : 25));
   if (!Number.isFinite(degrees) || degrees < 0) return { effect, skipReason: 'INVALID_ANGLE_LIMIT' };
   const radians = THREE.MathUtils.degToRad(Math.min(180, degrees));
   if (effect === 'SPREAD') {
@@ -243,12 +324,10 @@ export function unitCombEffectState(entry, options = {}) {
     return { effect, axis, targetRotation: new THREE.Quaternion().slerp(target, angle > 0 ? Math.min(1, radians / angle) : 0) };
   }
   const seed = Number.isFinite(Number(options.seed)) ? Number(options.seed) : 1;
-  const azimuth = hashFraction(`${entry.id}:${seed}:axis`) * Math.PI * 2;
-  const helper = Math.abs(axis.z) < .9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
-  const first = new THREE.Vector3().crossVectors(axis, helper).normalize(), second = new THREE.Vector3().crossVectors(axis, first);
-  const rotationAxis = first.multiplyScalar(Math.cos(azimuth)).addScaledVector(second, Math.sin(azimuth));
-  const angle = radians * (.5 + hashFraction(`${entry.id}:${seed}:angle`) * .5);
-  return { effect, axis, targetRotation: new THREE.Quaternion().setFromAxisAngle(rotationAxis, angle) };
+  const targetRotation = effect === 'DISPERSE' ? options.dispersionTargets?.get(entry.id)
+    || jitterRotation(entry.id, axis, THREE.MathUtils.degToRad(Math.min(maxDisperseDegrees, degrees)) * .32, seed)
+    : jitterRotation(entry.id, axis, radians, seed);
+  return { effect, axis, targetRotation };
 }
 
 function fixedStrokeUpdate(entry, options, state, motion, influence, force) {
@@ -271,8 +350,9 @@ function fixedStrokeUpdate(entry, options, state, motion, influence, force) {
   const after = state.effect === 'SCALE' ? copyPlacement(stroke.instance)
     : rotatedPlacement(entry, stroke.instance, stroke.frame || evaluatePlacement(entry, stroke.instance, placementContext(entry).carriers), totalRotation);
   const family = entry.familyScales || [stroke.instance.scale];
+  const [minimum, maximum] = entry.scaleRange || [INSTANCE_SCALE_MIN, INSTANCE_SCALE_MAX];
   const sizeRatio = state.effect === 'SCALE' ? clamp(1 + Number(options.sizeLimitPercent ?? 20) / 100 * sizeProgress,
-    Math.max(...family.map(scale => INSTANCE_SCALE_MIN / scale)), Math.min(...family.map(scale => INSTANCE_SCALE_MAX / scale))) : 1;
+    Math.max(...family.map(scale => minimum / scale)), Math.min(...family.map(scale => maximum / scale))) : 1;
   after.scale = state.effect === 'SCALE' ? stroke.instance.scale * sizeRatio : stroke.instance.scale;
   after.radius_scale = stroke.instance.radius_scale;
   const before = copyPlacement(entry.instance), { matrix, frame } = placementDelta(entry, after);
@@ -293,9 +373,14 @@ function combWithState(entry, options, preparedState = null) {
   const state = preparedState || unitCombEffectState(entry, options);
   if (state.skipReason) return null;
   if (state.effect !== 'TURN') return fixedStrokeUpdate(entry, options, state, motion, influence, force);
-  const target = state.targetRotation || new THREE.Quaternion().setFromUnitVectors(entry.frame.direction.clone().normalize(), motion.clone().normalize());
-  const turn = Math.min(0.25, motion.length() / Math.max(0.01, Number(worldRadius) || 1) * force * 2) * influence;
-  const rotation = new THREE.Quaternion().slerp(target, turn);
+  let rotation;
+  if (state.orientation === 'TWIST') {
+    rotation = new THREE.Quaternion().setFromAxisAngle(state.axis, Math.PI * (options.signedTwist ?? 0) * force * influence);
+  } else {
+    const target = state.targetRotation || new THREE.Quaternion().setFromUnitVectors(entry.frame.direction.clone().normalize(), motion.clone().normalize());
+    const turn = Math.min(0.25, motion.length() / Math.max(0.01, Number(worldRadius) || 1) * force * 2) * influence;
+    rotation = new THREE.Quaternion().slerp(target, turn);
+  }
   if (Math.abs(rotation.w) > 1 - 1e-14) return null;
   const before = copyPlacement(entry.instance);
   const after = rotatedPlacement(entry, before, placementContext(entry).frame, rotation);

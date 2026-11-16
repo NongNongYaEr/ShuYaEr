@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$ProjectRoot)
+param([string]$ProjectRoot = 'Z:/UEproject/Day30Man')
 $ErrorActionPreference = 'Stop'
 $ProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).Path
 if (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot 'Day30Man.uproject'))) { throw 'Expected Day30Man project.' }

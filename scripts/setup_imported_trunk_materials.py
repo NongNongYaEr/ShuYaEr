@@ -46,6 +46,10 @@ def setup(package_directory, content_folder='/Game/TreeDuckTrunks', settings=Non
         return textures[identity]
 
     for record in records:
+        if record.get('flow'):
+            from branchforge_pve_light_material import create_light_material
+            materials[record['id']] = create_light_material(record, content_folder)
+            continue
         name = 'M_' + record['id'].replace('-', '_')
         material = tools.create_asset(name, content_folder, unreal.Material, unreal.MaterialFactoryNew())
         if not material:
@@ -95,7 +99,9 @@ def setup(package_directory, content_folder='/Game/TreeDuckTrunks', settings=Non
 
         vertex = node(unreal.MaterialExpressionVertexColor, -300, -150)
         base = sample('baseColor', 0) if 'baseColor' in record['maps'] else None
-        color = multiply(base, '', vertex, '') if base else vertex
+        color = vertex
+        if base:
+            color = base if record.get('tree_bark_role') == 'shared' else multiply(base, '', vertex, '')
         assert edit.connect_material_property(color, '', unreal.MaterialProperty.MP_BASE_COLOR), 'Material property connection failed'
         alpha = multiply(vertex, 'A', scalar(record['base_color_linear'][3]))
         if base:
@@ -144,6 +150,9 @@ def setup(package_directory, content_folder='/Game/TreeDuckTrunks', settings=Non
     if settings is not None:
         try:
             settings.set_editor_property('AssemblyMaterialOverrides', materials)
+            shared = data.get('shared_tree_bark')
+            if shared is not None:
+                settings.set_editor_property('AssemblyBarkMaterial', materials[shared['material_id']])
         except Exception as exc:
             raise RuntimeError('This package requires the current TreeDuck PVE material-table bridge') from exc
     return materials

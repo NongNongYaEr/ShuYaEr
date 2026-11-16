@@ -1,16 +1,92 @@
 import * as THREE from 'three';
 import { copy } from './branch-workbench-data.js';
 import { skeletonBranches } from './skeleton-thickness.js';
-import { assemblyTargets, assemblyProtection, localAssemblyState, localAssemblyPlan } from './local-assembly-data.js';
+import { createAppConfirm } from './app-confirm.js';
+import { assemblyTargets, assemblyProtection, localAssemblyState, localAssemblyPlan, groupAssemblyVoids, removeAssemblyVoids } from './local-assembly-data.js';
+
+const emptyRules = [];
+const voidRoles = {ANY:'全部分区', MATURE:'内部', MIXED:'中间', YOUNG:'末端'};
+const percent = new Intl.NumberFormat('zh-CN', {style:'percent', maximumFractionDigits:2});
 
 export function createLocalAssemblyControls(api) {
   const panel=document.createElement('details');panel.id='localAssemblyPanel';panel.className='wb-tree-only local-assembly';
   panel.innerHTML='<summary>局部装配与精修保护</summary><p class="vine-note">框选主枝，或刷选屏幕区域；只修改范围内可自动调整的单元枝。刷选穿过屏幕深度，请核对选中枝与统计；Shift 擦除选区。</p><label>作用范围<select id="laScope"><option value="SELECTED">选中的承重枝</option><option value="SUBTREE">选中枝与下级</option><option value="BRUSH">刷选的承重枝</option><option value="TREE">整棵树</option></select></label><div class="wb-row"><button id="laBrush">刷选区域</button><button id="laClearBrush">清除刷选</button></div><label>刷选半径（屏幕像素）<input id="laBrushRadius" type="range" min="12" max="140" step="2" value="48"></label><div class="field-grid"><label>起点（%）<input id="laStart" type="number" min="0" max="99" value="0"></label><label>终点（%）<input id="laEnd" type="number" min="1" max="100" value="100"></label></div><label>分区<select id="laRole"><option value="ANY">全部分区</option><option value="MATURE">偏内部 · 深绿</option><option value="MIXED">中间 · 混合</option><option value="YOUNG">末端 · 嫩绿</option></select></label><p id="laSummary" role="status"></p><label>局部目标单元枝数量<input id="laCount" type="number" min="0" max="1600" step="1" value="0"></label><label>使用素材<select id="laAsset"><option value="">沿用三类样本</option></select></label><div class="wb-row"><button id="laPreviewCount">预览数量</button><button id="laPreviewReplace">预览替换</button></div><label>沿枝疏密<select id="laProfile"><option value="UNIFORM">均匀</option><option value="TIP">靠近枝梢</option><option value="ROOT">靠近枝根</option></select></label><div class="wb-row"><button id="laPreviewLayout">预览铺设</button><button id="laVoid">预览保留空隙</button></div><button id="laClearVoid">解除此范围的空隙</button><div class="wb-row"><button id="laLock">锁定范围内单元枝</button><button id="laUnlock">解除手动锁定</button></div><p class="vine-note">锁定保留样本、版本与挂点；精修、独立副本和附属挂接自动保护。解锁不会抹去精修。改变承重枝形时，单元枝仍跟随母枝。</p><details><summary>范围内的保护原因</summary><div id="laProtectedList"></div><button id="laSelectProtected">选中受保护单元枝</button></details><div id="laPreviewActions" hidden><p id="laImpact" role="status"></p><div class="wb-row"><button id="laCommit" class="accent">确认局部修改</button><button id="laCancel">取消预览</button></div></div>';
   document.getElementById('wbAssemblyZones').closest('.wb-assembly').after(panel);
   const $=id=>panel.querySelector('#'+id);
+  const voidDetails = document.createElement('details');
+  voidDetails.id = 'laVoidRules';
+  voidDetails.className = 'assembly-void-rules';
+  voidDetails.innerHTML = '<summary></summary><div class="assembly-void-list" id="laVoidList"></div><button type="button" id="laRemoveAllVoids">解除全部空隙</button>';
+  panel.querySelector('summary').after(voidDetails);
+  const openVoids = document.createElement('button');
+  openVoids.type = 'button';
+  openVoids.id = 'wbAssemblyOpenVoids';
+  openVoids.className = 'assembly-open-voids';
+  openVoids.hidden = true;
+  openVoids.setAttribute('aria-controls', voidDetails.id);
+  document.getElementById('wbAssemblyCapacity').after(openVoids);
+  const confirmVoids = createAppConfirm('laVoidConfirm');
   const brush=document.createElement('div');brush.className='assembly-brush-ring';brush.hidden=true;api.canvas.parentElement.append(brush);
   let brushActive=false,drag=null,painted=new Set(),preview=null,lastAsset=null,lastSignature='';
   const valid=()=>api.isTree()&&!api.getSkeletonEditMode()&&!api.isBusy()&&api.getAsset();
+  const getRules = () => api.getAuthoring().workbench?.assembly_voids || emptyRules;
+  let renderedRules = null;
+  function revealVoids() {
+    if (!valid()) return;
+    panel.open = voidDetails.open = true;
+    refresh();
+    voidDetails.scrollIntoView({block:'nearest'});
+    voidDetails.querySelector('summary').focus({preventScroll:true});
+  }
+  function voidLabel(group) {
+    return `${voidRoles[group.role] || voidRoles.ANY} · ${percent.format(group.start)}–${percent.format(group.end)}`;
+  }
+  async function clearVoids(group = null) {
+    if (!valid() || preview) return;
+    try {
+      stopBrush();
+      await api.flush();
+      const rules = getRules();
+      const currentGroup = group && groupAssemblyVoids(rules).find(item => item.key === group.key);
+      if (!valid() || !rules.length || (group && !currentGroup)) return refresh();
+      const count = currentGroup ? currentGroup.count : rules.length;
+      if (!await confirmVoids({
+        title:currentGroup ? '解除这组保留空隙？' : '解除全部保留空隙？',
+        name:currentGroup ? voidLabel(currentGroup) : '整棵树',
+        detail:`${count} 条规则`,
+        message:'解除后可重新在这些范围内自动挂枝。这一步可以撤销。', accept:'解除空隙',
+      })) return;
+      if (!valid() || getRules() !== rules) throw Error('保留空隙已更新，请重新选择。');
+      api.transact(`已解除 ${count} 条保留空隙`, draft => removeAssemblyVoids(draft, currentGroup?.key ?? null), {bypassLayers:true});
+      refresh();
+    } catch (error) { api.toast(error.message, true); }
+  }
+  function refreshVoids() {
+    const rules = getRules();
+    const hidden = !api.isTree() || !rules.length;
+    openVoids.hidden = voidDetails.hidden = hidden;
+    openVoids.disabled = !valid() || !!preview;
+    if (hidden) return;
+    openVoids.textContent = `查看保留空隙（${rules.length} 条）`;
+    voidDetails.querySelector('summary').textContent = `保留空隙 · ${rules.length} 条`;
+    if (!voidDetails.open || rules === renderedRules) return;
+    renderedRules = rules;
+    $('laVoidList').replaceChildren(...groupAssemblyVoids(rules).map(group => {
+      const row = document.createElement('div');
+      const label = document.createElement('span');
+      label.textContent = `${voidLabel(group)} · ${group.parents.size} 根枝`;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = '解除';
+      button.setAttribute('aria-label', `解除 ${label.textContent} 的保留空隙`);
+      button.onclick = () => clearVoids(group);
+      row.append(label, button);
+      return row;
+    }));
+  }
+  openVoids.onclick = revealVoids;
+  $('laRemoveAllVoids').onclick = () => clearVoids();
+  voidDetails.addEventListener('toggle', refresh);
   const options=()=>({start:Number($('laStart').value)/100,end:Number($('laEnd').value)/100,role:$('laRole').value,count:Number($('laCount').value),assetId:$('laAsset').value,profile:$('laProfile').value});
   const targets=()=>assemblyTargets(api.getAsset()?.masterBranches||[],api.getAuthoring(),$('laScope').value==='BRUSH'?painted:api.getSelections(),$('laScope').value);
   function cancel(){if(!preview)return false;preview=null;api.cancel();refresh();return true;}
@@ -34,6 +110,7 @@ export function createLocalAssemblyControls(api) {
     if(lastAsset&&lastAsset!==api.getAsset()&&!preview&&lastAsset.authoring!==api.getAuthoring())stopBrush();lastAsset=api.getAsset();
     if(!api.isTree()){cancel();stopBrush();}
     $('laPreviewActions').hidden=!preview;
+    refreshVoids();
     for(const e of panel.querySelectorAll('input,select,button'))e.disabled=!!preview&&!['laCommit','laCancel'].includes(e.id)||!valid();
     if(!valid()||!panel.open&&!preview&&!brushActive)return;
     const library=api.library(),select=$('laAsset'),value=select.value;

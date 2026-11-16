@@ -1,5 +1,5 @@
 const fs = require('fs'), path = require('path'), assert = require('node:assert/strict');
-const {chromium} = require('playwright');
+const {chromium} = require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 (async () => {
   const out = path.resolve('.runtime/sculpt-hotkeys'); fs.mkdirSync(out, {recursive:true});
   const report = {checks:[], errors:[]};

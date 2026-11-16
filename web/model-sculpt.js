@@ -1,3 +1,4 @@
+import {VIEWPORT_NAVIGATION_HINT} from './viewport-navigation.js';
 import {resourceEscape as esc,resourceIcon as icon,syncResourceOverlay,trapResourceDialogFocus} from './resource-ui.js';
 import {createModelSculptView} from './model-sculpt-view.js';
 import {createTrunkPreparationStore} from './trunk-preparation-store.js';
@@ -6,6 +7,7 @@ import {trunkEditable,restoreTrunkEdits,validateTrunkReady} from './trunk-prepar
 import {SCULPT_TOOLS as TOOLS,SCULPT_DEFAULT,BRUSH_DEFAULT,clampBrush} from './model-sculpt-tools.js';
 import {readImportedTrunkGlb} from './imported-trunk-glb.js';
 import {prepareImportedTrunk} from './imported-trunk-runtime.js';
+import {applyTrunkGeometryCleanup} from './trunk-geometry-cleanup.js';
 
 export function createModelSculpt(api){
  const style=document.createElement('link');style.rel='stylesheet';style.href='/model-sculpt.css';document.head.append(style);
@@ -28,7 +30,7 @@ export function createModelSculpt(api){
  <details><summary>保护遮罩</summary><div><div class="ms-two">${button('clear-mask','清空保护')}${button('invert-mask','反选保护')}${button('mask-selection','选区转保护')}${button('mask-grow','扩大')}${button('mask-shrink','缩小')}${button('mask-blur','平滑')}${button('mask-feather','羽化')}${button('scope-masked','隐藏保护区')}</div><label class="ms-check"><input type="checkbox" data-mask-visible checked>显示保护遮罩</label>${numeric('mask-opacity','显示深度',.72,0,1)}</div></details>
  <details><summary>对照与阶段</summary><div><input data-stage-name placeholder="例如：大造型完成" maxlength="60">${button('stage','保存阶段快照','camera')}<select data-stages aria-label="阶段快照"></select>${button('restore-stage','恢复阶段')}${button('reset','恢复本次开始')}<small>恢复也可撤销。保留最近 4 个阶段，原始 GLB 始终保留。</small></div></details>
  <details><summary>模型检查</summary><div>${button('inspect','检查模型','scan-eye')}<div data-inspection></div><p data-source-info></p><p data-review-state></p><small>模型尺寸未在树干整理中确认时，仅作参考。</small></div></details>
- <details><summary>操作提示</summary><div><p>F 半径 · Shift＋F 强度 · [ / ] 快速调节<br>Shift 临时平滑 · Alt 反向<br>G / R / S 区域变换 · XYZ 约束<br>Enter / 左键确认 · Esc / 右键取消<br>Home 聚焦 · 每笔一步撤销</p><small>中键旋转 · Shift＋中键平移 · 滚轮缩放。纹理随造型拉伸，编辑后进入树干整理检查骨架。</small></div></details>
+ <details><summary>操作提示</summary><div><p>F 半径 · Shift＋F 强度 · [ / ] 快速调节<br>Shift 临时平滑 · Alt 反向（Maya 用 Ctrl＋Alt）<br>G / R / S 区域变换 · XYZ 约束<br>Enter / 左键确认 · Esc / 右键取消<br>Home 聚焦 · 每笔一步撤销</p><small><span data-viewport-navigation-hint>${VIEWPORT_NAVIGATION_HINT}</span>。纹理随造型拉伸，编辑后进入树干整理检查骨架。</small></div></details>
  </div></aside></div>
  <footer class="ms-footer"><div><strong data-status role="status">导入 GLB，或继续已有雕刻草稿。</strong><small data-save-note>编辑副本；原模型与已有实例保留。</small></div><div class="ms-save-actions">${button('library','另存到内容库','library-big')}${button('project','保存到当前项目','folder-plus')}${button('continue','进入树干整理','arrow-right')}</div></footer><input type="file" data-file accept=".glb" hidden>`;
  // Attribute helpers also support value-bearing data-display selectors.
@@ -59,7 +61,13 @@ export function createModelSculpt(api){
  async function listDrafts(){drafts=(await store.list()).filter(i=>i.workbench==='sculpt');const selected=q('[data-drafts]').value;q('[data-drafts]').innerHTML='<option value="">选择雕刻草稿</option>'+drafts.map(d=>'<option value="'+d.id+'">'+esc(d.name)+' · '+new Date(d.updatedAt).toLocaleDateString('zh-CN')+'</option>').join('');q('[data-drafts]').value=drafts.some(d=>d.id===selected)?selected:'';draftSize();}
  function draftSize(){const d=drafts.find(d=>d.id===q('[data-drafts]').value);q('[data-draft-size]').textContent=d?(d.bytes/1024/1024).toFixed(2)+' MB · '+(d.id===draft?.id?'正在编辑，保留草稿':'可改名或删除'):drafts.length+' 个草稿';render();}
  function cleanSettings(value){for(const key of Object.keys(SCULPT_DEFAULT))if(key in (value||{})){const next=value[key];if(typeof SCULPT_DEFAULT[key]==='number')settings[key]=clampBrush(key,next,value.unit||settings.unit);else if(typeof SCULPT_DEFAULT[key]==='boolean')settings[key]=!!next;else if(typeof next==='string'&&next.length<30)settings[key]=next;}if(!TOOLS[settings.tool])settings.tool='GRAB';}
- async function canonicalSource(value){let source=value;if(value.sculpt){const bytes=Uint8Array.from(atob(value.source.glb_base64),c=>c.charCodeAt(0));source=prepareImportedTrunk(await readImportedTrunkGlb(bytes.buffer,{name:value.source.name}));}return store.source({...source,id:'TRUNK_SOURCE_'+value.source.sha256.slice(0,32)});}
+ async function canonicalSource(value){
+  let source=value;
+  if(value.sculpt){const bytes=Uint8Array.from(atob(value.source.glb_base64),c=>c.charCodeAt(0));source=prepareImportedTrunk(await readImportedTrunkGlb(bytes.buffer,{name:value.source.name,preservePrimitiveIds:value.material_workflow?.preparation==='overlay'}));}
+  const cleanup=value.geometry_cleanup;
+  if(cleanup){const primitives=applyTrunkGeometryCleanup(source.primitives,cleanup);source={...source,primitives,geometry_cleanup:cleanup,triangles:primitives.reduce((sum,p)=>sum+p.geometry.index.length/3,0)};}
+  return store.source({...source,id:'TRUNK_SOURCE_'+value.source.sha256.slice(0,32)+(cleanup?'_'+cleanup.id:'')});
+ }
  async function setModel(value,{resume=null}={}){busy=true;render();try{view?.dispose();view=null;render();const parent=value.id;model={...value,id:resume?value.id:'TRUNK_SCULPT_'+crypto.randomUUID().replaceAll('-',''),revision:resume?value.revision:1,name:resume?value.name:(value.name+' · 塑形').slice(0,80)};if(!resume)model.sculpt_parent={id:parent,revision:value.revision};validateTrunkReady(model);lastGeometry=!!model.sculpt?.needs_review;
   q('.ms-property-scroll').scrollTop=0;const source=resume?null:await canonicalSource(value);draft=resume||{version:1,id:crypto.randomUUID(),sourceId:source.id,sourceRevision:source.revision,revision:0};generation=0;
   view=await createModelSculptView(q('[data-host]'),model,{native:api.native,settings:()=>settings,status,error:e=>safe(()=>{throw e;})(),commit:changed,refresh:()=>render(),gesture:value=>{gesture=value;render();if(!value){if(!settings.shared)preferences.tools[settings.tool]=Object.fromEntries(Object.keys(BRUSH_DEFAULT).map(k=>[k,settings[k]]));persistPreferences();clearTimeout(timer);timer=setTimeout(()=>safe(flush)(),800);}},adjust:(field,value)=>{settings[field]=clampBrush(field,value,settings.unit);syncControls();},unit:(unit,value)=>{settings.unit=unit;settings.radius=clampBrush('radius',value,unit);syncControls();changed({geometry:false});},axisChanged:a=>{q('[data-axis-state]').textContent='两点已设置 · 长度 '+(Math.hypot(...a.tip.map((n,k)=>n-a.base[k]))*model.calibration.scale).toFixed(3)+' m（参考）';},quickMenu:e=>quickMenu(e)});

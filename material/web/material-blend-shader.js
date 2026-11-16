@@ -34,5 +34,12 @@ Surface blendedLayer(int id,Surface s,Surface f,vec3 p,vec3 n,float fine,int slo
  if(id==1)s.paintMask=1.-(1.-s.paintMask)*(1.-alpha);s.layerCoverage=coverage;if(slot==uEffectSelected)s.selectedCoverage=alpha;return s;
 }
 void accumulateEmission(int slot,int type,vec3 p,vec3 n){if((uPass!=-1&&uPass!=14)||uEmissionMaximum<=0.)return;float a=clamp(lastMaterialCoverage*uEffectConfig[slot].y,0.,1.);if(physicalMaterial(type))surfaceEmission*=1.-a;vec4 em=uEffectEmission[slot],shape=uEffectEmissionShape[slot];if(em.w<=0.||a<=0.)return;float pattern=shape.x>.5?1.-smoothstep(shape.y-shape.z,shape.y+shape.z,barkHeight(p,n)):1.;surfaceEmission+=fromSRGB(em.rgb)*em.w*a*pattern;}
-void rememberMaterial(int slot,int type,Surface s){float a=physicalMaterial(type)?lastMaterialCoverage:0.;for(int j=0;j<16;j++){if(j>=slot)break;materialWeights[j]*=1.-a;}materialBarkWeight*=1.-a;materialPaintWeight=materialPaintWeight*(1.-a)+(type==1?a:0.);materialMossWeight=materialMossWeight*(1.-a)+(type==0?a:0.);materialWeights[slot]=a;materialHeights[slot]=s.h*uNormalStrength*uRelief+s.coatH;}
+void rememberMaterial(int slot,int type,Surface s){
+ float coverage=physicalMaterial(type)?lastMaterialCoverage:0.;
+ // An image is independently targetable but does not replace substrate properties.
+ float a=type==10&&effectParameter(16,0.)>.5?0.:coverage;
+ for(int j=0;j<16;j++){if(j>=slot)break;materialWeights[j]*=1.-a;}
+ materialBarkWeight*=1.-a;materialPaintWeight=materialPaintWeight*(1.-a)+(type==1?a:0.);materialMossWeight=materialMossWeight*(1.-a)+(type==0?a:0.);
+ materialWeights[slot]=coverage;materialHeights[slot]=s.h*uNormalStrength*uRelief+s.coatH;
+}
 `;

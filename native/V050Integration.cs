@@ -12,6 +12,7 @@ namespace ShuYaErV050 {
   readonly Panel surface=new Panel{Dock=DockStyle.Fill};readonly FlowLayoutPanel bar=new FlowLayoutPanel{Dock=DockStyle.Top,Height=42,Padding=new Padding(8,5,8,5)};
   readonly Button plantButton=new Button{Text="植物创作",Width=110,Height=30},materialButton=new Button{Text="树干材质",Width=110,Height=30};readonly Label state=new Label{AutoSize=true,Padding=new Padding(12,7,0,0)};
   bool closing,busy,closeAttempt,waitCancelled;string pendingInput;readonly JavaScriptSerializer json=new JavaScriptSerializer();
+  string viewportNavigationMode="blender";
   readonly FlowLayoutPanel closeNotice=new FlowLayoutPanel{Dock=DockStyle.Bottom,Height=44,Padding=new Padding(10,7,8,4),BackColor=Color.FromArgb(39,49,43),Visible=false};
   readonly Label closeNoticeText=new Label{AutoSize=true,Padding=new Padding(0,6,8,0)};
   readonly Button continueEditing=new Button{Text="返回工作台",AutoSize=true};
@@ -35,7 +36,10 @@ namespace ShuYaErV050 {
     material=new TreeMaterialLab.MainForm(Path.Combine(root,"material"),materialSurface,graphicsMode);material.IntegrationMessage+=MaterialMessage;
    }
    materialActive=editing;plant.Visible=true;plant.SetIntegrationActive(!editing);
-   if(materialSurface!=null){materialSurface.Visible=editing;if(editing){materialSurface.BringToFront();material.StartForIntegration();}}
+   if(materialSurface!=null){materialSurface.Visible=editing;if(editing){
+    materialSurface.BringToFront();material.StartForIntegration();
+    if(material.IntegrationReady)ApplyMaterialNavigationMode();
+   }}
    if(plant.IntegrationReady)plant.IntegrationEvaluate("window.treeDuckMaterialIntegration.componentState("+json.Serialize(new {active=editing})+")");
    Text=ReleaseTitle+" · 树干整理";
   }
@@ -50,24 +54,76 @@ namespace ShuYaErV050 {
   static string ValidId(Dictionary<string,object> data){string id=Convert.ToString(data["id"]);Guid value;if(!Guid.TryParseExact(id,"D",out value))throw new Exception("无效传递编号");return id;}
   string TransferPath(string id){return Path.Combine(root,".runtime",test?"integration-test/plant-session/material-handoff":"material-handoff",id+".glb");}
   static string SHA(string file){using(var stream=File.OpenRead(file))using(var hash=SHA256.Create())return BitConverter.ToString(hash.ComputeHash(stream)).Replace("-","").ToLowerInvariant();}
+  void ReadNavigationMode(Dictionary<string,object> data,string key){
+   object value;if(!data.TryGetValue(key,out value))return;
+   string mode=Convert.ToString(value);
+   if(mode=="blender"||mode=="max"||mode=="maya")viewportNavigationMode=mode;
+  }
+  async void ApplyMaterialNavigationMode(){
+   if(material==null||closing)return;
+   try{await material.IntegrationEvaluate("window.treeMaterialIntegration?.setViewportNavigationMode("+json.Serialize(viewportNavigationMode)+")");}
+   catch(Exception e){Log(e);}
+  }
   async void PlantMessage(Dictionary<string,object> data){
    string action=Convert.ToString(data["action"]);
+   if(action=="viewport-navigation-mode"){
+    ReadNavigationMode(data,"mode");
+    if(material!=null&&material.IntegrationReady)ApplyMaterialNavigationMode();
+    return;
+   }
    if(action=="graphics-mode"){
     if(!closing&&!closeAttempt)await SaveGraphicsMode(data);
     return;
    }
    if(action=="material-component-bounds"){try{var b=(Dictionary<string,object>)data["bounds"];double dpr=Convert.ToDouble(b["dpr"]);if(dpr<.5||dpr>8)return;var r=new Rectangle((int)Math.Round(Convert.ToDouble(b["x"])*dpr),(int)Math.Round(Convert.ToDouble(b["y"])*dpr),(int)Math.Round(Convert.ToDouble(b["width"])*dpr),(int)Math.Round(Convert.ToDouble(b["height"])*dpr));if(r.Width<100||r.Height<100||r.X<0||r.Y<0||r.Right>surface.ClientSize.Width+2||r.Bottom>surface.ClientSize.Height+2)return;componentBounds=r;if(materialSurface!=null)materialSurface.Bounds=r;}catch(Exception e){Log(e);}return;}
    if(action=="material-component-command"){await ComponentCommand(data);return;}
-   if(busy||closing||action!="edit-material")return;SetBusy(true);string id=null,previous=pendingInput;try{
+   if(action!="edit-material")return;
+   if(busy||closing){
+    string requestId;if(TryRequestId(data,out requestId))NotifyPlantFailure(requestId,"请等待当前步骤结束后重试。");
+    return;
+   }
+   SetBusy(true);string id=null,previous=pendingInput;try{
    id=ValidId(data);string source=TransferPath(id);if(!File.Exists(source)||new FileInfo(source).Length>150000000)throw new Exception("传递的树干文件不存在或超过150MB");
+   ReadNavigationMode(data,"navigationMode");
    Select(true);Status("正在将树干送入材质工坊…");await WaitReady(()=>material!=null&&material.IntegrationReady,90000);
    // The material workbench checkpoints its current document before starting a new draft.
    string target=Path.Combine(root,"material",".runtime","integration-input",id+".glb");Directory.CreateDirectory(Path.GetDirectoryName(target));File.Copy(source,target,false);pendingInput=id;
    bool resume=data.ContainsKey("resume")&&Convert.ToBoolean(data["resume"]);if(resume){string bundle=Path.ChangeExtension(source,".treeproj");if(!File.Exists(bundle)||new FileInfo(bundle).Length>200000000)throw new Exception("材质编辑包不存在或超过容量");File.Copy(bundle,Path.ChangeExtension(target,".treeproj"),false);}
-   string prepared=await material.IntegrationAwait("window.treeMaterialIntegration.receive("+json.Serialize(new {id=id,name=Convert.ToString(data["name"]),height=Convert.ToDouble(data["height"]),resume=resume,originKey=data.ContainsKey("originKey")?Convert.ToString(data["originKey"]):null,projectId=data.ContainsKey("projectId")?data["projectId"]:null,rebuild=data.ContainsKey("rebuild")&&Convert.ToBoolean(data["rebuild"]),target=data.ContainsKey("target")?Convert.ToInt32(data["target"]):50000,resolution=data.ContainsKey("resolution")?Convert.ToInt32(data["resolution"]):2048,stage=data.ContainsKey("stage")?Convert.ToString(data["stage"]):"material",preparation=data.ContainsKey("preparation")&&(Convert.ToString(data["preparation"])=="material"||Convert.ToString(data["preparation"])=="overlay")?Convert.ToString(data["preparation"]):"full",view=data.ContainsKey("view")?data["view"]:null})+")",300000);
-   await plant.IntegrationAwait("window.treeDuckMaterialIntegration.notePrepared("+json.Serialize(id)+","+prepared+")",15000);
-   File.Delete(source);File.Delete(Path.ChangeExtension(source,".treeproj"));await plant.IntegrationEvaluate("window.treeDuckMaterialIntegration.settle("+json.Serialize(id)+")");Status("树干已就绪 · 制作材质");
-  }catch(Exception e){pendingInput=previous;Status("材质准备未完成："+e.Message);Log(e);Select(false);if(id!=null)try{File.Delete(TransferPath(id));File.Delete(Path.ChangeExtension(TransferPath(id),".treeproj"));File.Delete(Path.Combine(root,"material",".runtime","integration-input",id+".glb"));File.Delete(Path.Combine(root,"material",".runtime","integration-input",id+".treeproj"));NotifyPlantFailure(id,e.Message);}catch{}}finally{SetBusy(false);}}
+    string prepared=null;TimeoutException receiveTimeout=null;
+    try{
+     prepared=await material.IntegrationAwait("window.treeMaterialIntegration.receive("+json.Serialize(new {id=id,name=Convert.ToString(data["name"]),height=Convert.ToDouble(data["height"]),resume=resume,originKey=data.ContainsKey("originKey")?Convert.ToString(data["originKey"]):null,projectId=data.ContainsKey("projectId")?data["projectId"]:null,rebuild=data.ContainsKey("rebuild")&&Convert.ToBoolean(data["rebuild"]),target=data.ContainsKey("target")?Convert.ToInt32(data["target"]):50000,resolution=data.ContainsKey("resolution")?Convert.ToInt32(data["resolution"]):2048,stage=data.ContainsKey("stage")?Convert.ToString(data["stage"]):"material",preparation=data.ContainsKey("preparation")&&(Convert.ToString(data["preparation"])=="material"||Convert.ToString(data["preparation"])=="overlay")?Convert.ToString(data["preparation"]):"full",view=data.ContainsKey("view")?data["view"]:null,navigationMode=viewportNavigationMode})+")",300000);
+    }catch(TimeoutException e){receiveTimeout=e;}
+    if(receiveTimeout!=null){
+     if(id==pendingInput)try{
+      await material.IntegrationAwait("window.treeMaterialIntegration.cancelReceive("+json.Serialize(id)+")",10000);
+     }catch(Exception cancelError){Log(cancelError);}
+     throw receiveTimeout;
+    }
+    var result=json.Deserialize<Dictionary<string,object>>(prepared);
+    bool canRecover=result.ContainsKey("recovery")&&Convert.ToBoolean(result["recovery"]);
+    if(!canRecover)await plant.IntegrationAwait("window.treeDuckMaterialIntegration.notePrepared("+json.Serialize(id)+","+prepared+")",15000);
+    await plant.IntegrationEvaluate("window.treeDuckMaterialIntegration.settle("+json.Serialize(id)+")");
+    if(!canRecover)Status("树干已就绪 · 制作材质");
+   }catch(Exception e){
+    pendingInput=previous;
+    if(id!=null)NotifyPlantFailure(id,e.Message);
+    Status("材质准备未完成："+e.Message);Log(e);Select(false);
+   }finally{
+    if(id!=null){
+     DeleteTransferCopies(TransferPath(id));
+     DeleteTransferCopies(Path.Combine(root,"material",".runtime","integration-input",id+".glb"));
+    }
+    SetBusy(false);
+   }}
+   static bool TryRequestId(Dictionary<string,object> data,out string id){
+    object value;Guid parsed;
+    id=data.TryGetValue("id",out value)?Convert.ToString(value):null;
+    return Guid.TryParseExact(id,"D",out parsed);
+   }
+   void DeleteTransferCopies(string glb){
+    foreach(string file in new[]{glb,Path.ChangeExtension(glb,".treeproj")})
+     try{File.Delete(file);}catch(IOException e){Log(e);}catch(UnauthorizedAccessException e){Log(e);}
+   }
   async void NotifyPlantFailure(string id,string message){try{await plant.IntegrationEvaluate("window.treeDuckMaterialIntegration.settle("+json.Serialize(id)+","+json.Serialize(message)+")");}catch{}}
   async Task ComponentCommand(Dictionary<string,object> data){string id=Convert.ToString(data["id"]),error=null;bool ownsCommand=false;try{
    Guid parsed;if(!Guid.TryParseExact(id,"D",out parsed))return;if(componentCommandBusy||busy||closing||material==null||!materialActive)throw new Exception("请等待当前步骤完成");
@@ -78,7 +134,20 @@ namespace ShuYaErV050 {
    try{await plant.IntegrationEvaluate("window.treeDuckMaterialIntegration.componentCommandSettled("+json.Serialize(id)+","+json.Serialize(error)+")");}catch{}
    finally{if(ownsCommand)componentCommandBusy=false;}}
   async void MaterialMessage(Dictionary<string,object> data){string action=Convert.ToString(data["action"]);
-   if(action=="material-component-state"){if(materialActive&&!closing)try{await plant.IntegrationEvaluate("window.treeDuckMaterialIntegration.componentState("+json.Serialize(new {active=true,stage=data["stage"],busy=data["busy"],message=data["message"],nextLabel=data["nextLabel"]})+")");}catch(Exception e){Log(e);}return;}
+   if(action=="viewport-navigation-ready"){ApplyMaterialNavigationMode();return;}
+    if(action=="material-component-state"){if(materialActive&&!closing)try{await plant.IntegrationEvaluate("window.treeDuckMaterialIntegration.componentState("+json.Serialize(new {active=true,stage=data["stage"],busy=data["busy"],canAdvance=!data.ContainsKey("canAdvance")||Convert.ToBoolean(data["canAdvance"]),message=data["message"],nextLabel=data["nextLabel"]})+")");}catch(Exception e){Log(e);}return;}
+    if(action=="material-preparation-recovered"){
+     string requestId;
+     if(materialActive&&!closing&&TryRequestId(data,out requestId)&&requestId==pendingInput)try{
+      var recovered=new {originKey=data["originKey"],projectId=data["projectId"],preparation="full"};
+      await plant.IntegrationAwait("window.treeDuckMaterialIntegration.notePrepared("+json.Serialize(requestId)+","+json.Serialize(recovered)+")",15000);
+     }catch(Exception e){Status("模型已打开，材质草稿引用未保存："+e.Message);Log(e);}
+     return;
+    }
+    if(action=="return-material"&&(busy||closing)){
+     string requestId;if(TryRequestId(data,out requestId))NotifyMaterialFailure(requestId,"请等待当前步骤结束后重试");
+     return;
+    }
    if(busy||closing)return;if(action=="show-plant"){Select(false);if(data.ContainsKey("view"))await plant.IntegrationEvaluate("window.treeDuckMaterialIntegration.componentState("+json.Serialize(new {active=false,view=data["view"]})+")");return;}if(action!="return-material")return;SetBusy(true);string resultId=null;bool transferAccepted=false;try{
    string id=ValidId(data);resultId=id;if(pendingInput==null||Convert.ToString(data["inputId"])!=pendingInput)throw new Exception("材质结果与当前树干不匹配，请重新送入");
    string relative=Convert.ToString(data["model"]);if(!relative.StartsWith("/exports/",StringComparison.Ordinal)||relative.IndexOf('?')>=0||relative.IndexOf('#')>=0)throw new Exception("材质结果路径无效");

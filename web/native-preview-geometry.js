@@ -6,6 +6,7 @@ import * as THREE from './vendor/three.module.min.js';
 const names=['position','normal','uv','color','sampleCenter','sampleTangent'];
 const aliases=new WeakMap();
 const objectUvPreviews=new WeakMap(),uvGeometries=new WeakMap();
+const objectPosePreviews=new WeakMap();
 const attributeState=attribute=>{if(!attribute)return null;const data=attribute.data||attribute;return {attribute,data,array:data.array,version:data.version,stride:data.stride,count:attribute.count,size:attribute.itemSize,normalized:attribute.normalized,offset:attribute.offset};};
 const sameAttribute=(attribute,state)=>{if(!state)return !attribute;const data=attribute?.data||attribute;return attribute===state.attribute&&data===state.data&&data.array===state.array&&data.version===state.version&&data.stride===state.stride&&attribute.count===state.count&&attribute.itemSize===state.size&&attribute.normalized===state.normalized&&attribute.offset===state.offset;};
 const state=geometry=>({attributes:names.map(name=>attributeState(geometry.attributes[name])),index:attributeState(geometry.index),start:geometry.drawRange.start,count:geometry.drawRange.count,groups:geometry.groups.map(g=>({...g}))});
@@ -39,4 +40,19 @@ export function setNativePreviewUv(object,uv){
 export function nativePreviewGeometryForObject(object){
   const preview=objectUvPreviews.get(object);
   return preview&&preview.source===object.geometry ? preview.geometry : nativePreviewGeometrySource(object.geometry);
+}
+
+export function clearNativePreviewUv(object){objectUvPreviews.delete(object);}
+
+// Keep the editor's baked geometry for picking and export. DX12 can draw the
+// same vertices from a fixed source and apply the placement as a draw matrix.
+export function setNativePreviewPose(object, geometry, matrix) {
+  objectPosePreviews.set(object, { baked:object.geometry, bakedState:state(object.geometry), geometry, matrix });
+}
+
+export function nativePreviewPoseForObject(object) {
+  const preview = objectPosePreviews.get(object);
+  if (preview?.baked === object.geometry && objectUvPreviews.get(object)?.source !== object.geometry
+    && unchanged(object.geometry, preview.bakedState)) return preview;
+  return null;
 }

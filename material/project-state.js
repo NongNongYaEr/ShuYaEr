@@ -14,6 +14,7 @@ import {validatePartMaterials,partMaterialResources} from './part-materials.js';
 import {validateTreeUvOptions} from './tree-uv-rules.js';
 import {validateSurface,legacySurface} from './surface-effects.js';
 import {validateSourcePbrBase} from './source-pbr-base.js';
+import {imageDecalResources} from './image-decal-rules.js';
 export const PROJECT_VERSION=25;
 const hash=/^[a-f0-9]{64}$/;
 export function validateDocument(raw){
@@ -30,6 +31,12 @@ export function validateDocument(raw){
   if(!raw.resources||typeof raw.resources!=='object'||Array.isArray(raw.resources)||Object.values(raw.resources).some(v=>v!=null&&!hash.test(v))||new Set(Object.values(raw.resources).filter(Boolean)).size>PROJECT_RESOURCE_LIMIT)throw Error('工程素材引用无效或超过32项。');
   for(const key of ['source','working','bark','ao','height','roughness','normal'])if(raw.resources?.[key]!=null&&!hash.test(raw.resources[key]))throw Error('工程素材引用无效。');
   if(!hash.test(raw.resources?.source||''))throw Error('工程缺少源模型。');
+  if(raw.acceptedSourceUvOverlap!=null){
+    const {source,uv}=raw.acceptedSourceUvOverlap;
+    if(typeof source!=='string'||!hash.test(source)||typeof uv!=='string'||!hash.test(uv))throw Error('原 UV 重叠确认无效。');
+    if(source===raw.resources.source)raw.acceptedSourceUvOverlap={source,uv};
+    else delete raw.acceptedSourceUvOverlap;
+  }
   if(raw.materialBase!=null)raw.materialBase=validateSourcePbrBase(raw.materialBase);
   if(raw.meshOptimization!=null)raw.meshOptimization=validateMeshOptimization(raw.meshOptimization,raw.resources);
   raw.parts=validateParts(raw.parts,raw.resources.source);raw.partSuggestionOptions=validatePartSuggestionOptions(raw.partSuggestionOptions);
@@ -48,6 +55,8 @@ export function validateDocument(raw){
   for(const region of raw.regions)if(region.scope!=null)region.scope=validateScope(region.scope);
   for(const region of raw.regions)if(region.partId!=null&&(raw.maskMode!=='pixel'||!raw.parts.groups.some(group=>group.id===region.partId)))throw Error('部位范围需要像素模式和有效的部位选区。');
   raw.surface=validateSurface(raw.surface,raw,{allowLegacy:sourceVersion<14});
+  raw.resources=imageDecalResources(raw.resources,raw.surface);
+  if(new Set(Object.values(raw.resources).filter(Boolean)).size>PROJECT_RESOURCE_LIMIT)throw Error('工程素材引用超过32项。');
   if(JSON.stringify(raw).length>(raw.surface?.effects?.some(e=>e.paint)?8000000:2000000))throw Error('工程状态超过容量限制。');
   return structuredClone(raw);
 }

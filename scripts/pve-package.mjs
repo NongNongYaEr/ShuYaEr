@@ -44,10 +44,125 @@ export function validatePackage(directory, sourceBytes) {
   assert(JSON.stringify(r.instances) === JSON.stringify(s.foliage) && JSON.stringify(r.sources) === JSON.stringify(s.foliage_sources) && JSON.stringify(r.branches) === JSON.stringify(s.branches), '骨架、实例或枝类索引不一致');
   const ids = new Set(s.branches.map(v => v.id)), counts = m.units.map(() => 0);
   const meshUnitSources = new Set(s.foliage_sources.flatMap((source, i) => source.mesh_unit ? [i] : []));
+  const lights=s.required_capabilities?.includes('tree_light_flow_v1')===true;
+  const sharedBark = s.shared_tree_bark;
+  for (const ref of [m.shared_tree_bark, r.shared_tree_bark]) {
+    assert(Boolean(ref) === Boolean(sharedBark) && (!ref || (ref.version === sharedBark.version
+      && ref.material_id === sharedBark.material_id)), '共用树皮材质引用不一致');
+  }
   const imported=r.imported_trunk_materials;
-  if(s.imported_trunks){assert(imported?.version===1&&Array.isArray(imported.materials)&&imported.materials.length>0,'外部树干缺少实际材质表');const ids=new Set(imported.materials.map(m=>m.id));assert(ids.size===imported.materials.length,'外部树干材质身份重复');for(const material of imported.materials)for(const map of Object.values(material.maps||{})){const bytes=file(map.file);assert(bytes.length===map.bytes&&hash(bytes).toLowerCase()===map.sha256,'外部树干贴图校验失败');}for(const chunk of r.chunks){if(chunk.imported_trunk_material)assert(ids.has(chunk.imported_trunk_material.material_id)&&chunk.imported_trunk_material.uv_policy==='source_gltf_uv0_no_extra_flip','外部树干材质绑定缺失');if(chunk.vertex_colors){const c=chunk.vertex_colors,bytes=file(c.file);assert(c.count===chunk.vertex_count&&c.stride===16&&bytes.length===c.count*16&&hash(bytes).toLowerCase()===c.sha256,'外部树干顶点颜色校验失败');}}assert(imported.setup==='setup_imported_trunk_materials.py'&&file(imported.setup).length>0,'外部树干材质设置脚本缺失');}
+  const atlasBark = Array.isArray(imported?.materials)
+    ? imported.materials.filter(material => material.unit_bark_role === 'atlas') : [];
+  const unitAtlases = Array.isArray(imported?.materials)
+    ? imported.materials.filter(material => material.unit_atlas_role === 'shared') : [];
+  if (s.imported_trunks || lights || sharedBark || atlasBark.length || unitAtlases.length) {
+    assert(imported?.version === 1 && Array.isArray(imported.materials) && imported.materials.length > 0, '缺少实际材质表');
+    const materialIds = new Set(imported.materials.map(material => material.id));
+    assert(materialIds.size === imported.materials.length, '实际材质身份重复');
+    for (const material of imported.materials) for (const map of Object.values(material.maps || {})) {
+      const bytes = file(map.file);
+      assert(bytes.length === map.bytes && hash(bytes).toLowerCase() === map.sha256, '实际材质贴图校验失败');
+    }
+    for (const chunk of r.chunks) {
+      const binding = chunk.imported_trunk_material;
+      if (binding) assert(materialIds.has(binding.material_id) && binding.uv_policy === 'source_gltf_uv0_no_extra_flip', '实际材质绑定缺失');
+      if (chunk.vertex_colors) {
+        const c = chunk.vertex_colors, bytes = file(c.file);
+        assert(c.count === chunk.vertex_count && c.stride === 16 && bytes.length === c.count * 16
+          && hash(bytes).toLowerCase() === c.sha256, '外部树干顶点颜色校验失败');
+      }
+    }
+    assert(imported.setup === 'setup_imported_trunk_materials.py' && file(imported.setup).length > 0, '实际材质设置脚本缺失');
+    for (const material of atlasBark) {
+      const chunks = r.chunks.filter(chunk => chunk.imported_trunk_material?.material_id === material.id);
+      assert(/^unit-bark-[a-f0-9]{24}$/.test(material.id) && material.name === 'M_UnitBark'
+        && material.alpha_mode === 'OPAQUE' && (material.maps?.baseColor || material.maps?.normal)
+        && chunks.length > 0 && chunks.every(chunk => chunk.material_role === 'bark'), '基础枝木质图集材质绑定错误');
+    }
+    for (const material of unitAtlases) {
+      const chunks = r.chunks.filter(chunk => chunk.imported_trunk_material?.material_id === material.id);
+      assert(/^unit-atlas-[a-f0-9]{24}$/.test(material.id) && material.name === 'M_UnitAtlas'
+        && material.alpha_mode === 'OPAQUE' && material.maps?.baseColor && !material.unit_bark_role
+        && chunks.length > 0 && chunks.every(chunk => chunk.material_role === 'bark' || chunk.material_role === 'foliage'),
+      '合并的枝叶原图集材质绑定错误');
+    }
+  }
   else assert(!imported,'外部树干不能使用旧版 PVE 入口');
-  const skin=r.imported_trunk_skin;if(s.imported_trunks){assert(skin?.version===1&&skin.stride===12&&skin.coordinate_system==='UE_centimeter_X_negativeY_Z','外部树干缺少显式骨骼权重');const bytes=file(skin.file);assert(bytes.length===skin.bytes&&bytes.subarray(0,8).toString()==='BFTS0001'&&hash(bytes).toLowerCase()===skin.sha256&&hash(bytes,'sha1').toLowerCase()===skin.sha1,'树干权重文件校验失败');assert(Array.isArray(skin.nodes)&&skin.nodes.length>1&&skin.nodes.every(n=>ids.has(n.branch_id)&&n.position_cm?.length===3&&n.position_cm.every(Number.isFinite)),'树干骨骼节点无效');let end=8;for(const [i,p]of skin.pieces.entries()){assert(p.offset===end&&p.count===r.chunks[p.chunk]?.vertex_count&&r.chunks[p.chunk]?.imported_trunk_skin?.piece===i,'树干权重块引用不一致');end+=p.count*12;for(let v=0;v<p.count;v++){const at=p.offset+v*12,a=bytes.readUInt32LE(at),b=bytes.readUInt32LE(at+4),w=bytes.readFloatLE(at+8);assert(a<skin.nodes.length&&b<skin.nodes.length&&Number.isFinite(w)&&w>=0&&w<=1,'树干权重无效');}}assert(end===bytes.length&&file(skin.setup).length>0,'树干权重文件长度或完成脚本缺失');if(skin.instructions)assert(skin.instructions==='树干UE导出说明.txt'&&file(skin.instructions).length>0,'树干UE导出说明缺失');if(skin.ue_export)assert(skin.ue_export==='export_imported_trunk_assets.ps1'&&file(skin.ue_export).length>0,'树干后台导出脚本缺失');}
+
+  if (sharedBark) {
+    const records = imported.materials.filter(material => material.tree_bark_role === 'shared');
+    const material = records[0];
+    assert(records.length === 1 && material.id === sharedBark.material_id && material.name === 'M_UnitBark'
+      && material.alpha_mode === 'OPAQUE' && material.base_color_linear?.length === 4
+      && material.base_color_linear.every(value => value === 1), '共用树皮材质定义错误');
+    for (const channel of ['baseColor', 'normal', 'metallicRoughness']) {
+      const map = material.maps?.[channel];
+      assert(map && map.rotation === 0 && map.offset?.length === 2 && map.offset.every(value => value === 0)
+        && map.scale?.length === 2 && map.scale.every(value => value === 1)
+        && map.sampler?.wrapS === 10497 && map.sampler.wrapT === 10497, '共用树皮必须使用已烘焙 UV 和重复采样');
+      const png = file(map.file);
+      assert(png.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) && png.length >= 45
+        && png.readUInt32BE(16) === 2048 && png.readUInt32BE(20) === 2048, '共用树皮必须是 2K PNG');
+    }
+    const chunks = r.chunks.filter(chunk => chunk.imported_trunk_material?.material_id === material.id);
+    assert(chunks.length > 0 && chunks.every(chunk => chunk.material_role === 'bark'
+      && !chunk.vertex_colors && chunk.color_linear?.length === 3 && chunk.color_linear.every(value => value === 1))
+      && !r.bark_materials, '共用树皮装配混入了独立枝干材质');
+    assert(r.chunks.every(chunk => chunk.material_role !== 'bark' || chunk.imported_trunk_material), '木质几何缺少材质绑定');
+  }
+
+  const lightUV=r.tree_light_uv,lightChunks=r.chunks.filter(c=>c.material_role==='light');
+  assert(lights===Boolean(lightUV)&&lights===Boolean(lightChunks.length),'灯带能力与数据不一致');
+  if(lights){
+    const bytes=file(lightUV.file);
+    assert(lightUV.version===1&&lightUV.stride===8&&lightUV.file==='whole.light-uv.bin'
+      &&bytes.length===lightUV.bytes&&bytes.subarray(0,8).toString()==='BFLU0001'
+      &&hash(bytes).toLowerCase()===lightUV.sha256&&hash(bytes,'sha1').toLowerCase()===lightUV.sha1,'灯带第二套 UV 校验失败');
+    const flows=new Set(imported.materials.filter(m=>m.flow?.flowTexCoord===1&&m.flow.flowAxis==='U').map(m=>m.id));
+    let end=8,uMin=1,uMax=0;
+    for(const c of lightChunks){
+      assert(c.instance_index===-1&&flows.has(c.imported_trunk_material?.material_id)
+        &&Number.isInteger(c.imported_trunk_skin?.piece)&&c.light_uv?.offset===end
+        &&end+c.vertex_count*8<=bytes.length,'灯带缺少材质、蒙皮或 UV 引用');
+      for(let i=0;i<c.vertex_count*2;i++){
+        const value=bytes.readFloatLE(end+i*4);
+        assert(Number.isFinite(value)&&value>=0&&value<=1,'灯带第二套 UV 超出 0–1');
+        if(i%2===0){uMin=Math.min(uMin,value);uMax=Math.max(uMax,value);}
+      }
+      end+=c.vertex_count*8;
+    }
+    assert(end===bytes.length,'灯带第二套 UV 长度不一致');
+    assert(uMin<=1e-5&&uMax>=1-1e-5,'灯带流水 UV 必须覆盖从起点 0 到终点 1');
+  }
+  const skin=r.imported_trunk_skin;
+  if(s.imported_trunks||lights){
+    const stride=lights?32:12,version=lights?2:1;
+    assert(skin?.version===version&&skin.stride===stride&&skin.coordinate_system==='UE_centimeter_X_negativeY_Z','外部树干缺少显式骨骼权重');
+    const bytes=file(skin.file);
+    assert(bytes.length===skin.bytes&&bytes.subarray(0,8).toString()==='BFTS000'+version
+      &&hash(bytes).toLowerCase()===skin.sha256&&hash(bytes,'sha1').toLowerCase()===skin.sha1,'树干权重文件校验失败');
+    assert(Array.isArray(skin.nodes)&&skin.nodes.length>1&&skin.nodes.every(n=>ids.has(n.branch_id)
+      &&n.position_cm?.length===3&&n.position_cm.every(Number.isFinite)),'树干骨骼节点无效');
+    let end=8;
+    for(const [i,p]of skin.pieces.entries()){
+      assert(p.offset===end&&p.count===r.chunks[p.chunk]?.vertex_count&&r.chunks[p.chunk]?.imported_trunk_skin?.piece===i
+        &&end+p.count*stride<=bytes.length,'树干权重块引用不一致');
+      for(let v=0;v<p.count;v++){
+        const at=p.offset+v*stride;
+        let total=0;
+        for(let k=0;k<(lights?4:2);k++){
+          const node=bytes.readUInt32LE(at+4*k),w=lights?bytes.readFloatLE(at+16+4*k):k?bytes.readFloatLE(at+8):1-bytes.readFloatLE(at+8);
+          assert(node<skin.nodes.length&&Number.isFinite(w)&&w>=0&&w<=1,'树干权重无效');
+          total+=w;
+        }
+        assert(Math.abs(total-1)<1e-5,'树干权重和无效');
+      }
+      end+=p.count*stride;
+    }
+    assert(end===bytes.length&&file(skin.setup).length>0,'树干权重文件长度或完成脚本缺失');
+    if(skin.instructions)assert(skin.instructions==='树干UE导出说明.txt'&&file(skin.instructions).length>0,'树干UE导出说明缺失');
+    if(skin.ue_export)assert(skin.ue_export==='export_imported_trunk_assets.ps1'&&file(skin.ue_export).length>0,'树干后台导出脚本缺失');
+  }
   const barkMaterials = new Map(), barkFiles = new Set();
   if (r.bark_materials !== undefined) {
     assert(Array.isArray(r.bark_materials) && r.bark_materials.length > 0 && r.bark_materials.length <= 4096, '树皮材质表无效');
@@ -129,6 +244,20 @@ export function validatePackage(directory, sourceBytes) {
     const glb = file(unit.glb);
     assert(hash(glb) === unit.glb_sha256 && glb.toString('ascii', 0, 4) === 'glTF' && glb.readUInt32LE(4) === 2 && glb.readUInt32LE(8) === glb.length, 'GLB 哈希或头错误：' + unit.id);
     const length = glb.readUInt32LE(12), data = JSON.parse(glb.toString('utf8', 20, 20 + length));
+    if (sharedBark && !unit.mesh_unit) {
+      const materials = data.materials || [];
+      const wood = materials.filter(material => material.name === 'M_Bark');
+      const atlasWood = materials.some(material => {
+        if (material.extras?.base_branch_atlas !== true || material.pbrMetallicRoughness?.baseColorTexture
+          || material.normalTexture) return false;
+        return /^M_Leaf(?:_|$)/.test(material.name) || (material.name === 'M_UnitBark'
+          && material.extras.base_branch_atlas_role === 'bark' && (!material.alphaMode || material.alphaMode === 'OPAQUE'));
+      });
+      const sharedWood = wood.length === 1 && !wood[0].pbrMetallicRoughness?.baseColorTexture && !wood[0].normalTexture
+        && !wood[0].pbrMetallicRoughness?.metallicRoughnessTexture;
+      assert((sharedWood || (!wood.length && atlasWood)) && !unit.bark_material_bindings,
+        '完整单元的木质面必须引用包内共用树皮或基础枝原图集');
+    }
     if (unit.bark_material_bindings !== undefined) {
       assert(Array.isArray(unit.bark_material_bindings) && unit.bark_material_bindings.length > 0, '完整单元树皮槽表无效');
       const slots = new Set();
@@ -197,7 +326,7 @@ export function validatePackage(directory, sourceBytes) {
   for (const c of r.chunks) {
     assert(c.vertex_offset === cursor && c.vertex_count > 0 && Number.isInteger(c.vertex_count) && c.index_count > 0 && c.index_count % 3 === 0, '实际装配块布局错误');
     assert(c.index_offset === cursor + c.vertex_count * 48 && c.index_offset + c.index_count * 4 <= b.length, '实际装配块越界');
-    assert(ids.has(c.host_branch_id) && ['bark','foliage'].includes(c.material_role), '实际装配所属骨架或材质错误');
+    assert(ids.has(c.host_branch_id) && ['bark','foliage','light'].includes(c.material_role), '实际装配所属骨架或材质错误');
     if (c.bark_material_binding !== undefined) {
       assert(c.material_role === 'bark', '叶花果不能绑定承重树皮材质'); validateBarkBinding(c.bark_material_binding);
     }
@@ -219,7 +348,7 @@ export function validatePackage(directory, sourceBytes) {
   const filenames = fs.readdirSync(directory).sort();
   const importedFiles=imported?[imported.setup,...imported.materials.flatMap(m=>Object.values(m.maps||{}).map(x=>x.file)),...r.chunks.filter(c=>c.vertex_colors).map(c=>c.vertex_colors.file)]:[];
   const supportedFiles = new Set(['whole.pve-skeleton.json', 'complete_units.manifest.json', 'whole.resolved.json',
-    'whole.resolved.bin', 'leaf_atlas_color.png', 'leaf_atlas_normal.png', 'validation.json', ...m.units.map(unit => unit.glb), ...barkFiles,...importedFiles,...(skin?[skin.file,skin.setup,...(skin.ue_export?[skin.ue_export]:[]),...(skin.instructions?[skin.instructions]:[])]:[])]);
+    'whole.resolved.bin', 'leaf_atlas_color.png', 'leaf_atlas_normal.png', 'validation.json', ...m.units.map(unit => unit.glb), ...barkFiles,...importedFiles,...(lightUV?[lightUV.file]:[]),...(skin?[skin.file,skin.setup,...(skin.ue_export?[skin.ue_export]:[]),...(skin.instructions?[skin.instructions]:[])]:[])]);
   for (const name of filenames) assert(supportedFiles.has(name), '验证报告包含现有 UE 完整包约定之外的文件：' + name);
   if (m.package_kind === 'vine') {
     const ref = m.vine_detail;
@@ -238,11 +367,24 @@ export function validatePackage(directory, sourceBytes) {
   const files = Object.fromEntries(filenames.filter(n => n !== 'validation.json').map(n => { const bytes = file(n); return [n, { bytes: bytes.length, sha256: hash(bytes) }]; }));
   const originalValidation = json('validation.json');
   assert(originalValidation.valid && originalValidation.errors?.length === 0, '骨架校验未通过');
+  const cleanup = originalValidation.geometry_cleanup;
+  if (cleanup != null || m.geometry_cleanup != null) {
+    assert(JSON.stringify(cleanup) === JSON.stringify(m.geometry_cleanup), '几何清理统计与清单不一致');
+    const unitIds = new Set(m.units.map(unit => unit.id));
+    const sources = cleanup.source_models;
+    const positiveCount = value => Number.isSafeInteger(value) && value > 0;
+    assert(Number.isSafeInteger(cleanup.assembly_removed_faces) && cleanup.assembly_removed_faces >= 0
+      && Array.isArray(sources) && sources.every(source => unitIds.has(source?.id) && positiveCount(source.removed_faces))
+      && new Set(sources.map(source => source.id)).size === sources.length
+      && positiveCount(cleanup.removed_faces)
+      && cleanup.removed_faces === sources.reduce((total, source) => total + source.removed_faces, cleanup.assembly_removed_faces),
+    '几何清理统计无效');
+  }
   return { ...originalValidation, valid: true, errors: [], branch_count: s.branches.length, foliage_count: s.foliage.length, sources: m.units.length,
     source_sha256: sourceHash, resolved_assembly: { ...s.resolved_assembly, ...r.summary }, atlas: png?{ width: png.readUInt32BE(16), height: png.readUInt32BE(20) }:null, files };
 }
 
-export async function packageTransaction({ input, destination, statusPath, generate, keepHistory = false,
+export async function packageTransaction({ input, destination, statusPath, generate, keepHistory = false, expectedSourceSha256 = '',
   validate = validatePackage, manifestName = 'complete_units.manifest.json', manifestFormat = 'BranchForgeCompleteUnitSet',
   entryName = 'whole.pve-skeleton.json', initialStage = '生成骨架与样本枝' }) {
   const id = randomUUID(), parent = path.dirname(destination), name = path.basename(destination);
@@ -251,8 +393,15 @@ export async function packageTransaction({ input, destination, statusPath, gener
   const historyRoot = path.join(parent, '历史备份', name);
   const archive = path.join(historyRoot, new Date().toISOString().replace(/[:.]/g, '-') + '_' + id);
   const lockPath = destination + '.export.lock';
-  let lock, stage = initialStage, moved = false, published = false;
+  let lock, sourceBytes, stage = initialStage, moved = false, published = false;
   const started = new Date().toISOString();
+  const removeJobDirectory = () => {
+    assert(path.dirname(path.resolve(jobRoot)) === path.resolve(workRoot)
+      && path.basename(jobRoot) === id && !fs.lstatSync(workRoot).isSymbolicLink()
+      && !fs.lstatSync(jobRoot).isSymbolicLink(), '临时回退目录校验失败');
+    fs.rmSync(jobRoot, { recursive: true, force: true, maxRetries: 12, retryDelay: 250 });
+    try { fs.rmdirSync(workRoot); } catch { /* Other active/failed jobs remain. */ }
+  };
   const report = (next, detail = '', extra = {}) => {
     stage = next;
     const data = { success: true, state: 'running', stage, detail, pid: process.pid, started, updated: new Date().toISOString(), output_dir: destination, keep_history: keepHistory === true, ...extra };
@@ -274,7 +423,8 @@ export async function packageTransaction({ input, destination, statusPath, gener
     lock = fs.openSync(lockPath, 'wx'); fs.writeSync(lock, JSON.stringify({ pid: process.pid, started }));
     if (fs.existsSync(destination)) assert(!fs.lstatSync(destination).isSymbolicLink(), '完整包目标不能是目录链接');
     if (fs.existsSync(destination)) assert(read(path.join(destination, manifestName)).format === manifestFormat, '目标目录不是对应导出包，拒绝覆盖');
-    const sourceBytes = fs.readFileSync(input);
+    sourceBytes = fs.readFileSync(input);
+    if (expectedSourceSha256) assert(hash(sourceBytes) === expectedSourceSha256, '工程副本已变化，请重新保存并导出');
     fs.mkdirSync(workRoot, { recursive: true });
     assert(!fs.lstatSync(workRoot).isSymbolicLink(), '导出临时目录不能是目录链接');
     fs.mkdirSync(jobRoot);
@@ -299,11 +449,8 @@ export async function packageTransaction({ input, destination, statusPath, gener
       if (moved && keepHistory === true) { await renamePackageDirectory(previous, archive); previousDir = archive; }
       // Only this transaction's UUID directory may be removed, and only after
       // the replacement has been validated and successfully published.
-      assert(path.dirname(path.resolve(jobRoot)) === path.resolve(workRoot)
-        && path.basename(jobRoot) === id && !fs.lstatSync(jobRoot).isSymbolicLink(), '临时回退目录校验失败');
-      fs.rmSync(jobRoot, { recursive: true, force: true, maxRetries: 12, retryDelay: 250 });
+      removeJobDirectory();
       if (keepHistory !== true) previousDir = null;
-      try { fs.rmdirSync(workRoot); } catch { /* Other active/failed jobs remain. */ }
     } catch (error) {
       maintenanceWarnings.push(`完整包已发布，但旧包归档或临时目录清理未完成：${error.message}；保留位置：${previousDir || jobRoot}`);
     }
@@ -312,9 +459,18 @@ export async function packageTransaction({ input, destination, statusPath, gener
       previous_dir: previousDir, maintenance_warnings: maintenanceWarnings });
   } catch (error) {
     if (moved && !published) await renamePackageDirectory(previous, destination);
-    const detail = ['EPERM','EACCES','EBUSY'].includes(error.code)
+    let detail = ['EPERM','EACCES','EBUSY'].includes(error.code)
       ? '文件被占用或没有写入权限，请关闭使用该文件的程序后重试。\n' + error.message : error.message;
-    report(stage, detail, { state: 'failed', error: error.stack, failed_directory: fs.existsSync(staging) ? staging : null });
+    let failedDirectory = fs.existsSync(staging) ? staging : null;
+    // A consent pause can follow texture/source generation. Discard its staging
+    // now since a confirmed retry rebuilds from the exact saved input hash.
+    if (error.geometryCleanupRequired && failedDirectory && !moved && !published) {
+      try { removeJobDirectory(); failedDirectory = null; }
+      catch (cleanupError) { detail += '\n临时副本清理未完成：' + cleanupError.message; }
+    }
+    report(stage, detail, { state: 'failed', error: error.stack, failed_directory: failedDirectory,
+      ...(error.geometryCleanupRequired ? { geometry_cleanup_required: { ...error.geometryCleanupRequired,
+        project_path: input, source_sha256: hash(sourceBytes) } } : {}) });
     throw error;
   } finally {
     if (lock !== undefined) { fs.closeSync(lock); fs.unlinkSync(lockPath); }

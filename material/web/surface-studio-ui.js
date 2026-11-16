@@ -1,5 +1,9 @@
 import {defaultEmission} from './emission-rules.js';
-import {makeManualDecal} from './manual-decal-rules.js';
+import {addManualDecal,isManualDecalPlacement,makeManualDecal} from './manual-decal-rules.js';
+import {createDecalPointEditor,makeFittedDecalProjection} from './decal-point-editor.js';
+import {BURL_SCATTER_LIMIT} from './burl-rules.js';
+import {burlBarkFusion,supportsBurlBarkFusion} from './burl-effect.js';
+import {LOCAL_ENDGRAIN_RECIPES} from './local-endgrain-catalog.js';
 import {prepareMaterialBrush} from './surface-material-brushes.js';
 import {surfaceMaterialBrush} from './material-brush-rules.js';
 import {renderFeaturedBark} from './featured-bark-ui.js';
@@ -18,18 +22,57 @@ import {createLayerMaterialPreviews} from './layer-material-previews.js';
 import {createStudioLayoutUI} from './studio-layout-ui.js';
 import {materialFieldGroups} from './surface-inspector-layout.js';
 import {studioIcon} from './studio-ui-icons.js';
-import {createEffectLibraryPanel,EFFECT_DRAG_MIME,LAYER_DRAG_MIME} from './effect-library-ui.js';
+import {createEffectLibraryPanel,EFFECT_DRAG_MIME,EFFECT_VIEWPORT_DRAG_MIME,LAYER_DRAG_MIME} from './effect-library-ui.js';
 import {applyLibraryCombination} from './material-combinations.js';
-import {instantiateLibraryEntry,saveLayerPreset,EFFECT_CATEGORIES,prepareLibraryEntry,libraryEntryDependencies} from './effect-library.js';
+import {instantiateLibraryDecal,saveLayerPreset,EFFECT_CATEGORIES,prepareLibraryEntry,libraryEntryDependencies} from './effect-library.js';
 import {layerIndex,layerLeafIds,layerIsLocked,createLayerGroup,ungroupLayer,moveLayer,duplicateLayer,deleteLayer,pruneSurfaceResources} from './surface-layers.js';
 import {effectLayerKind,effectChannels} from './surface-effects.js';
 import {EFFECT_TYPES,RULE_TYPES,MASK_COMBINE_NAMES,addEffect,duplicateEffect,cloneMask,createRule,appendPaintRule,surfaceUses,syncLegacySurface} from './surface-effects.js';
 import {shouldSkipDab} from './brush-dabs.js';
+import {createSceneOverlayEditor} from './scene-overlay-ui.js';
+import {sceneOverlayDefaults,sceneOverlayMembers,sceneOverlayRule,validateSceneOverlay} from './scene-overlay-rules.js';
+import {IMAGE_DECAL_SPEC,IMAGE_DECAL_STYLE} from './image-decal-rules.js';
+import {validateSceneAnchor} from './scene-overlay-rules.js';
 
 const node=(tag,text,cls)=>{const e=document.createElement(tag);if(text!=null)e.textContent=text;if(cls)e.className=cls;return e;};
 import {stableRule,STABLE_FIELDS,upgradeStableDistribution} from './stable-distribution.js';
 const weatheringRule=(s,e)=>stableRule(s,e)||legacyWeatheringRule(s,e);
 const uid=()=>crypto.randomUUID();
+const endgrainStyles=new Set(LOCAL_ENDGRAIN_RECIPES.map(recipe=>recipe.layers[0].params.burlStyle));
+const usesManualPlacement=e=>e.type==='burl'&&(isManualDecalPlacement(e)||e.params.burlCount===0&&endgrainStyles.has(e.params.burlStyle));
+function remainingDecalSlots(surface,effectId){
+ const otherCount=surface.effects.filter(e=>e.type==='burl'&&e.id!==effectId).reduce((total,e)=>total+e.params.burlCount,0);
+ return Math.max(0,BURL_SCATTER_LIMIT-otherCount);
+}
+
+export function sampleMaskThumbnail(map,size,channel,previewSize=40){
+ const values=new Uint8Array(previewSize*previewSize);
+ let visible=false;
+ for(let y=0;y<previewSize;y++){
+  const row=Math.floor((previewSize-1-y)*size/previewSize)*size;
+  for(let x=0;x<previewSize;x++){
+   const value=map[(row+Math.floor(x*size/previewSize))*4+channel];
+   values[y*previewSize+x]=value;
+   if(value)visible=true;
+  }
+ }
+ if(visible||size<=previewSize)return values;
+
+ // If point sampling misses sparse coverage, keep each cell's strongest
+ // original sample. An empty channel remains completely black.
+ const cell=Uint32Array.from({length:size},(_,i)=>Math.floor(((i+1)*previewSize-1)/size));
+ for(let y=0;y<size;y++){
+  const row=(previewSize-1-cell[y])*previewSize;
+  for(let x=0,at=y*size*4+channel;x<size;x++,at+=4){
+   const value=map[at];
+   if(!value)continue;
+   const pixel=row+cell[x];
+   if(value>values[pixel])values[pixel]=value;
+  }
+ }
+ return values;
+}
+
 export function createSurfaceStudio(api){
  const left=node('div',null,'surface-outline'),right=node('div',null,'surface-inspector'),context=node('div',null,'surface-context'),brush=node('div',null,'surface-brushbar');
  left.id='surfaceOutline';right.id='surfaceInspector';left.dataset.workspaceStage=right.dataset.workspaceStage='material';
@@ -46,8 +89,69 @@ export function createSurfaceStudio(api){
  const doc=()=>api.document(),surface=()=>doc()?.surface,selectedEffect=()=>surface()?.effects.find(e=>e.id===effectId),selectedMask=()=>surface()?.masks.find(m=>m.id===selectedEffect()?.maskRef);
  const materialPreviews=createLayerMaterialPreviews({renderer:api.renderer,busy:()=>api.busy()||!!editing||!!painting||!!api.materialPaint?.active,visible:()=>document.body.dataset.workspaceStage==='material'&&!document.body.classList.contains('blender-tools-hidden'),changed:(id,state)=>{if(disposed)return;for(const image of left.querySelectorAll('img[data-material-effect]'))if(image.dataset.materialEffect===id){if(state.url)image.src=state.url;image.dataset.previewState=state.ready?'ready':state.failed?'sample':'updating';}}});
  const parts=createPartsWorkspace({busy:api.busy,current:api.currentPart,document:doc,renderer:api.renderer,mode:api.mode,preview:api.preview,currentPreview:api.currentPreview,stop:()=>api.stopParts?.(),syncSource:()=>api.syncParts?.(),changed:()=>sync(),finished:({owner,purpose,part})=>{if(part&&purpose==='range'&&owner)unified.usePart(owner,part.id);const saved=partsReturn;partsReturn=null;if(saved)choose(part&&purpose==='range'?'mask':saved.kind,part&&purpose==='range'?surface().effects.find(e=>e.id===owner)?.maskRef:saved.id,owner||saved.owner);else sync();}});
+ function editableDecalEffect(){
+  if(document.body.dataset.workspaceStage!=='material'||tab==='data'||pendingDecalId||parts.active||painting||api.materialPaint?.active||chosenLayers.size>1||!['effect','mask','rule'].includes(selection.kind))return null;
+  const e=selectedEffect();return e?.type==='burl'&&(Array.isArray(e.manualDecals)||!endgrainStyles.has(e.params.burlStyle))?e:null;
+ }
+ const pointEditor=createDecalPointEditor({
+  panel:right,document:doc,renderer:api.renderer,source:api.source,busy:api.busy,notify:api.notify,
+  effect:editableDecalEffect,
+  locked:id=>layerIsLocked(surface(),id),remaining:id=>remainingDecalSlots(surface(),id),placement:id=>api.burlPlacement?.(id),
+  prepare:()=>{pendingDecalId=null;api.renderer().finishInteraction?.();stopPaint();api.live();if(api.currentPreview())api.preview(null);api.mode(-1);api.renderer().tool='orbit';},
+  edit:(id,mutate)=>edit((s,d)=>mutate(d,s.effects.find(e=>e.id===id)),{ids:[id]}),changed:sync,
+ });
+ const sceneEditor=createSceneOverlayEditor({
+  document:doc,source:api.source,renderer:api.renderer,busy:api.busy,
+  imageURL:api.imageDecalURL,
+  active:()=>!disposed&&tab==='effects'&&!parts.active&&document.body.dataset.workspaceStage==='material',
+  locked:id=>layerIsLocked(surface(),id),selected:()=>selectedScene(),notify:api.notify,changed:sync,
+  section:inspectorSection,button,field,select,
+  prepare:path=>{
+   pendingDecalId=null;
+   pointEditor.cancel(false);
+   api.renderer().finishInteraction?.();
+   stopPaint();
+   api.live();api.preview(null);api.mode(-1);
+   api.renderer().tool=path?'mask':'orbit';
+  },
+  update:(instance,mutate,{commit=true}={})=>{
+   const members=sceneOverlayMembers(surface(),instance);
+   if(!members.length||members.some(({effect})=>layerIsLocked(surface(),effect.id)))throw Error('场景叠加图层已锁定或已移除。');
+   edit((s,d)=>{
+    for(const {rule} of sceneOverlayMembers(s,instance)){
+     const next=structuredClone(rule.scene);
+     mutate(next);
+     rule.scene=validateSceneOverlay(next,d.resources.source);
+    }
+   },{ids:members.map(({effect})=>effect.id),commit});
+  },
+ });
+ function groupScenes(id){
+  const s=surface(),leaves=new Set(layerLeafIds(s,id)),scenes=new Map();
+  for(const effect of s.effects)if(leaves.has(effect.id)){
+   const scene=sceneOverlayRule(s,effect)?.scene;
+   if(scene&&!scenes.has(scene.instance))scenes.set(scene.instance,scene);
+  }
+  return [...scenes.values()];
+ }
+ function selectedScene(){
+  if(chosenLayers.size>1)return null;
+  if(selection.kind==='group'){
+   const scenes=groupScenes(selection.id);
+   return scenes.length===1?scenes[0]:null;
+  }
+  return selectedEffect()?sceneOverlayRule(surface(),selectedEffect())?.scene:null;
+ }
+ const studioPointTools={...pointEditor,
+  get hint(){return sceneEditor.hint??pointEditor.hint;},
+  pointerAction:event=>sceneEditor.pointerAction(event)||pointEditor.pointerAction(event),
+  pointerMotion:event=>sceneEditor.pointerMotion(event)||pointEditor.pointerMotion(event),
+  pointerLeave:()=>{pointEditor.pointerLeave();sceneEditor.pointerLeave();sceneEditor.refresh();},
+  cancel:()=>sceneEditor.cancel()||pointEditor.cancel(),
+  key:(event,inViewport)=>sceneEditor.key(event,inViewport)||pointEditor.key(event,inViewport),
+ };
  const generation=createGenerationPanel({document:doc,busy:api.busy,analysis:api.analysis,notify:api.notify,prepare:api.prepare,currentPart:api.currentPart,parts:()=>openParts({effectId}),sync:()=>sync(),stopPaint,painting:()=>painting,paintCurrent:beginPaint,finishPaint:()=>{api.renderer().finishInteraction?.();stopPaint();sync();},preview:()=>{api.preview(null);api.mode(12);sync();},apply:(next,id)=>{effectId=id;selectedLayerId=id;inspectorTab='mask';selection={kind:'mask',id:next.surface.effects.find(e=>e.id===id).maskRef};editing=null;api.edit(next,{commit:true});api.preview(null);sync();}});
- const unified=createUnifiedDistributionPanel({list:api.distributionList,save:api.distributionSave,remove:api.distributionDelete,restore:api.distributionRestore,applyGroup:(next,id)=>{selectedLayerId=id;effectId=null;selection={kind:'group',id};api.edit(next,{commit:true});editing=null;sync();},document:doc,selected:()=>selectedLayerId,prepare:api.prepare,notify:api.notify,sync,stopPaint:()=>{api.renderer().finishInteraction?.();stopPaint();},field,select,button,section:inspectorSection,edit,startPaint,parts:id=>openParts({effectId:id}),correct:e=>startLayerMask(e,'erase'),preview:()=>{api.preview(null);api.mode(12);sync();},apply:(next,id,commit=true)=>{effectId=selectedLayerId=id;inspectorTab='mask';selection={kind:'mask',id:next.surface.effects.find(e=>e.id===id).maskRef};api.edit(next,{commit});if(commit){editing=null;sync();}}});
+ const unified=createUnifiedDistributionPanel({list:api.distributionList,save:api.distributionSave,remove:api.distributionDelete,restore:api.distributionRestore,applyGroup:(next,id)=>{selectedLayerId=id;effectId=null;selection={kind:'group',id};api.edit(next,{commit:true});editing=null;sync();},document:doc,selected:()=>selectedLayerId,structure:()=>api.renderer()?.surfaceAnalysis?.structure,prepare:api.prepare,notify:api.notify,sync,stopPaint:()=>{api.renderer().finishInteraction?.();stopPaint();},field,select,button,section:inspectorSection,edit,startPaint,parts:id=>openParts({effectId:id}),correct:e=>startLayerMask(e,'erase'),preview:()=>{api.preview(null);api.mode(12);sync();},apply:(next,id,commit=true)=>{effectId=selectedLayerId=id;inspectorTab='mask';selection={kind:'mask',id:next.surface.effects.find(e=>e.id===id).maskRef};api.edit(next,{commit});if(commit){editing=null;sync();}}});
  function blendInspector(e){renderBlendPanel({parent:right,e,document:doc(),renderer:api.renderer(),field,select,button,section:inspectorSection,edit});}
  function syncViewUI(){viewSelect.value=String(api.renderer().mode);const baked=document.getElementById('previewSource').value==='baked';materialReturn.hidden=api.renderer().mode===-1&&!baked;materialReturn.textContent=baked?'返回实时材质':'返回材质';returnButton.hidden=true;}
  function openParts({effectId:owner=effectId,kind='range',startBrush=false}={}){if(!doc()||api.busy())return;api.renderer().finishInteraction?.();stopPaint();if(!parts.active)partsReturn={kind:selection.kind,id:selection.id,owner:effectId};parts.open({effectId:owner,kind});if(startBrush)document.getElementById('partTool').click();}
@@ -60,20 +164,109 @@ export function createSurfaceStudio(api){
  }catch(error){api.notify(error.message,true);sync();}}
  function startManualDecal(id=effectId){
   const e=surface()?.effects.find(e=>e.id===id);if(!e||e.type!=='burl'||layerIsLocked(surface(),id))throw Error('先选择未锁定的贴花层。');
-  if(surface().effects.filter(x=>x.id!==id&&x.type==='burl').reduce((n,x)=>n+x.params.burlCount,0)>=8)throw Error('表面贴花数量已满，请先减少其它贴花。');
-  api.renderer().finishInteraction?.();stopPaint();choose('effect',id,id);api.live();api.mode(-1);pendingDecalId=id;api.renderer().tool='orbit';sync();
+  if(Array.isArray(e.manualDecals))throw Error('请用贴花点位工具添加或移动点位。');
+  if(!remainingDecalSlots(surface(),id))throw Error('表面贴花数量已满，请先减少其它贴花。');
+  const page=inspectorTab==='mask'?'mask':'effect';
+  api.renderer().finishInteraction?.();stopPaint();choose(page,page==='mask'?e.maskRef:id,id);api.live();api.mode(-1);pendingDecalId=id;api.renderer().tool='orbit';sync();
  }
  function pickDecal(hit){
+  if(sceneEditor.pick(hit))return true;
   if(!pendingDecalId)return false;const id=pendingDecalId;pendingDecalId=null;if(api.busy()||!doc())return true;
-  try{edit((s,d)=>{const e=s.effects.find(e=>e.id===id);if(!e||layerIsLocked(s,id))throw Error('贴花层已移除或锁定。');e.manualDecal=makeManualDecal(d,e,hit);e.params.burlCount=1;delete e.publicDistribution;delete e.legacyBinding;e.enabled=true;},{ids:[id]});api.notify('贴花已定位 · 可调整尺寸、旋转、边缘和投射深度。');}catch(error){api.notify(error.message,true);}sync();return true;
+  try{edit((s,d)=>{const e=s.effects.find(e=>e.id===id);if(!e||layerIsLocked(s,id))throw Error('贴花层已移除或锁定。');e.manualDecal=makeManualDecal(d,e,hit);e.params.burlCount=1;delete e.publicDistribution;delete e.legacyBinding;e.enabled=true;},{ids:[id]});api.notify('贴花已定位 · 可调整尺寸、旋转和投射深度。');}catch(error){api.notify(error.message,true);}sync();return true;
  }
- function manualDecalPanel(e){
-  const pane=inspectorSection('manual-decal','局部定位与投影',true);button(pane,e.manualDecal?'重新定位 · 点击模型':'手动放置 · 点击模型',()=>startManualDecal(e.id));
-  if(!e.manualDecal){pane.append(node('small','用于端面、伤口与剧情细节；点击表面确定中心，不重新拆 UV。','surface-note'));return;}
-  pane.append(node('small','仅投射到与锚点连通的源表面；弯折和深度限制避免穿到另一根。','surface-note'));
-  select(pane,'贴花材质',SURFACE_DECAL_STYLES.map((s,i)=>[String(i),s.name]),String(e.params.burlStyle),v=>edit(s=>{const target=s.effects.find(x=>x.id===e.id),oldMode=decalColorMode(target.params.burlStyle);if(!target.blend||target.blend.color.mode===oldMode&&target.blend.color.strength===1){target.blend||=defaultBlend();target.blend.color.mode=decalColorMode(Number(v));}Object.assign(target.params,decalAppearance(Number(v)));}));
-  for(const[key,label,min,max,step,unit]of [['widthMeters','宽度',.005,3,.005,'m'],['heightMeters','高度',.005,3,.005,'m'],['rotation','旋转',-180,180,1,'°'],['feather','边缘柔化',.02,.45,.01,''],['depthMeters','投射深度',.001,.5,.005,'m'],['maxBendDegrees','最大转折',5,85,1,'°']])field(pane,label,e.manualDecal[key],(v,commit)=>edit(s=>s.effects.find(x=>x.id===e.id).manualDecal[key]=v,{commit}),{min,max,step,unit});
-  button(pane,'改回数量散布',()=>edit(s=>{delete s.effects.find(x=>x.id===e.id).manualDecal;}));
+ function decalStyleControl(parent,e){
+  select(parent,isManualDecalPlacement(e)?'贴花材质':'表面样式',SURFACE_DECAL_STYLES.map((style,i)=>[String(i),style.name]),String(e.params.burlStyle),v=>edit(s=>{
+   const target=s.effects.find(x=>x.id===e.id),index=Number(v),oldMode=decalColorMode(target.params.burlStyle);
+   if(!isManualDecalPlacement(target)&&target.name===SURFACE_DECAL_STYLES[target.params.burlStyle].name+'散布')target.name=SURFACE_DECAL_STYLES[index].name+'散布';
+   if(!target.blend||target.blend.color.mode===oldMode&&target.blend.color.strength===1){target.blend||=defaultBlend();target.blend.color.mode=decalColorMode(index);}
+   Object.assign(target.params,decalAppearance(index));
+  }));
+ }
+ function decalBarkFusionControl(parent,e){
+  if(!supportsBurlBarkFusion(e.params.burlStyle))return;
+  const input=field(parent,'树皮融合',burlBarkFusion(e.params),(value,commit)=>edit(s=>{
+   s.effects.find(effect=>effect.id===e.id).params.burlBarkFusion=value;
+  },{ids:[e.id],commit}),{min:0,max:1,step:.01,slider:true});
+  input.dataset.decalBarkFusion='';
+  input.parentElement.title='0 使用素材原貌，1 继承树皮颜色和底纹，并保留疤痕或树瘤的起伏。';
+  input.disabled||=layerIsLocked(surface(),e.id);
+  if(input.disabled)for(const control of input.parentElement.querySelectorAll('input'))control.disabled=true;
+ }
+ function manualDecalPanel(pane,e){
+  const pending=pendingDecalId===e.id;
+  const locate=button(pane,pending?'等待点击模型…':e.manualDecal?'重新定位':'点击定位',()=>startManualDecal(e.id));
+  locate.dataset.decalPlace='';
+  locate.disabled||=!remainingDecalSlots(surface(),e.id);
+  if(pending)pane.append(node('p','点击模型上的端面或表面放置，Esc 取消。','surface-note'));
+  if(!e.manualDecal)return;
+  const projectionField=(parent,property,label,min,max,step,unit,slider)=>field(parent,label,e.manualDecal[property],(value,commit)=>edit(s=>{
+   s.effects.find(x=>x.id===e.id).manualDecal[property]=value;
+  },{commit}),{min,max,step,unit,slider});
+  projectionField(pane,'widthMeters','宽度',.005,3,.005,'m').dataset.decalField='width';
+  projectionField(pane,'heightMeters','高度',.005,3,.005,'m').dataset.decalField='height';
+  projectionField(pane,'rotation','旋转',-180,180,1,'°',true).dataset.decalField='rotation';
+  const advanced=inspectorSection('manual-decal-projection','投射细节',false,pane);
+  projectionField(advanced,'depthMeters','投射深度',.001,.5,.005,'m');
+  button(advanced,'改回数量散布',()=>edit(s=>{delete s.effects.find(x=>x.id===e.id).manualDecal;}));
+ }
+ function scatterDecalPanel(pane,e){
+  const p=e.params,requested=p.burlCount,maximum=remainingDecalSlots(surface(),e.id);
+  const set=(property,value,commit=true)=>{
+   const previous=surface().effects.find(x=>x.id===e.id).params[property];
+   edit(s=>{s.effects.find(x=>x.id===e.id).params[property]=value;},{commit});
+   if(!commit&&previous!==value){
+    summary.textContent='正在计算落点…';
+    summary.dataset.requested=String(surface().effects.find(x=>x.id===e.id).params.burlCount);
+    delete summary.dataset.placed;
+    pane.querySelector('[data-burl-shortfall]')?.remove();
+    focus.disabled=true;
+   }
+  };
+  const scatterField=(parent,key,property,options={},advanced=false)=>{
+   const definition=EFFECT_TYPES.burl.fields[property],{label,...rest}=definition;
+   const input=field(parent,label,p[property],(value,commit)=>set(property,value,commit),{...rest,...options});
+   input.dataset[advanced?'burlOption':'burlField']=key;
+   if(key!=='count'&&!requested)for(const control of input.parentElement.querySelectorAll('input'))control.disabled=true;
+   return input;
+  };
+  const count=scatterField(pane,'count','burlCount',{max:maximum,slider:maximum>0});
+  count.disabled||=maximum===0;
+  count.title=`本层可申请 ${maximum} 个。全工程限 ${BURL_SCATTER_LIMIT} 个，包含隐藏图层。`;
+  scatterField(pane,'minSize','burlMinSizeCm',{max:p.burlMaxSizeCm,slider:true});
+  scatterField(pane,'maxSize','burlMaxSizeCm',{min:p.burlMinSizeCm,slider:true});
+  const preference=select(pane,'选点偏好',[[0,'智能选点'],[1,'宽阔表面'],[2,'形体转折'],[3,'均匀散布']],p.burlPreference,value=>set('burlPreference',Number(value)));
+  preference.dataset.burlField='preference';preference.disabled||=!requested;
+  const placement=api.burlPlacement?.(e.id),result=placement?.result;
+  const error=api.analysis().error;
+  const status=!requested?'已生成 0 / 0 个':placement?.active===false?'图层未参与散布':result?`已生成 ${result.placed} / ${requested} 个`:error?'散布未更新 · '+error:'正在计算落点…';
+  const summary=node('p',status,'surface-note');summary.dataset.burlResult='';
+  if(result||!requested)summary.dataset.placed=String(requested?result.placed:0);
+  summary.dataset.requested=String(requested);pane.append(summary);
+  if(result&&result.placed<requested){
+   const reason=node('p',result.reason||'可用表面或间距不足。','surface-note');
+   reason.dataset.burlShortfall=result.reasonCode||'';pane.append(reason);
+  }
+  if(maximum<BURL_SCATTER_LIMIT) pane.append(node('p',`本层可申请 ${maximum} 个 · 全工程共 ${BURL_SCATTER_LIMIT} 个名额，含隐藏图层。`,'surface-note'));
+  const actions=node('div',null,'studio-quick-actions');pane.append(actions);
+  button(actions,'换一批位置',()=>set('burlPlacementSeed',(p.burlPlacementSeed+1)%10001)).disabled||=!requested;
+  const focus=button(actions,p.burlStyle?'定位查看贴花':'定位查看树瘤',()=>focusBurl(e));
+  focus.disabled||=!result?.placed;
+  button(actions,'查看散布覆盖',()=>{api.preview(null);api.mode(12);sync();});
+  const advanced=inspectorSection('burl-placement-options','间距、高度与随机',false,pane);
+  scatterField(advanced,'spacing','burlSpacing',{},true);
+  scatterField(advanced,'minHeight','burlMinHeightMeters',{max:p.burlMaxHeightMeters},true);
+  scatterField(advanced,'maxHeight','burlMaxHeightMeters',{min:p.burlMinHeightMeters},true);
+  scatterField(advanced,'seed','burlPlacementSeed',{},true);
+  if(endgrainStyles.has(p.burlStyle))button(advanced,'点击指定位置',()=>startManualDecal(e.id)).disabled||=!maximum;
+ }
+ function decalPlacementPanel(e){
+  const manual=usesManualPlacement(e)||pendingDecalId===e.id,pane=node('section',null,'generation-panel');
+  pane.dataset.decalPlacement=manual?'manual':'quantity';
+  if(editableDecalEffect()===e)pointEditor.render(pane,e,{node,button,field,icon:studioIcon});
+  if(manual&&!Array.isArray(e.manualDecals))manualDecalPanel(pane,e);
+  if(!manual){pane.dataset.burlPlacement='quantity';scatterDecalPanel(pane,e);}
+  if(layerIsLocked(surface(),e.id))for(const control of pane.querySelectorAll('input,select,button'))control.disabled=true;
+  right.append(pane);
  }
  function beginSurfaceMaterialBrush(presetId,id=effectId,operation='paint'){
   if(!doc()||api.busy())return;api.renderer().finishInteraction?.();stopPaint();if(parts.active)parts.close();
@@ -122,22 +315,22 @@ export function createSurfaceStudio(api){
  function select(parent,label,options,value,fn){const row=node('label',null,'surface-field');row.append(node('span',label));const s=node('select');for(const[v,t]of options){const o=node('option',t);o.value=v;s.append(o);}s.value=value??'';s.onchange=()=>{try{fn(s.value);}catch(e){api.notify(e.message,true);sync();}};s.disabled=api.busy();row.append(s);parent.append(row);return s;}
  function detach(s,ids){for(const e of s.effects)if(ids.includes(e.id))delete e.legacyBinding;s.active=true;}
  function edit(fn,{ids=[effectId],commit=true}={}){if(!doc()||api.busy())return;const d=structuredClone(doc());d.surface=syncLegacySurface({...d,settings:api.settings()});detach(d.surface,ids);fn(d.surface,d);pruneSurfaceResources(d.surface);api.edit(d,{commit});if(commit){editing=null;sync();}}
- function field(parent,label,value,set,{kind='number',min=0,max=1,step=.01,unit=''}={}){
+ function field(parent,label,value,set,{kind='number',min=0,max=1,step=.01,unit='',slider:showSlider,sliderMax,live=true}={}){
   const row=node('label',null,'surface-field');row.append(node('span',label+(unit?' · '+unit:'')));const input=node('input');input.type=kind;input.value=kind==='number'&&Number.isFinite(value)?String(Number(value.toPrecision(6))):value;if(kind==='number')input.title='完整数值：'+value;if(kind==='checkbox')input.checked=!!value;if(kind==='number'){input.min=min;input.max=max;input.step=step;}input.disabled=api.busy();
   input.onfocus=()=>{if(kind==='number')input.value=String(value);editing={element:input,snapshot:structuredClone(doc()),settings:structuredClone(api.settings())};};
   const read=()=>kind==='checkbox'?input.checked:kind==='number'?Number(input.value):input.value;
-  input.oninput=()=>{if(kind==='number'&&(!Number.isFinite(read())||read()<min||read()>max))return;try{set(read(),false);}catch(e){api.notify(e.message,true);}};
+  input.oninput=()=>{if(!live)return;if(kind==='number'&&(!Number.isFinite(read())||read()<min||read()>max))return;try{set(read(),false);}catch(e){api.notify(e.message,true);}};
   input.onchange=()=>{try{if(kind==='number'&&(!Number.isFinite(read())||read()<min||read()>max))throw Error('数值超出允许范围。');set(read(),true);editing=null;sync();}catch(e){cancelEdit();api.notify(e.message,true);}};
   input.onblur=()=>{if(kind==='number'&&Number.isFinite(Number(input.value)))input.value=String(Number(Number(input.value).toPrecision(6)));if(editing?.element===input){editing=null;setTimeout(()=>{if(!disposed&&!document.activeElement?.closest('#surfaceOutline,#surfaceInspector,.surface-brushbar,#effectLibrary'))sync();},0);}};
-  input.onkeydown=e=>{if(e.key==='Escape'){e.stopPropagation();cancelEdit();input.blur();}if(e.key==='Enter')input.blur();};row.append(input);if(kind==='number'&&max<=8&&min>=0){const slider=node('input');slider.type='range';slider.min=min;slider.max=max;slider.step=step;slider.value=value;slider.className='surface-slider';input.classList.add('surface-number');slider.disabled=api.busy();slider.onfocus=()=>{input.onfocus();};slider.oninput=()=>{input.value=slider.value;input.oninput();};slider.onchange=()=>{input.value=slider.value;input.onchange();};slider.onkeydown=input.onkeydown;slider.onblur=input.onblur;row.append(slider);}parent.append(row);return input;
+  input.onkeydown=e=>{if(e.key==='Escape'){e.stopPropagation();cancelEdit();input.blur();}if(e.key==='Enter')input.blur();};row.append(input);if(kind==='number'&&(showSlider??(sliderMax!=null||max<=8&&min>=0))){const slider=node('input');slider.type='range';slider.min=min;slider.max=sliderMax??max;slider.step=step;slider.value=value;slider.className='surface-slider';input.classList.add('surface-number');slider.disabled=api.busy();slider.onfocus=()=>{input.onfocus();};slider.oninput=()=>{input.value=slider.value;input.oninput();};slider.onchange=()=>{input.value=slider.value;input.onchange();};slider.onkeydown=input.onkeydown;slider.onblur=input.onblur;row.append(slider);}parent.append(row);return input;
  }
  function cancelEdit(){if(editing?.snapshot)api.edit(editing.snapshot,{commit:false,restoreSettings:editing.settings});editing=null;sync();}
  function properties(parent,fields,values,set){for(const[k,d]of Object.entries(fields).filter(([k])=>k!=='burlPreference'&&k!=='burlStyle'&&!(k==='burlRings'&&values.burlStyle>0)))field(parent,d.label,values[k]??d.value,(v,commit)=>set(k,v,commit),{...d,kind:d.kind==='boolean'?'checkbox':d.kind});}
  const heading=(parent,title,note)=>{parent.append(node('h3',title));if(note)parent.append(node('p',note,'surface-note'));};
- function choose(kind,id,owner,{keepSelection=false}={}){pendingDecalId=null;if(kind!=='base'){api.renderer().setFlowPreview?.(null,null,'material');const flowView=document.getElementById('flowPreviewMode');if(flowView)flowView.value='material';const badge=document.getElementById('flowPreviewBadge');if(badge)badge.hidden=true;}right.parentElement.scrollTop=0;stopPaint();if(parts.active){parts.close();}inspectorTab=inspectorPage(kind,inspectorTab);closeLayerMenu();api.renderer().soloEffectId=null;selection={kind,id};if(owner){effectId=owner;selectedLayerId=owner;}if(kind==='group'){effectId=null;selectedLayerId=id;expanded=null;}if(kind==='effect')selectedLayerId=id;if(kind==='base'){api.renderer().finishInteraction?.();api.materialPaint?.stop();effectId=null;selectedLayerId=null;expanded=null;library?.showBase({select:false,reveal:false});}else if(['effect','group','layer','mask','rule'].includes(kind))library?.showEffects();if(!keepSelection&&kind!=='library'){chosenLayers.clear();if(selectedLayerId)chosenLayers.add(selectedLayerId);}if(selectedLayerId)for(const parent of layerIndex(surface()).get(selectedLayerId)?.ancestors||[])collapsedGroups.delete(parent);api.preview(null);if(kind==='effect')expanded=null;if(['mask','rule'].includes(kind))expanded=effectId;if(kind==='area'){api.mode(12);api.preview({kind:'area',areaId:id});}sync();}
+ function choose(kind,id,owner,{keepSelection=false}={}){pendingDecalId=null;pointEditor.cancel(false);if(kind!=='base'){api.renderer().setFlowPreview?.(null,null,'material');const flowView=document.getElementById('flowPreviewMode');if(flowView)flowView.value='material';const badge=document.getElementById('flowPreviewBadge');if(badge)badge.hidden=true;}right.parentElement.scrollTop=0;stopPaint();if(parts.active){parts.close();}inspectorTab=inspectorPage(kind,inspectorTab);closeLayerMenu();api.renderer().soloEffectId=null;selection={kind,id};if(owner){effectId=owner;selectedLayerId=owner;}if(kind==='group'){effectId=null;selectedLayerId=id;expanded=null;}if(kind==='effect')selectedLayerId=id;if(kind==='base'){api.renderer().finishInteraction?.();api.materialPaint?.stop();effectId=null;selectedLayerId=null;expanded=null;library?.showBase({select:false,reveal:false});}else if(['effect','group','layer','mask','rule'].includes(kind))library?.showEffects();if(!keepSelection&&kind!=='library'){chosenLayers.clear();if(selectedLayerId)chosenLayers.add(selectedLayerId);}if(selectedLayerId)for(const parent of layerIndex(surface()).get(selectedLayerId)?.ancestors||[])collapsedGroups.delete(parent);api.preview(null);if(kind==='effect')expanded=null;if(['mask','rule'].includes(kind))expanded=effectId;if(kind==='area'){api.mode(12);api.preview({kind:'area',areaId:id});}sync();}
  function usesArea(id){return surface().effects.filter(e=>e.scopeRef===id||surface().masks.find(m=>m.id===e.maskRef)?.items.some(r=>[r.areaRef,r.addRef,r.eraseRef].includes(id)));}
  function startPaint(target){if(!doc()||api.busy())return;if(!painting)paintView={mode:api.renderer().mode,preview:api.currentPreview?.()||null};painting=target;api.renderer().tool='mask';sync();}
- function stopPaint(){api.materialPaint?.stop();const previous=paintView,restore=paintingPreview&&api.renderer()?.mode===12;painting=null;paintView=null;paintingPreview=false;if(api.renderer()?.tool==='mask')api.renderer().tool='orbit';if(restore&&previous){api.mode(previous.mode);api.preview(previous.preview);}syncBrush();}
+ function stopPaint(){sceneEditor.cancel(false);api.materialPaint?.stop();const previous=paintView,restore=paintingPreview&&api.renderer()?.mode===12;painting=null;paintView=null;paintingPreview=false;if(api.renderer()?.tool==='mask')api.renderer().tool='orbit';if(restore&&previous){api.mode(previous.mode);api.preview(previous.preview);}syncBrush();}
  function move(items,id,delta){const i=items.findIndex(x=>x.id===id),j=i+delta;if(j>=0&&j<items.length)[items[i],items[j]]=[items[j],items[i]];}
  function rowActions(parent,items,id,mutate,ids=[effectId]){for(const[txt,d]of[['↑',-1],['↓',1]])button(parent,txt,()=>edit(s=>move(mutate(s),id,d),{ids}), 'surface-icon');}
  function renderEffects(){
@@ -147,7 +340,7 @@ export function createSurfaceStudio(api){
    const eye=button(row,'',()=>edit(s=>{const target=n.kind==='group'?layerIndex(s).get(n.id).node:s.effects.find(x=>x.id===e.id);target.enabled=!target.enabled;},{ids:e?[e.id]:[]}), 'surface-icon layer-eye');eye.append(studioIcon(value.enabled?'eye':'hidden'));eye.title=value.enabled?'隐藏图层':'显示图层';eye.setAttribute('aria-label',eye.title+' '+value.name);eye.disabled||=inherited;
    if(n.kind==='group'){button(row,collapsedGroups.has(n.id)?'▸':'▾',()=>{if(collapsedGroups.has(n.id))collapsedGroups.delete(n.id);else collapsedGroups.add(n.id);sync();},'surface-icon');}
    const material=button(row,n.kind==='group'?n.name:e.name,()=>{},'surface-effect-name layer-name');const layerTitle=node('span',null,'studio-layer-title');layerTitle.append(material.firstChild);if(e){const badge=node('small',e.paint||e.manualBrush?'绘制':e.type==='burl'?'散布':'自动','layer-authoring-kind');badge.dataset.layerKind=e.paint||e.manualBrush?'paint':'fill';if(e.blend&&chosenLayers.has(e.id))badge.textContent=(e.paint||e.manualBrush?'绘制 · ':'')+COLOR_BLEND_MODES[e.blend.color.mode]+' '+Math.round(e.blend.color.strength*100)+'%';badge.title=badge.textContent;layerTitle.append(badge);}material.append(layerTitle);material.prepend(n.kind==='group'?studioIcon('folder'):materialImage(e.id,e.type,e.name));material.style.borderLeftColor=e?(e.params.surfaceColor||e.params.mossColor||e.params.paintColor||e.params.lichenColor||e.params.dirtColor||'#7c8075'):'#b9a560';material.onclick=event=>{if(event.target.closest('img[data-material-effect]')){inspectorTab='effect';}selectLayerNode(n,event);};material.ondblclick=event=>{event.preventDefault();renameLayer(n.id);};material.title=n.kind==='group'?'图层组 · '+layerLeafIds(surface(),n.id).length+' 个叶层':(e.paint||e.manualBrush?'绘制层 · 多通道笔触':isFormEffect(e.type)?'自动形体修饰 · 多通道叠加':'自动层 · 规则分布');
-   if(e){const mask=button(row,'',()=>choose('mask',e.maskRef,e.id),'surface-mask-thumb');mask.setAttribute('aria-label',e.name+' · 分布蒙版');const optional=e.paint&&!hasRestrictionMask(surface(),e);mask.classList.toggle('surface-mask-add',!!optional);mask.append(node('span',optional?'＋蒙版':e.type==='burl'?'限制':e.paint?'蒙版':'分布'));mask.classList.toggle('active',effectId===e.id&&['mask','rule'].includes(selection.kind));mask.dataset.maskEffect=e.id;if(!optional&&thumbnails.has(e.id))mask.style.backgroundImage='url('+thumbnails.get(e.id)+')';mask.title=optional?'可选：添加限制蒙版，直接绘制不需要先建蒙版':e.type==='burl'?'限制蒙版：隐藏已选位置的材质；数量与选点在材质页调整':e.paint?'限制蒙版：只控制显隐，不改变笔触材质':'自动分布：由规则控制覆盖';}
+   if(e){const mask=button(row,'',()=>choose('mask',e.maskRef,e.id),'surface-mask-thumb');mask.setAttribute('aria-label',e.name+' · 分布蒙版');const optional=e.paint&&!hasRestrictionMask(surface(),e),placement=usesManualPlacement(e)?'定位':'散布';mask.classList.toggle('surface-mask-add',!!optional);mask.append(node('span',optional?'＋蒙版':e.type==='burl'?placement:e.paint?'蒙版':'分布'));mask.classList.toggle('active',effectId===e.id&&['mask','rule'].includes(selection.kind));mask.dataset.maskEffect=e.id;if(!optional&&thumbnails.has(e.id))mask.style.backgroundImage='url('+thumbnails.get(e.id)+')';mask.title=optional?'可选：添加限制蒙版，直接绘制不需要先建蒙版':e.type==='burl'?placement+'参数与限制蒙版':e.paint?'限制蒙版：只控制显隐，不改变笔触材质':'自动分布：由规则控制覆盖';}
    const lock=button(row,'',()=>edit(s=>{const target=n.kind==='group'?layerIndex(s).get(n.id).node:s.effects.find(x=>x.id===e.id);target.locked=!target.locked;},{ids:e?[e.id]:[]}), 'surface-icon layer-lock');lock.append(studioIcon(value.locked?'lock':'unlock'));lock.title=value.locked?'解锁':'锁定';lock.setAttribute('aria-label',lock.title+' '+value.name);lock.disabled||=inherited;
    row.oncontextmenu=event=>{event.preventDefault();selectLayerNode(n,{});showLayerMenu(n.id,event.clientX,event.clientY);};row.onkeydown=event=>{try{layerKey(event,n.id);}catch(error){event.preventDefault();event.stopPropagation();api.notify(error.message,true);}};setupDropTarget(row,n);row.ondragstart=event=>{if(locked||api.busy()){event.preventDefault();return;}event.dataTransfer.effectAllowed='move';event.dataTransfer.setData(LAYER_DRAG_MIME,JSON.stringify({id:n.id,projectId:doc().id}));};row.ondragend=clearDropIndicators;left.append(row);
    if(n.kind==='group'&&!collapsedGroups.has(n.id))render(n.children,depth+1);
@@ -172,9 +365,9 @@ export function createSurfaceStudio(api){
  }
  function inspectorSection(key,title,open=true,parent=right){const details=node('details',null,'studio-property-section');details.open=sectionStates.has(key)?sectionStates.get(key):open;details.append(node('summary',title));details.ontoggle=()=>sectionStates.set(key,details.open);parent.append(details);return details;}
  function effectHeader(e){
-  const head=node('div',null,'studio-inspector-header'),line=node('div',null,'studio-inspector-title');line.append(node('h3',e.name));const menu=node('details',null,'studio-layer-actions'),summary=node('summary');summary.title='图层操作';summary.setAttribute('aria-label','图层操作');summary.append(studioIcon('more'));menu.append(summary);layerActions(menu,e.id);line.append(menu);head.append(line,node('small',(e.type==='burl'?'数量散布 · 表面材质':e.paint||e.manualBrush?'绘制层 · 多通道笔触':isFormEffect(e.type)?'自动形体修饰 · 多通道叠加':'自动层 · 规则分布')));
+  const head=node('div',null,'studio-inspector-header'),line=node('div',null,'studio-inspector-title');line.append(node('h3',e.name));const menu=node('details',null,'studio-layer-actions'),summary=node('summary');summary.title='图层操作';summary.setAttribute('aria-label','图层操作');summary.append(studioIcon('more'));menu.append(summary);layerActions(menu,e.id);line.append(menu);head.append(line,node('small',(e.type==='burl'?(usesManualPlacement(e)||pendingDecalId===e.id?'局部定位 · 表面贴花':'数量散布 · 表面贴花'):e.paint||e.manualBrush?'绘制层 · 多通道笔触':isFormEffect(e.type)?'自动形体修饰 · 多通道叠加':'自动层 · 规则分布')));
   field(head,'整体强度',e.opacity,(v,commit)=>edit(s=>s.effects.find(x=>x.id===e.id).opacity=v,{commit}));if(layerIsLocked(surface(),e.id))head.querySelectorAll('input').forEach(n=>n.disabled=true);
-  const tabs=node('div',null,'studio-property-tabs');for(const[k,label]of Object.entries(INSPECTOR_PAGES)){const title=e.manualBrush?{effect:'笔刷材质',mask:'笔触范围',layer:'图层'}[k]:e.paint?{effect:'笔刷材质',mask:'限制蒙版',layer:'图层'}[k]:isFormEffect(e.type)?{effect:'材质',mask:'自动分布',layer:'图层'}[k]:label;const b=button(tabs,title,()=>choose(k,k==='mask'?e.maskRef:e.id,e.id),(k==='mask'?['mask','rule'].includes(selection.kind):selection.kind===k)?'active':'');b.dataset.inspectorTab=k;}head.append(tabs);right.append(head);
+  const tabs=node('div',null,'studio-property-tabs');for(const[k,label]of Object.entries(INSPECTOR_PAGES)){const title=e.manualBrush?{effect:'笔刷材质',mask:'笔触范围',layer:'图层'}[k]:e.paint?{effect:'笔刷材质',mask:'限制蒙版',layer:'图层'}[k]:e.type==='burl'&&k==='mask'?usesManualPlacement(e)?'定位':'散布':label;const b=button(tabs,title,()=>choose(k,k==='mask'?e.maskRef:e.id,e.id),(k==='mask'?['mask','rule'].includes(selection.kind):selection.kind===k)?'active':'');b.dataset.inspectorTab=k;}head.append(tabs);right.append(head);
  }
  function legacyDistribution(e,parent){if(e.coverageMode!=='legacy')return;const details=node('details',null,'studio-legacy-distribution');details.append(node('summary','原版生成分布（兼容）'));properties(details,Object.fromEntries(Object.entries(EFFECT_TYPES[e.type].fields).filter(([,f])=>f.group==='legacy')),e.params,(k,v,commit)=>edit(s=>s.effects.find(x=>x.id===e.id).params[k]=v,{commit}));button(details,'改用通用分布规则',()=>edit((s,d)=>{const v=s.effects.find(x=>x.id===e.id),m=s.masks.find(x=>x.id===v.maskRef),r=createRule(v.type==='paint'?'height':'noise');if(v.type==='paint')r.params.maxMeters=v.params.paintHeight*d.actualHeightMeters;m.items.unshift(r);for(const old of m.items.slice(1))old.combine='intersect';v.coverageMode='rules';selection={kind:'mask',id:m.id};expanded=e.id;}));parent.append(details);}
  function formInspector(e){
@@ -186,12 +379,20 @@ export function createSurfaceStudio(api){
   const actions=node('div',null,'studio-quick-actions');button(actions,'查看自动分布',()=>{api.preview({effectId:e.id,kind:'automatic'});api.mode(12);});button(actions,'修正影响范围',()=>choose('mask',e.maskRef,e.id));right.append(actions);
   const advanced=inspectorSection(e.type+':form-advanced','高级材质与识别',false),keys=e.type==='contact'?['surfaceAmount','surfaceAO','formThreshold']:['surfaceAmount','surfaceRoughness',...(e.type==='rootwet'?[]:['surfaceColor','surfaceBarkKeep',...(e.type==='groove'?['surfaceNormalStrength','surfaceHeightMm','surfaceGrainCm','surfaceAO']:[])]),'surfaceVariation','formThreshold'];properties(advanced,Object.fromEntries(keys.map(k=>[k,fields[k]])),e.params,change);
  }
- let burlFocusIndex=0;function focusBurl(e){const r=api.renderer(),slot=r.surfaceStack?.effects.findIndex(x=>x.id===e.id),items=r.localPatchCompilation?.descriptors.filter(d=>d.channels[3]===slot+1)||[];if(!items.length){api.notify('尚无可定位的贴花，请检查数量、尺寸与选点范围。',true);return;}const d=items[burlFocusIndex++%items.length];api.live();api.mode(-1);Object.assign(r,{focus:d.origin.slice(0,3),pan:[0,0,0],yaw:Math.atan2(d.n[0],d.n[2]),pitch:Math.asin(Math.max(-.95,Math.min(.95,d.n[1]))),radius:Math.max(.025,3.5/Math.hypot(...d.u.slice(0,3))),dirty:true});}
+ let burlFocusIndex=0;function focusBurl(e){const r=api.renderer(),slot=r.surfaceStack?.effects.findIndex(x=>x.id===e.id),items=r.localPatchCompilation?.descriptors.filter(d=>Math.abs(d.channels[3])===slot+1)||[];if(!items.length){api.notify('尚无可定位的贴花，请检查数量、尺寸与选点范围。',true);return;}const d=items[burlFocusIndex++%items.length];api.live();api.mode(-1);Object.assign(r,{focus:d.origin.slice(0,3),pan:[0,0,0],yaw:Math.atan2(d.n[0],d.n[2]),pitch:Math.asin(Math.max(-.95,Math.min(.95,d.n[1]))),radius:Math.max(.025,3.5/Math.hypot(...d.u.slice(0,3))),dirty:true});}
  function emissionInspector(e){const pane=inspectorSection('emission','自发光',!!e.emission?.enabled),em=e.emission||defaultEmission();pane.dataset.emissionControls=e.id;const change=(k,v,commit)=>edit(s=>{const target=s.effects.find(x=>x.id===e.id);target.emission={...(target.emission||defaultEmission()),[k]:v};},{commit});field(pane,'启用自发光',em.enabled,(v,c)=>change('enabled',v,c),{kind:'checkbox'});if(!em.enabled)return;field(pane,'光色',em.color,(v,c)=>change('color',v,c),{kind:'color'});field(pane,'发光强度',em.strength,(v,c)=>change('strength',v,c),{min:0,max:20,step:.1});select(pane,'发光形态',[['bark-cavity','树皮裂隙'],['solid','整层覆盖']],em.pattern,v=>change('pattern',v,true));if(em.pattern==='bark-cavity'){field(pane,'裂隙阈值',em.threshold,(v,c)=>change('threshold',v,c),{min:0,max:1,step:.01});field(pane,'裂隙柔边',em.softness,(v,c)=>change('softness',v,c),{min:.001,max:.5,step:.005});}pane.append(node('p','独立发光贴图随最终 GLB 导出。工作台显示发光亮度，泛光由目标引擎设置。','surface-note'));if(layerIsLocked(surface(),e.id))pane.querySelectorAll('input,select').forEach(n=>n.disabled=true);}
- function effectInspector(e){blendInspector(e);emissionInspector(e);if(e.type==='burl')manualDecalPanel(e);if(e.manualBrush){const actions=node('div',null,'studio-quick-actions');button(actions,'继续绘制 · B',()=>beginSurfaceMaterialBrush(e.manualBrush.presetId,e.id));button(actions,'擦除此层 · E',()=>beginSurfaceMaterialBrush(e.manualBrush.presetId,e.id,'erase'));right.append(actions,node('p','直接涂上本层材质；颜色、法线与粗糙度随覆盖一起合成。参数调整作用于整层。','surface-note'));}if(isFormEffect(e.type)){formInspector(e);return;}if(e.paint){api.materialPaint?.render(right,e);return;}if(e.type==='moss'){const direct=node('div',null,'studio-direct-paint');button(direct,'拿起苔藓画笔 · B',()=>beginMaterialPaint('paint',e.id));direct.append(node('small','直接画材质；首笔建立绘制层，自动层保留。','surface-note'));right.append(direct);}
+ function effectInspector(e){const scene=sceneOverlayRule(surface(),e)?.scene;if(scene)sceneEditor.render(scene,right);if(e.type==='burl'){decalBarkFusionControl(right,e);decalPlacementPanel(e);}blendInspector(e);emissionInspector(e);if(e.manualBrush){const actions=node('div',null,'studio-quick-actions');button(actions,'继续绘制 · B',()=>beginSurfaceMaterialBrush(e.manualBrush.presetId,e.id));button(actions,'擦除此层 · E',()=>beginSurfaceMaterialBrush(e.manualBrush.presetId,e.id,'erase'));right.append(actions,node('p','直接涂上本层材质；颜色、法线与粗糙度随覆盖一起合成。参数调整作用于整层。','surface-note'));}if(isFormEffect(e.type)){formInspector(e);return;}if(e.paint){api.materialPaint?.render(right,e);return;}if(e.type==='moss'){const direct=node('div',null,'studio-direct-paint');button(direct,'拿起苔藓画笔 · B',()=>beginMaterialPaint('paint',e.id));direct.append(node('small','直接画材质；首笔建立绘制层，自动层保留。','surface-note'));right.append(direct);}
   if(layerIsLocked(surface(),e.id)){right.append(node('p','图层已锁定，可在“图层”页或左侧解锁。','surface-shared'));return;}
-  if(e.type==='burl'&&!e.manualDecal){const pane=inspectorSection('burl-placement','表面贴花散布',true);pane.dataset.burlPlacement='quantity';select(pane,'表面样式',SURFACE_DECAL_STYLES.map((s,i)=>[String(i),s.name]),String(e.params.burlStyle),v=>edit(s=>{const target=s.effects.find(x=>x.id===e.id),p=target.params;if(target.name===SURFACE_DECAL_STYLES[p.burlStyle].name+'散布')target.name=SURFACE_DECAL_STYLES[Number(v)].name+'散布';const oldMode=decalColorMode(p.burlStyle);if(!target.blend||target.blend.color.mode===oldMode&&target.blend.color.strength===1){target.blend||=defaultBlend();target.blend.color.mode=decalColorMode(Number(v));}Object.assign(p,decalAppearance(Number(v)));}));select(pane,'选点模式',[['0','智能选点'],['1','宽阔表面'],['2','形体转折'],['3','均匀散布']],String(e.params.burlPreference),v=>edit(s=>s.effects.find(x=>x.id===e.id).params.burlPreference=Number(v)));button(pane,'换一批位置',()=>edit(s=>{const p=s.effects.find(x=>x.id===e.id).params;p.burlPlacementSeed=(p.burlPlacementSeed+1)%10001;}));button(pane,e.params.burlStyle?'定位查看贴花':'定位查看树瘤',()=>focusBurl(e));button(pane,e.params.burlStyle?'查看贴花分布':'查看树瘤分布',()=>{api.preview(null);api.mode(12);sync();});const a=api.renderer().surfaceAnalysis?.burls?.find(x=>x.effectId===e.id);pane.append(node('p',a?'已生成 '+a.placed+' / '+a.requested+' 个。'+(a.reason||''):'添加后自动分析表面并生成。','surface-note'));pane.append(node('p','AI Alpha贴花配合估算高度/法线/粗糙度/AO。树瘤与新贴花合计全工程最多8个（含隐藏层）。切换样式采用建议外观，数量与选点保留；位置种子负责重排。作用范围限制选点，限制蒙版只隐藏结果。仅贴图起伏，不改变轮廓。','surface-note'));}
-  for(const group of materialFieldGroups(e.type,e.manualDecal?Object.fromEntries(Object.entries(EFFECT_TYPES[e.type].fields).filter(([k])=>!k.startsWith('burl')||['burlRings','burlWarp'].includes(k))):EFFECT_TYPES[e.type].fields)){const pane=inspectorSection(e.type+':'+group.id,group.name,group.open);properties(pane,group.fields,e.params,(k,v,commit)=>edit(s=>s.effects.find(x=>x.id===e.id).params[k]=v,{commit}));}
+  if(scene?.style===IMAGE_DECAL_STYLE){
+   const change=(key,value,commit)=>edit(s=>s.effects.find(effect=>effect.id===e.id).params[key]=value,{commit});
+   field(right,'贴花强度',e.params.surfaceAmount,(value,commit)=>change('surfaceAmount',value,commit));
+   if(e.channels.roughness)field(right,'粗糙度',e.params.surfaceRoughness,(value,commit)=>change('surfaceRoughness',value,commit),{min:.05,max:1});
+   return;
+  }
+  if(e.type==='burl')decalStyleControl(right,e);
+  const fields=EFFECT_TYPES[e.type].fields;
+  const materialFields=e.type==='burl'?Object.fromEntries(Object.entries(fields).filter(([key,field])=>field.group!=='scatter'&&key!=='burlBarkFusion')):fields;
+  for(const group of materialFieldGroups(e.type,materialFields)){const pane=inspectorSection(e.type+':'+group.id,group.name,group.open);properties(pane,group.fields,e.params,(k,v,commit)=>edit(s=>s.effects.find(x=>x.id===e.id).params[k]=v,{commit}));}
   const quick=node('div',null,'studio-quick-actions');button(quick,e.manualBrush?'查看笔触范围':e.type==='burl'?'限制范围与蒙版':'调整自动分布',()=>choose('mask',e.maskRef,e.id));right.append(quick);
  }
  function layerInspector(e){
@@ -203,6 +404,24 @@ export function createSurfaceStudio(api){
   button(right,api.renderer().soloEffectId===e.id?'结束隔离查看':'隔离查看此效果',()=>{api.live();api.renderer().soloEffectId=api.renderer().soloEffectId===e.id?null:e.id;api.renderer().dirty=true;api.mode(-1);sync();});
  }
  function addMaskRule(e,m,type){if(!type)return;const ids=surfaceUses(surface(),m.id).map(e=>e.id);edit((s,d)=>{const mask=s.masks.find(x=>x.id===m.id);if(mask.items.length>=16)throw Error('每套分布最多16条规则。');let id;if(type==='paint'){const result=appendPaintRule(s,e.id,d.resources.source);d.surface=result.s;id=result.id;}else{const r=createRule(type,type==='area'?{areaRef:s.areas.find(a=>!a.ownedBy).id}:{});mask.items.push(r);id=r.id;}selection={kind:'rule',id};},{ids});}
+ function distributionInspector(e,m,rule){
+  let parent=right;
+  const scene=sceneOverlayRule(surface(),e)?.scene;
+  if(scene)sceneEditor.render(scene,right);
+  if(e.type==='burl'){
+   decalPlacementPanel(e);
+   parent=inspectorSection('decal-distribution-options','作用范围与分布模板',false);
+  }
+  if(scene){
+   const range=node('div',null,'studio-quick-actions');
+   button(range,'查看最终覆盖',()=>{api.preview(null);api.mode(12);});
+   button(range,'指定作用部位',()=>openParts({effectId:e.id})).disabled||=layerIsLocked(surface(),e.id);
+   parent.append(range);
+  }else unified.render(parent,e);
+  const advanced=maskRuleStack(e,m);
+  if(selection.kind==='rule'&&rule)ruleInspector(e,m,rule,advanced);
+  else maskInspector(e,m,advanced);
+ }
  function maskRuleStack(e,m){
   const advanced=node('details',null,'generation-advanced');advanced.open=selection.kind==='rule'||sectionStates.get('generation-advanced')===true;advanced.append(node('summary','高级规则与手绘修正'));advanced.ontoggle=()=>sectionStates.set('generation-advanced',advanced.open);right.append(advanced);const shared=surfaceUses(surface(),m.id),locked=shared.some(e=>layerIsLocked(surface(),e.id)),head=node('div',null,'studio-mask-heading');head.append(node('strong','分布规则'),node('small',shared.length>1?'共享 · '+shared.length+' 层':'独立蒙版'));advanced.append(head);
   const preview=node('div',null,'studio-mask-preview');button(preview,'预览蒙版',()=>{api.preview(null);api.mode(12);sync();});button(preview,'返回材质',()=>{api.preview(null);api.mode(-1);sync();});button(preview,'手绘修正',()=>{let r=m.items.find(r=>r.type==='paint');if(!r){let id;edit((s,d)=>{const result=appendPaintRule(s,e.id,d.resources.source);d.surface=result.s;id=result.id;},{ids:shared.map(e=>e.id)});r=surface().masks.find(x=>x.id===m.id).items.find(x=>x.id===id);}choose('rule',r.id,e.id);startPaint({kind:'rule',id:r.id,effectId:e.id});}).disabled||=locked;advanced.append(preview);
@@ -269,24 +488,40 @@ export function createSurfaceStudio(api){
   }
   select(controls,'操作',[['paint',painting.role==='limitation'?'白色 · 显示':'增加'],['erase',painting.role==='limitation'?'黑色 · 隐藏':'擦除'],['smooth','平滑']],document.getElementById('brushOperation').value,v=>document.getElementById('brushOperation').value=v);brush.append(controls,node('small','彩色线：表面影响 · 白色虚线：半径参考 · 内圈：硬度 · Ctrl 擦除 · Shift 平滑 · F 半径 / Shift F 强度 · Esc 取消当前笔，再按退出','brushbar-hint'));
  }
- function sync(){if(disposed||editing)return;const oldScroll=right.parentElement.scrollTop;const materialStage=document.body.dataset.workspaceStage==='material';left.hidden=right.hidden=toolstrip.hidden=!materialStage;baseProperties.hidden=!materialStage||!doc()||!!doc()?.materialBase||selection.kind!=='base'||tab==='data'||parts.active;overlayProperties.hidden=!materialStage||!doc()||!['effect','group','layer','mask','rule'].includes(selection.kind)||parts.active;if(!materialStage&&parts.active){parts.close();return;}const d=doc();materialPreviews.update(d);if(lastDocument!==d?.id){parts.reset();partsReturn=null;inspectorTab='effect';thumbnails.clear();lastDocument=d?.id;effectId=null;selectedLayerId=null;chosenLayers.clear();collapsedGroups.clear();selection={kind:'base'};expanded=null;stopPaint();library?.showBase({select:false,reveal:false});}parts.detach();left.replaceChildren();right.replaceChildren();const tabs=node('div',null,'surface-tabs');for(const[k,t]of[['effects','图层'],['areas','区域'],['data','数据']])button(tabs,t,()=>{tab=k;sync();},tab===k?'active':'');left.append(tabs);if(!d){heading(right,'先导入一棵树');return;}
+ function sync(){if(disposed||editing)return;const oldScroll=right.parentElement.scrollTop;const materialStage=document.body.dataset.workspaceStage==='material';left.hidden=right.hidden=toolstrip.hidden=!materialStage;baseProperties.hidden=!materialStage||!doc()||!!doc()?.materialBase||selection.kind!=='base'||tab==='data'||parts.active;overlayProperties.hidden=!materialStage||!doc()||!['effect','group','layer','mask','rule'].includes(selection.kind)||parts.active;if(!materialStage&&parts.active){parts.close();return;}const d=doc();materialPreviews.update(d);if(lastDocument!==d?.id){parts.reset();partsReturn=null;inspectorTab='effect';thumbnails.clear();lastDocument=d?.id;effectId=null;selectedLayerId=null;chosenLayers.clear();collapsedGroups.clear();selection={kind:'base'};expanded=null;stopPaint();library?.showBase({select:false,reveal:false});}parts.detach();left.replaceChildren();right.replaceChildren();const tabs=node('div',null,'surface-tabs');for(const[k,t]of[['effects','图层'],['areas','区域'],['data','数据']])button(tabs,t,()=>{tab=k;sync();},tab===k?'active':'');left.append(tabs);if(!d){pointEditor.refresh();heading(right,'先导入一棵树');return;}
   if(painting&&(painting.kind==='rule'&&(!surface().effects.some(e=>e.id===painting.effectId&&!layerIsLocked(surface(),e.id)&&surface().masks.find(m=>m.id===e.maskRef)?.items.some(r=>r.id===painting.id)))||painting.kind==='area'&&!surface().areas.some(a=>a.id===painting.id)||painting.role==='generation'&&(!surface().effects.some(e=>e.id===painting.effectId&&e.scopeRef===painting.id)||layerIsLocked(surface(),painting.effectId))))stopPaint();
   library?.sync();if(api.renderer().soloEffectId&&!layerIndex(surface()).has(api.renderer().soloEffectId))api.renderer().soloEffectId=null;if(selectedLayerId&&!layerIndex(surface()).has(selectedLayerId)){selectedLayerId=null;chosenLayers.clear();selection={kind:'base'};}if(effectId&&!selectedEffect()){effectId=null;selection={kind:'base'};expanded=null;}if(tab==='effects')renderEffects();if(tab==='areas')renderAreas();if(tab==='data')renderData(left);
-  const e=selectedEffect(),m=selectedMask(),r=m?.items.find(x=>x.id===selection.id),a=surface().areas.find(x=>x.id===selection.id);if(parts.active)parts.render(right);else if(selection.kind!=='library'&&chosenLayers.size>1&&tab==='effects')multiLayerInspector();else if(selection.kind==='group')groupInspector(selection.id);else if(selection.kind==='library')libraryInspector(selection.id);else if(e&&['effect','layer','mask','rule'].includes(selection.kind)){effectHeader(e);if(selection.kind==='effect')effectInspector(e);else if(selection.kind==='layer')layerInspector(e);else if(m&&e.manualBrush){heading(right,'笔触范围','材质画笔直接控制本层覆盖；不需要生成或应用蒙版。');button(right,'继续绘制',()=>beginSurfaceMaterialBrush(e.manualBrush.presetId,e.id));button(right,'查看覆盖',()=>{api.preview(null);api.mode(12);});}else if(m&&e.paint){paintMaskInspector(e,m);}else if(m){unified.render(right,e);const advanced=maskRuleStack(e,m);if(selection.kind==='rule'&&r)ruleInspector(e,m,r,advanced);else maskInspector(e,m,advanced);}}else if(selection.kind==='area'&&a)areaInspector(a);else baseInspector();
+  pointEditor.refresh();const e=selectedEffect(),m=selectedMask(),r=m?.items.find(x=>x.id===selection.id),a=surface().areas.find(x=>x.id===selection.id);if(parts.active)parts.render(right);else if(selection.kind!=='library'&&chosenLayers.size>1&&tab==='effects')multiLayerInspector();else if(selection.kind==='group')groupInspector(selection.id);else if(selection.kind==='library')libraryInspector(selection.id);else if(e&&['effect','layer','mask','rule'].includes(selection.kind)){effectHeader(e);if(selection.kind==='effect')effectInspector(e);else if(selection.kind==='layer')layerInspector(e);else if(m&&e.manualBrush){heading(right,'笔触范围','材质画笔直接控制本层覆盖；不需要生成或应用蒙版。');button(right,'继续绘制',()=>beginSurfaceMaterialBrush(e.manualBrush.presetId,e.id));button(right,'查看覆盖',()=>{api.preview(null);api.mode(12);});}else if(m&&e.paint){paintMaskInspector(e,m);}else if(m){distributionInspector(e,m,r);}}else if(selection.kind==='area'&&a)areaInspector(a);else baseInspector();
   if(tab==='data'&&!parts.active){right.replaceChildren();heading(right,'模型分析数据','只读取源几何数据，不读取最终 ORM 或当前合成法线。');field(right,'曲率采样半径',surface().analysis.curvature.radiusMeters,(v,commit)=>edit(s=>s.analysis.curvature.radiusMeters=v,{ids:[],commit}),{min:.001,max:20,step:.01,unit:'m'});renderData(right);}
-  layout.setFocus(materialStage&&(!!painting||!!api.materialPaint?.active||parts.active));syncViewUI();maskView.disabled=api.busy()||!selectedEffect();maskView.classList.toggle('active',api.renderer().mode===12);const state=api.analysis();context.textContent=pendingDecalId?'点击树表面放置贴花 · 中键导航 · Esc 取消':painting?.role==='material'?'材质绘制 · '+(selectedEffect()?.name||'当前层')+' · 直接落笔 / Ctrl 擦除':selection.kind==='library'?'效果库 · 拖入创建独立图层':selection.kind==='group'?'图层组 · '+(layerIndex(surface()).get(selection.id)?.node.name||''):state.pending?'正在更新分布…':state.error?'分布未更新 · '+state.error:painting?'手绘 · '+(painting.kind==='area'?surface().areas.find(a=>a.id===painting.id)?.name:e?.name)+' · 限制：'+(e?.scopeRef?surface().areas.find(a=>a.id===e.scopeRef)?.name:'无'):e?(e.name+' / '+(r?RULE_TYPES[r.type].name:selection.kind==='mask'?'最终分布':'材质')):'树皮 · 基底材质';if(api.renderer().soloEffectId)context.textContent+=' · 隔离查看';if(parts.active)context.textContent='模型部位 · '+(api.currentPart()?.name||'新建并刷选部位');else if(e&&!painting&&!pendingDecalId&&!state.pending&&!state.error)context.textContent='当前层：'+e.name+' · '+INSPECTOR_PAGES[inspectorTab]+(api.renderer().soloEffectId?' · 隔离查看':'');context.hidden=!materialStage||!d;context.classList.toggle('error',!!state.error);if(api.materialPaint?.active){const target=surface().effects.find(x=>x.id===api.materialPaint.target);context.textContent='笔刷：'+api.materialPaint.brushName+' · '+(target&&(target.paint?.appearance||api.materialPaint.operation==='erase')?'目标层：'+target.name:'首笔新建苔藓绘制层');if(!e?.paint){right.replaceChildren();api.materialPaint.render(right,null);}}api.materialPaint?.sync();syncAuthoringTools();syncBrush();api.renderer().selectedEffectId=effectId;right.parentElement.scrollTop=oldScroll;
+  sceneEditor.refresh();
+  layout.setFocus(materialStage&&(!!painting||!!api.materialPaint?.active||parts.active));syncViewUI();maskView.disabled=api.busy()||!selectedEffect();maskView.classList.toggle('active',api.renderer().mode===12);const state=api.analysis();context.textContent=pendingDecalId?'点击树表面放置贴花 · 中键导航 · Esc 取消':painting?.role==='material'?'材质绘制 · '+(selectedEffect()?.name||'当前层')+' · 直接落笔 / Ctrl 擦除':selection.kind==='library'?'效果库 · 拖入创建独立图层':selection.kind==='group'?'图层组 · '+(layerIndex(surface()).get(selection.id)?.node.name||''):state.pending?'正在更新分布…':state.error?'分布未更新 · '+state.error:painting?'手绘 · '+(painting.kind==='area'?surface().areas.find(a=>a.id===painting.id)?.name:e?.name)+' · 限制：'+(e?.scopeRef?surface().areas.find(a=>a.id===e.scopeRef)?.name:'无'):e?(e.name+' / '+(r?RULE_TYPES[r.type].name:selection.kind==='mask'?'最终分布':'材质')):'树皮 · 基底材质';if(api.renderer().soloEffectId)context.textContent+=' · 隔离查看';if(parts.active)context.textContent='模型部位 · '+(api.currentPart()?.name||'新建并刷选部位');else if(e&&!painting&&!pendingDecalId&&!state.pending&&!state.error)context.textContent='当前层：'+e.name+' · '+INSPECTOR_PAGES[inspectorTab]+(api.renderer().soloEffectId?' · 隔离查看':'');if(pointEditor.hint)context.textContent=pointEditor.hint;if(sceneEditor.hint)context.textContent=sceneEditor.hint;context.hidden=!materialStage||!d;context.classList.toggle('error',!!state.error);if(api.materialPaint?.active){const target=surface().effects.find(x=>x.id===api.materialPaint.target);context.textContent='笔刷：'+api.materialPaint.brushName+' · '+(target&&(target.paint?.appearance||api.materialPaint.operation==='erase')?'目标层：'+target.name:'首笔新建苔藓绘制层');if(!e?.paint){right.replaceChildren();api.materialPaint.render(right,null);}}api.materialPaint?.sync();syncAuthoringTools();syncBrush();api.renderer().selectedEffectId=effectId;right.parentElement.scrollTop=oldScroll;
  }
- function paintStart(){if(!painting)return false;gesture=structuredClone(doc());dirty=false;return true;}
- function paintCancel(){if(!painting)return false;if(gesture&&dirty)api.edit(gesture,{commit:false});gesture=null;dirty=false;sync();return true;}
- function paint(hit,event){if(!painting)return false;if(api.busy()||!doc())return true;const source=api.source(),s=surface(),p=painting;let refs;
+ function paintStart(){if(sceneEditor.paintStart())return true;if(!painting)return false;gesture=structuredClone(doc());dirty=false;return true;}
+ function paintCancel(){if(sceneEditor.pathReady)return sceneEditor.cancel();if(!painting)return false;if(gesture&&dirty)api.edit(gesture,{commit:false});gesture=null;dirty=false;sync();return true;}
+ function paint(hit,event){if(sceneEditor.paint(hit))return true;if(!painting)return false;if(api.busy()||!doc())return true;const source=api.source(),s=surface(),p=painting;let refs;
   if(p.kind==='area')refs=[[p.id,event.ctrlKey||document.getElementById('brushOperation').value==='erase'?0:1]];
   else{const e=s.effects.find(x=>x.id===p.effectId),m=s.masks.find(x=>x.id===e?.maskRef),r=m?.items.find(x=>x.id===p.id);if(!r||layerIsLocked(s,e.id))return true;const erase=event.ctrlKey||document.getElementById('brushOperation').value==='erase';refs=[[r.addRef,erase?0:1],[r.eraseRef,erase?1:0]];}
   const smooth=!event.ctrlKey&&(event.shiftKey||document.getElementById('brushOperation').value==='smooth'),radius=Number(document.getElementById('brushRadius').value),bary=hit.bary.map(v=>Math.max(0,v)),sum=bary.reduce((a,b)=>a+b,0),dab={face:hit.face,bary:bary.map(v=>v/sum),radiusMeters:radius,hardness:Number(document.getElementById('brushHardness').value),strength:Number(document.getElementById('brushStrength').value),value:refs[0][1],...(smooth?{operation:'smooth'}:{})};
   const a=s.areas.find(x=>x.id===refs[0][0]);if(!a||shouldSkipDab(source,a.strokes.at(-1),dab,{sameGesture:dirty,actualHeightMeters:doc().actualHeightMeters}))return true;if(refs.some(([id])=>s.areas.find(a=>a.id===id).strokes.length>=512)){api.notify('手绘场已达512点，请增大半径或撤销。',true);return true;}
   const ids=p.kind==='area'?usesArea(p.id).map(e=>e.id):surfaceUses(s,selectedMask()?.id).map(e=>e.id);edit(s=>{for(const[id,value]of refs)s.areas.find(a=>a.id===id).strokes.push({...dab,value});},{ids,commit:false});dirty=true;return true;
  }
- function paintEnd(){if(!painting)return false;if(dirty)api.commit();gesture=null;dirty=false;sync();return true;}
- function acceptMasks(result){for(const[slot,id]of result.slots.entries()){const canvas=document.createElement('canvas');canvas.width=canvas.height=40;const ctx=canvas.getContext('2d'),image=ctx.createImageData(40,40),map=result.maps[slot>>2];for(let y=0;y<40;y++)for(let x=0;x<40;x++){const v=map[((Math.floor((39-y)*result.size/40)*result.size)+Math.floor(x*result.size/40))*4+slot%4],i=(y*40+x)*4;image.data.set([v,v,v,255],i);}ctx.putImageData(image,0,0);thumbnails.set(id,canvas.toDataURL());}sync();}
+ function paintEnd(){if(sceneEditor.paintEnd())return true;if(!painting)return false;if(dirty)api.commit();gesture=null;dirty=false;sync();return true;}
+ function acceptMasks(result){
+  for(const[slot,id]of result.slots.entries()){
+   const canvas=document.createElement('canvas');
+   canvas.width=canvas.height=40;
+   const ctx=canvas.getContext('2d'),image=ctx.createImageData(canvas.width,canvas.height);
+   const values=sampleMaskThumbnail(result.maps[slot>>2],result.size,slot%4,canvas.width);
+   for(let i=0;i<values.length;i++){
+    const pixel=i*4,value=values[i];
+    image.data[pixel]=image.data[pixel+1]=image.data[pixel+2]=value;
+    image.data[pixel+3]=255;
+   }
+   ctx.putImageData(image,0,0);
+   thumbnails.set(id,canvas.toDataURL());
+  }
+  sync();
+ }
 
  function selectedLocation(){const entry=selectedLayerId&&surface()&&layerIndex(surface()).get(selectedLayerId);return entry?.node.kind==='group'?{parentId:entry.node.id}:entry?{targetId:entry.node.id,position:'after'}:{};}
  function selectNode(id){const n=layerIndex(surface()).get(id)?.node;if(n)choose(n.kind==='group'?'group':'effect',id,n.kind==='effect'?id:null);}
@@ -309,7 +544,7 @@ export function createSurfaceStudio(api){
   if(effects.length===1){const actions=node('div',null,'studio-quick-actions');button(actions,'查看最终覆盖',()=>{api.preview(null);api.mode(12);});button(actions,'擦除局部影响',()=>startLayerMask(effects[0],'erase'));box.append(actions,node('p','只修正当前自动层；自由添加苔藓请用材质画笔。','surface-note'));}
  }
 
- function groupInspector(id){const entry=layerIndex(surface()).get(id);if(entry?.node.kind!=='group')return baseInspector();const g=entry.node;heading(right,g.name,'图层组 · '+layerLeafIds(surface(),id).length+' 个叶层');if(layerIsLocked(surface(),id,{self:false})){right.append(node('p','父级组已锁定。','surface-note'));return;}field(right,'组名称',g.name,(v,commit)=>edit(s=>layerIndex(s).get(id).node.name=v,{ids:[],commit}),{kind:'text'});field(right,'锁定组',g.locked,(v,commit)=>edit(s=>layerIndex(s).get(id).node.locked=v,{ids:[],commit}),{kind:'checkbox'});if(g.locked)return;field(right,'组强度',g.opacity,(v,commit)=>edit(s=>layerIndex(s).get(id).node.opacity=v,{ids:[],commit}));unified.renderGroup(right,id);right.append(node('p','组内各层保留各自分布方式；选中子层后可直接切换。','surface-note'));const leafIds=layerLeafIds(surface(),id),weatheringChildren=surface().effects.filter(e=>leafIds.includes(e.id)&&weatheringRule(surface(),e));if(weatheringChildren.length===leafIds.length)weatheringPanel(weatheringChildren);const formChildren=surface().effects.filter(e=>leafIds.includes(e.id)&&isFormEffect(e.type)&&!e.distribution);if(formChildren.length&&formChildren.length===leafIds.length){right.append(node('p','自动形体组合 · 子层分别识别位置；在此可统一调节。','surface-note'));for(const[k,label]of [['formWidthCm','统一影响宽度'],['formNaturalness','自然变化']]){const f=EFFECT_TYPES[formChildren[0].type].fields[k],value=formChildren.reduce((v,e)=>v+e.params[k],0)/formChildren.length;field(right,label,value,(v,commit)=>edit(s=>{for(const e of s.effects)if(leafIds.includes(e.id))e.params[k]=v;},{ids:leafIds,commit}),f);}right.append(node('small','调整统一宽度会将各子层设为同一尺寸；展开图层可分别调节。','surface-note'));}field(right,'显示组',g.enabled,(v,commit)=>edit(s=>layerIndex(s).get(id).node.enabled=v,{ids:[],commit}),{kind:'checkbox'});right.append(node('p','组强度与子层强度相乘；组开关保留每个子层原状态。具体蒙版在子层中编辑。','surface-note'));button(right,api.renderer().soloEffectId===id?'结束组隔离':'隔离查看整组',()=>{api.live();api.renderer().soloEffectId=api.renderer().soloEffectId===id?null:id;api.renderer().dirty=true;api.mode(-1);sync();});button(right,'解散组并保留外观',()=>{edit((s,d)=>d.surface=ungroupLayer(s,id),{ids:[]});choose('base');});const actions=node('details',null,'studio-group-actions');actions.append(node('summary','图层组操作'));layerActions(actions,id);right.append(actions);const missing=api.analysis().missing.filter(x=>layerLeafIds(surface(),id).includes(x.effectId));for(const type of new Set(missing.map(x=>x.type)))button(right,'准备 '+(type==='ao'?'模型 AO':'模型曲率'),()=>api.prepare(type));}
+ function groupInspector(id){const entry=layerIndex(surface()).get(id);if(entry?.node.kind!=='group')return baseInspector();const g=entry.node;heading(right,g.name,'图层组 · '+layerLeafIds(surface(),id).length+' 个叶层');if(layerIsLocked(surface(),id,{self:false})){right.append(node('p','父级组已锁定。','surface-note'));return;}field(right,'组名称',g.name,(v,commit)=>edit(s=>layerIndex(s).get(id).node.name=v,{ids:[],commit}),{kind:'text'});field(right,'锁定组',g.locked,(v,commit)=>edit(s=>layerIndex(s).get(id).node.locked=v,{ids:[],commit}),{kind:'checkbox'});if(g.locked)return;for(const scene of groupScenes(id))sceneEditor.render(scene,right);field(right,'组强度',g.opacity,(v,commit)=>edit(s=>layerIndex(s).get(id).node.opacity=v,{ids:[],commit}));unified.renderGroup(right,id);right.append(node('p','组内各层保留各自分布方式；选中子层后可直接切换。','surface-note'));const leafIds=layerLeafIds(surface(),id),weatheringChildren=surface().effects.filter(e=>leafIds.includes(e.id)&&weatheringRule(surface(),e));if(weatheringChildren.length===leafIds.length)weatheringPanel(weatheringChildren);const formChildren=surface().effects.filter(e=>leafIds.includes(e.id)&&isFormEffect(e.type)&&!e.distribution);if(formChildren.length&&formChildren.length===leafIds.length){right.append(node('p','自动形体组合 · 子层分别识别位置；在此可统一调节。','surface-note'));for(const[k,label]of [['formWidthCm','统一影响宽度'],['formNaturalness','自然变化']]){const f=EFFECT_TYPES[formChildren[0].type].fields[k],value=formChildren.reduce((v,e)=>v+e.params[k],0)/formChildren.length;field(right,label,value,(v,commit)=>edit(s=>{for(const e of s.effects)if(leafIds.includes(e.id))e.params[k]=v;},{ids:leafIds,commit}),f);}right.append(node('small','调整统一宽度会将各子层设为同一尺寸；展开图层可分别调节。','surface-note'));}field(right,'显示组',g.enabled,(v,commit)=>edit(s=>layerIndex(s).get(id).node.enabled=v,{ids:[],commit}),{kind:'checkbox'});right.append(node('p','组强度与子层强度相乘；组开关保留每个子层原状态。具体蒙版在子层中编辑。','surface-note'));button(right,api.renderer().soloEffectId===id?'结束组隔离':'隔离查看整组',()=>{api.live();api.renderer().soloEffectId=api.renderer().soloEffectId===id?null:id;api.renderer().dirty=true;api.mode(-1);sync();});button(right,'解散组并保留外观',()=>{edit((s,d)=>d.surface=ungroupLayer(s,id),{ids:[]});choose('base');});const actions=node('details',null,'studio-group-actions');actions.append(node('summary','图层组操作'));layerActions(actions,id);right.append(actions);const missing=api.analysis().missing.filter(x=>layerLeafIds(surface(),id).includes(x.effectId));for(const type of new Set(missing.map(x=>x.type)))button(right,'准备 '+(type==='ao'?'模型 AO':'模型曲率'),()=>api.prepare(type));}
  function multiLayerInspector(){heading(right,'已选择 '+chosenLayers.size+' 个图层','Ctrl 点选，Shift 选择同级范围。');button(right,'编为图层组',()=>makeGroup([...chosenLayers]));right.append(node('p','只有同组内连续图层可直接编组，以保留其它图层的叠加顺序。','surface-note'));}
  function libraryInspector(id){const entry=library.entries.find(e=>e.id===id);if(!entry)return baseInspector();heading(right,entry.name,EFFECT_CATEGORIES[entry.category]+' · '+entry.effectCount+' 个叶层');right.append(node('p',entry.description,'surface-note'));right.append(node('p','通道：'+(entry.channels||[]).map(c=>({color:'颜色',roughness:'粗糙度',height:'法线/高度',ao:'微AO'}[c])).join(' · '),'surface-note'));right.append(node('p','拖到左侧指定位置，或双击库卡片。每次创建独立图层；不会替换已有层。','surface-note'));if(entry.dependencies.length)right.append(node('p','需要：'+entry.dependencies.map(x=>x==='ao'?'模型AO':x==='curvature'?'模型曲率':'模型AO与曲率').join('、')+'。添加时自动准备，已有数据直接复用。','surface-shared'));if(entry.manual)right.append(node('p','此效果初始蒙版为黑色。添加后进入“手绘修正”绘制位置。','surface-shared'));button(right,'添加为新图层',()=>library.add(id).catch(e=>api.notify(e.message,true)));if(entry.kind==='user')button(right,'从我的效果库删除',()=>library.remove(id).catch(e=>api.notify(e.message,true)));}
  function closeLayerMenu(){layerMenu?.remove();layerMenu=null;}
@@ -325,8 +560,123 @@ export function createSurfaceStudio(api){
  document.addEventListener('dragend',clearDropIndicators,{signal:uiEvents.signal});
  document.addEventListener('drop',clearDropIndicators,{signal:uiEvents.signal});
  document.addEventListener('pointerdown',event=>{if(layerMenu&&!layerMenu.contains(event.target))closeLayerMenu();},{signal:uiEvents.signal});
- library=createEffectLibraryPanel({baseSelected:()=>choose('base'),brush:id=>{const current=selectedEffect();if(!id.startsWith('moss-')){beginSurfaceMaterialBrush(id,current?.id);return;}beginMaterialPaint('paint',current?.paint?current.id:null);if(api.materialPaint.active)api.materialPaint.selectBrush(id);},brushId:()=>painting?.role==='material'?painting.presetId:api.materialPaint?.presetId,layout,document:doc,busy:api.busy,list:api.libraryList,read:api.libraryRead,save:api.librarySave,remove:api.libraryDelete,restore:api.libraryRestore,location:selectedLocation,target:()=>selectedLayerId,notify:api.notify,inspect:()=>{},insert:async(entry,location,options={})=>{
-  if(entry.manualPlacement&&surface().effects.filter(e=>e.type==='burl').reduce((n,e)=>n+e.params.burlCount,0)>=8)throw Error('表面贴花数量已满，请先减少其它贴花。');
+ const viewport=document.getElementById('dropZone');
+ const clearViewportDecal=()=>pointEditor.previewLibraryDecal();
+ const viewportDecalReady=()=>!disposed&&!api.busy()&&doc()&&api.source()&&!parts.active&&document.body.dataset.workspaceStage==='material';
+ let importingImageDecal=false;
+ async function importImageDecal(file,hit=null){
+  if(importingImageDecal)throw Error('正在读取图片贴花，请稍候。');
+  if(!viewportDecalReady())throw Error('请先打开一个树干材质工程。');
+  if(surface().effects.length>=16)throw Error('图层预算不足，最多16个材质或调整叶层。');
+  const projectId=doc().id,source=doc().resources.source;
+  importingImageDecal=true;
+  api.notify('正在读取图片贴花…');
+  let image;
+  try{image=await api.loadImageDecal(file);}
+  finally{importingImageDecal=false;}
+  if(!viewportDecalReady()||doc().id!==projectId||doc().resources.source!==source)throw Error('当前模型已切换，请重新导入图片。');
+  const instance=crypto.randomUUID();
+  let id;
+  edit((s,d)=>{
+   const result=addEffect(s,'cork',{actualHeightMeters:d.actualHeightMeters,sourceSHA256:source});
+   d.surface=result.s;id=result.id;
+   const effect=result.s.effects.find(effect=>effect.id===id);
+   effect.name=image.name+' · 图片贴花';
+   Object.assign(effect.params,{surfaceAmount:1,surfaceBarkKeep:1,surfaceHeightMm:0,surfaceAO:0,surfaceRoughness:.65});
+   effect.channels={color:true,roughness:false,height:false,ao:false};
+   const mask=result.s.masks.find(mask=>mask.id===effect.maskRef);
+   const params=sceneOverlayDefaults(IMAGE_DECAL_STYLE),span=Math.max(image.width,image.height);
+   params.width=Math.max(IMAGE_DECAL_SPEC.fields.width.min,params.width*image.width/span);
+   params.height=Math.max(IMAGE_DECAL_SPEC.fields.height.min,params.height*image.height/span);
+   mask.name='图片覆盖';
+   mask.initial=0;
+   mask.items=[createRule('scene-overlay',{scene:{version:1,style:IMAGE_DECAL_STYLE,role:'main',instance,params,image,
+    points:hit?[validateSceneAnchor(hit)]:[],source:hit?source:null}})];
+  },{ids:[]});
+  tab='effects';selectNode(id);api.live();api.mode(-1);
+  if(!hit)sceneEditor.start(instance);
+  api.notify(`图片贴花 ${image.width} × ${image.height} px · ${hit?'已放置':'点击树面放置'}`);
+  return id;
+ }
+ function viewportDecalHit(event){
+  const renderer=api.renderer(),rect=renderer.canvas.getBoundingClientRect(),{clientX:x,clientY:y}=event;
+  if(x<rect.left||x>=rect.right||y<rect.top||y>=rect.bottom)return null;
+  return renderer.pick(x,y,{accelerated:true});
+ }
+ function placeViewportDecal(entry,hit){
+  if(!viewportDecalReady())throw Error('材质视口已切换，请重新拖入贴花。');
+  if(entry.sceneStyle){
+   const point=validateSceneAnchor(hit);
+   let result;
+   edit((s,d)=>{
+    result=applyLibraryCombination({...d,surface:s},entry,{location:selectedLocation()});
+    d.surface=result.surface;
+    const leaves=layerLeafIds(d.surface,result.id);
+    for(const effect of d.surface.effects.filter(e=>leaves.includes(e.id))){
+     const rule=d.surface.masks.find(mask=>mask.id===effect.maskRef)?.items.find(rule=>rule.type==='scene-overlay');
+     if(rule){rule.scene.points=[point];rule.scene.source=d.resources.source;}
+    }
+   },{ids:[]});
+   tab='effects';selectNode(result.id);api.live();api.mode(-1);
+   api.renderer().canvas.focus({preventScroll:true});api.notify('已在树面放置：'+entry.name);
+   return true;
+  }
+  const renderer=api.renderer(),source=api.source();let layerId,pointId;
+  edit((s,d)=>{
+   const placed=instantiateLibraryDecal(d,entry);
+   d.surface=placed.surface;
+   layerId=placed.id;
+   const effect=d.surface.effects.find(e=>e.id===layerId);
+   const projection=makeFittedDecalProjection(d,effect,source,hit,{geometry:renderer.decalPickCache?.geometry});
+   pointId=addManualDecal(d,effect,hit,projection);
+  },{ids:[]});
+  tab='effects';
+  selectNode(layerId);
+  api.live();api.mode(-1);renderer.tool='orbit';
+  pointEditor.select(pointId);
+  renderer.canvas.focus({preventScroll:true});
+  api.notify('已在树面放置：'+entry.name);
+  return true;
+ }
+ function handleViewportDecal(event){
+  const files=Array.from(event.dataTransfer?.files||[]),items=Array.from(event.dataTransfer?.items||[]);
+  const isPicture=/\.(png|jpe?g|webp)$/i;
+  const file=files.find(file=>isPicture.test(file.name));
+  if(file||event.type==='dragover'&&items.some(item=>item.kind==='file'&&/^image\/(png|jpeg|webp)$/.test(item.type))){
+   if(!viewportDecalReady())return;
+   event.preventDefault();event.stopImmediatePropagation();
+   const hit=viewportDecalHit(event);
+   event.dataTransfer.dropEffect=hit?'copy':'none';
+   if(file&&event.type==='drop'&&hit)importImageDecal(file,hit).catch(error=>api.notify(error.message,true));
+   return;
+  }
+  const types=Array.from(event.dataTransfer?.types||[]);
+  if(!types.includes(EFFECT_DRAG_MIME)&&!types.includes(EFFECT_VIEWPORT_DRAG_MIME))return;
+  event.preventDefault();event.stopImmediatePropagation();
+  const entry=types.includes(EFFECT_VIEWPORT_DRAG_MIME)&&library.viewportDragEntry;
+  const over=event.type==='dragover';
+  const hit=entry&&viewportDecalReady()&&viewportDecalHit(event);
+  if(over){
+   const canPlace=hit&&surface().effects.length+entry.effectCount<=16&&(entry.sceneStyle||remainingDecalSlots(surface())>0);
+   event.dataTransfer.dropEffect=canPlace?'copy':'none';
+   const previewDecal=canPlace&&!entry.sceneStyle;
+   pointEditor.previewLibraryDecal(previewDecal?entry.layers[0]:null,previewDecal?hit:null);
+   return;
+  }
+  clearViewportDecal();
+  if(!hit)return;
+  try{
+   const payload=event.dataTransfer.getData(EFFECT_VIEWPORT_DRAG_MIME);
+   if(!payload||payload.length>256)throw Error('贴花拖放数据无效。');
+   const {id,projectId}=JSON.parse(payload);
+   api.renderer().lastPointer={clientX:event.clientX,clientY:event.clientY};
+   Promise.resolve(library.placeOnSurface(id,hit,projectId)).catch(error=>api.notify(error.message,true));
+  }catch(error){api.notify(error.message,true);}
+ }
+ for(const type of ['dragover','drop'])viewport.addEventListener(type,handleViewportDecal,{capture:true,signal:uiEvents.signal});
+ viewport.addEventListener('dragleave',event=>{if(!event.relatedTarget||!viewport.contains(event.relatedTarget))clearViewportDecal();},{signal:uiEvents.signal});
+ library=createEffectLibraryPanel({importImageDecal,placeOnSurface:placeViewportDecal,drag:active=>{if(!active)clearViewportDecal();},baseSelected:()=>choose('base'),brush:id=>{const current=selectedEffect();if(!id.startsWith('moss-')){beginSurfaceMaterialBrush(id,current?.id);return;}beginMaterialPaint('paint',current?.paint?current.id:null);if(api.materialPaint.active)api.materialPaint.selectBrush(id);},brushId:()=>painting?.role==='material'?painting.presetId:api.materialPaint?.presetId,layout,document:doc,busy:api.busy,list:api.libraryList,read:api.libraryRead,save:api.librarySave,remove:api.libraryDelete,restore:api.libraryRestore,location:selectedLocation,target:()=>selectedLayerId,notify:api.notify,inspect:()=>{},insert:async(entry,location,options={})=>{
+  if(entry.manualPlacement&&!remainingDecalSlots(surface()))throw Error('表面贴花数量已满，请先减少其它贴花。');
   const candidate=()=>applyLibraryCombination({...doc(),surface:surface()},entry,{...options,location});
   candidate();await prepareLibraryEntry(entry,{document:doc,state:api.analysis,prepare:api.prepare,progress:message=>api.notify(message)});
   if(disposed)throw Error('工作台已关闭，本次效果未添加。');if(api.busy())throw Error('工作台正在处理其它任务，本次效果未添加。');
@@ -334,5 +684,5 @@ export function createSurfaceStudio(api){
   else edit((s,d)=>{result=applyLibraryCombination({...d,surface:s},entry,{...options,location});d.surface=result.surface;},{ids:[]});
   if(result){tab='effects';if(result.id)selectNode(result.id);if(entry.manualPlacement&&result.id){startManualDecal(result.id);return;}api.notify(result.warnings.length?result.warnings.join(' '):(options.mode==='replace'?'已替换所选组合，保留手绘与被引用图层：':'已添加：')+entry.name);}
  }});
- return{showBaseMaterials({reveal=true}={}){if(api.busy())return;if(document.body.dataset.workspaceStage!=='material')api.stage('material');choose('base');library?.showBase({select:false,reveal});},startManualDecal,pickDecal,beginSurfaceMaterialBrush,beginMaterialPaint,activateBrush,selectPaint(id){effectId=selectedLayerId=id;selection={kind:'effect',id};chosenLayers.clear();chosenLayers.add(id);inspectorTab='effect';},sync,syncViewUI,openParts,beginPaint,syncPartsContext:()=>parts.sync(),get partsWorkspace(){return parts;},acceptMasks,paintStart,paintCancel,paint,paintEnd,stopPaint,syncBrushValues,get selectedEffectId(){return effectId;},get painting(){return painting;},get snapshot(){return{tab,selection:{...selection},effectId,selectedLayerId,chosenLayers:[...chosenLayers],painting};},choose,get materialPreviews(){return materialPreviews;},get layout(){return layout;},get library(){return library;},dispose(){disposed=true;uiEvents.abort();closeLayerMenu();library?.dispose();generation.reset();unified.cancel();parts.dispose();for(const{section,marker,fold,stage}of barkSettings){marker.after(section);section.dataset.workspaceStage=stage;marker.remove();fold.remove();}if(suggestedMarker.isConnected)suggestedMarker.after(suggested);suggestedMarker.remove();baseProperties.remove();overlayProperties.remove();layout.dispose();materialPreviews.dispose();toolstrip.remove();left.remove();right.remove();context.remove();brush.remove();modeObserver.disconnect();returnButton.remove();maskView.remove();for(const id of ['previewSource','previewLight'])document.querySelector('.view-options').prepend(document.getElementById(id));display.remove();materialReturn.remove();viewLabel.remove();css.remove();layoutCSS.remove();flowCSS.remove();document.body.classList.remove('surface-studio');}};
+ return{showBaseMaterials({reveal=true}={}){if(api.busy())return;if(document.body.dataset.workspaceStage!=='material')api.stage('material');choose('base');library?.showBase({select:false,reveal});},showData(){if(!api.busy()){tab='data';sync();}},showLayers(){if(!api.busy()){tab='effects';sync();}},startManualDecal,pickDecal,decalPoints:studioPointTools,startScenePlacement:sceneEditor.start,beginSurfaceMaterialBrush,beginMaterialPaint,activateBrush,selectPaint(id){effectId=selectedLayerId=id;selection={kind:'effect',id};chosenLayers.clear();chosenLayers.add(id);inspectorTab='effect';},sync,syncViewUI,openParts,beginPaint,syncPartsContext:()=>parts.sync(),get partsWorkspace(){return parts;},acceptMasks,paintStart,paintCancel,paint,paintEnd,stopPaint,syncBrushValues,get selectedEffectId(){return effectId;},get painting(){return painting;},get snapshot(){return{tab,selection:{...selection},effectId,selectedLayerId,chosenLayers:[...chosenLayers],painting};},choose,get materialPreviews(){return materialPreviews;},get layout(){return layout;},get library(){return library;},dispose(){disposed=true;sceneEditor.cancel(false);pointEditor.dispose();uiEvents.abort();closeLayerMenu();library?.dispose();generation.reset();unified.cancel();parts.dispose();for(const{section,marker,fold,stage}of barkSettings){marker.after(section);section.dataset.workspaceStage=stage;marker.remove();fold.remove();}if(suggestedMarker.isConnected)suggestedMarker.after(suggested);suggestedMarker.remove();baseProperties.remove();overlayProperties.remove();layout.dispose();materialPreviews.dispose();toolstrip.remove();left.remove();right.remove();context.remove();brush.remove();modeObserver.disconnect();returnButton.remove();maskView.remove();for(const id of ['previewSource','previewLight'])document.querySelector('.view-options').prepend(document.getElementById(id));display.remove();materialReturn.remove();viewLabel.remove();css.remove();layoutCSS.remove();flowCSS.remove();document.body.classList.remove('surface-studio');}};
 }

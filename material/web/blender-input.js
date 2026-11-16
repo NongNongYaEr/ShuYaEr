@@ -1,4 +1,4 @@
-import {BLENDER_NAV_HINT,viewKey,viewLabel,setAxisView,changed} from './blender-navigation.js';
+import {MATERIAL_VIEWPORT_NAVIGATION_EVENT,materialViewportNavigationHint,viewKey,viewLabel,setAxisView,changed} from './blender-navigation.js';
 import {installUVNavigation,resetUVView,frameUVSelected} from './uv-view.js';
 
 export const isTextEntry=element=>!!element&&(element.isContentEditable||['INPUT','TEXTAREA','SELECT'].includes(element.tagName));
@@ -37,18 +37,24 @@ export function setupBlenderInput({renderer:r,root=document,isBusy=()=>false,isC
  listen(search,'input',()=>{active=0;renderMenu();});
  function endBrush(cancel){if(!modal)return false;const m=modal;modal=null;if(cancel)m.input.value=m.before;brushStatus.hidden=true;return true;}
  function startBrush(strength){if(isBusy())return;const target=brushTarget(strength);if(!target){notify(strength?'强度调整仅用于遮罩画笔。':'先启用遮罩画笔或部位刷选，再按 F 调整半径。');return;}r.finishInteraction?.();modal={input:target,before:target.value,start:Number(target.value),x:r.lastPointer?.clientX??canvas.getBoundingClientRect().left+canvas.clientWidth/2,strength};brushStatus.hidden=false;brushStatus.textContent=(strength?'强度':'半径')+' '+target.value+' · 移动鼠标调整 · 左键确认 · 右键 / Esc 取消';}
- r.onPointerAction=e=>{if(!modal)return false;if(e.button===0||e.button===2){e.preventDefault();endBrush(e.button===2);}return true;};
- r.onPointerMotion=e=>{if(!modal)return false;const {input,start,x,strength}=modal,min=input.min!==''?Number(input.min):.01,max=input.max!==''?Number(input.max):20,value=strength?start+(e.clientX-x)/300:start*Math.exp((e.clientX-x)*.01);input.value=String(Number(Math.max(min,Math.min(max,value)).toFixed(3)));brushStatus.textContent=(strength?'强度 ':'半径 ')+input.value+(strength?'':' 米')+' · 左键确认 · 右键 / Esc 取消';return true;};
+ r.onPointerAction=e=>{if(!modal)return authoring?.decalPointerAction?.(e)===true;if(e.button===0||e.button===2){e.preventDefault();endBrush(e.button===2);}return true;};
+ r.onPointerMotion=e=>{if(!modal)return authoring?.decalPointerMotion?.(e)===true;const {input,start,x,strength}=modal,min=input.min!==''?Number(input.min):.01,max=input.max!==''?Number(input.max):20,value=strength?start+(e.clientX-x)/300:start*Math.exp((e.clientX-x)*.01);input.value=String(Number(Math.max(min,Math.min(max,value)).toFixed(3)));brushStatus.textContent=(strength?'强度 ':'半径 ')+input.value+(strength?'':' 米')+' · 左键确认 · 右键 / Esc 取消';return true;};
  r.onWheelAction=()=>!!modal;r.onContextMenu=e=>showMenu({x:e.clientX,y:e.clientY});
  listen(root,'pointerover',e=>{const c=e.target.closest?.('canvas[data-blender-editor]');editor=c||null;});
  listen(root,'pointerdown',e=>{if(menuOpen&&!panel.contains(e.target))closeMenu();if(modal&&e.target!==canvas)endBrush(true);},{capture:true});
- listen(globalThis,'blur',()=>{endBrush(true);closeMenu();r.cancelInteraction?.();for(const c of uvControllers.values())c.cancel();});
- const menuButton=root.createElement('button');menuButton.id='blenderControls';menuButton.type='button';menuButton.textContent='Blender 操作';menuButton.title=BLENDER_NAV_HINT+' · F3 搜索 · Z 显示菜单 · T / N 面板';menuButton.onclick=()=>showMenu();root.querySelector('.view-options').append(menuButton);
+ listen(canvas,'pointerleave',()=>authoring?.decalPointerLeave?.());
+ listen(canvas,'focus',()=>{editor=canvas;});
+ listen(canvas,'pointercancel',()=>authoring?.decalCancel?.());
+ listen(globalThis,'blur',()=>{endBrush(true);authoring?.decalCancel?.();closeMenu();r.cancelInteraction?.();for(const c of uvControllers.values())c.cancel();});
+ const menuButton=root.createElement('button');menuButton.id='blenderControls';menuButton.type='button';menuButton.textContent='Blender 操作';menuButton.onclick=()=>showMenu();root.querySelector('.view-options').append(menuButton);
+ const updateNavigationHint=()=>{menuButton.title=materialViewportNavigationHint()+' · F3 搜索 · Z 显示菜单 · T / N 面板';};
+ updateNavigationHint();listen(globalThis,MATERIAL_VIEWPORT_NAVIGATION_EVENT,updateNavigationHint);
  function keydown(e){if(isClosing()){e.preventDefault();return;}if(e.isComposing||e.key==='Process')return;
   if(modal){e.preventDefault();if(e.key==='Escape')endBrush(true);else if(e.key==='Enter')endBrush(false);return;}
   if(menuOpen){if(['Escape','Enter','ArrowDown','ArrowUp'].includes(e.key)){e.preventDefault();if(e.key==='Escape')closeMenu();else if(e.key==='Enter'){if(visible[active])execute(visible[active]);}else{active=(active+(e.key==='ArrowDown'?1:-1)+Math.max(1,visible.length))%Math.max(1,visible.length);renderMenu();rows.children[active]?.scrollIntoView({block:'nearest'});}return;}return;}
   if($('projectDialog')?.open){if((e.ctrlKey||e.metaKey)&&['s','o','z'].includes(e.key.toLowerCase()))e.preventDefault();if(e.key==='Escape'&&isBusy())cancelTask();return;}
   if(isTextEntry(root.activeElement)||isTextEntry(e.target))return;
+  if(authoring?.decalKey?.(e,editor===canvas)){e.preventDefault();e.stopPropagation();return;}
   const key=e.key.toLowerCase(),ctrl=e.ctrlKey||e.metaKey;
   if(e.key==='Escape'){const cancelled=r.cancelInteraction?.();for(const c of uvControllers.values())c.cancel();if(isBusy())cancelTask();if(cancelled||isBusy())e.preventDefault();return;}
   if(ctrl&&!e.altKey&&['s','o','z'].includes(key)){e.preventDefault();if(isBusy()||e.repeat)return;r.finishInteraction?.();if(key==='s')save({download:e.shiftKey});if(key==='o')open();if(key==='z')$(e.shiftKey?'redo':'undo').click();return;}

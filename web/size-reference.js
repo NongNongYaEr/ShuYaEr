@@ -145,6 +145,6 @@ export function createSizeReference(api) {
     const text = `<strong>${scope}</strong>${asset.settings.preview_lod ? ' · 当前 LOD' : ''}<br>高 Z ${formatDistance(size.z)}　${mode === 'TREE' ? '冠幅' : '跨度'} X ${formatDistance(size.x)} × Y ${formatDistance(size.y)}<br>网格每格 ${formatDistance(step)}${selected ? '<br>'+selected : ''}`;
     if (readout.innerHTML !== text) readout.innerHTML = text;
   }
-  return { root, update, toggleGrid() { prefs.grid = !prefs.grid; persist(); update(performance.now(), true); },
+  return { root, update, invalidate() { current = null; }, toggleGrid() { prefs.grid = !prefs.grid; persist(); update(performance.now(), true); },
     get state() { return { mode, preferences: {...prefs}, bounds: bounds.clone(), human, ruler, gridStep: lastStep }; } };
 }

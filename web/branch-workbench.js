@@ -9,9 +9,10 @@ import { createUnitSourceWorkflow } from './unit-source-workflow.js';
 import { createUnitAssemblyUI } from './unit-assembly-ui.js';
 import { buildUnitAssemblySelection } from './unit-assembly-selection.js';
 import * as THREE from 'three';
-import { DEFAULT_SETTINGS } from './branch-kernel.js';
+import { DEFAULT_SETTINGS, createDefaultLeafGeometry, serializeGeometry } from './branch-kernel.js';
 import { normalizeAuthoring } from './authoring-state.js';
-import { blankBranchShape, captureBranchShape, copy, normalizeBranchLibrary, nextAssetVersion, resolveInstanceShape, resolveInstanceAsset } from './branch-workbench-data.js';
+import { blankBranchShape, captureBranchShape, copy, equalData, normalizeBranchLibrary, nextAssetVersion, resolveInstanceShape, resolveInstanceAsset } from './branch-workbench-data.js';
+import { unitAssetApplySelection, planUnitAssetApply, applyUnitAssetPlan } from './unit-assembly-apply.js';
 import { createWorkbenchTools } from './branch-workbench-tools.js';
 import { createShapingContext } from './shaping-context.js';
 import { createBranchInstallation } from './branch-installation.js';
@@ -35,6 +36,7 @@ import { TREE_ORGAN_MODES } from './tree-organ-data.js';
 import { createBranchQuickControls } from './branch-quick-controls.js';
 import { createBranchVariantWorkspace } from './branch-variant-workspace.js';
 import { createPlantUnitWorkspace } from './plant-unit-workspace.js';
+import { baseBranchShape } from './base-branch-assembly.js';
 import { normalizeFoliageUnit } from './foliage-unit-data.js';
 import { ASSEMBLY_ZONES, normalizeAssemblySlots, inferAssemblySlots, addAssemblyAsset, assignAssemblyInstances, seedAssemblyInstances, countAssemblyInstances, resizeAssemblyInstances, assemblyCountCapacity } from './branch-assembly.js';
 import { recoverLegacyBranchAsset } from './legacy-branch-recovery.js';
@@ -127,7 +129,9 @@ export function createBranchWorkbench(api) {
   section.prepend(skeletonEditNote);
   const quickControls = createBranchQuickControls({ ...api, isBranch: () => mode === 'BRANCH', isBusy: () => busy }, section);
   const candidateWorkspace = createBranchVariantWorkspace({ ...api, isBranch: () => mode === 'BRANCH' }, section);
-  const plantUnits = createPlantUnitWorkspace({ ...api, isBranch: () => mode === 'BRANCH', startUnitDrag: (...args) => unitEditor.unitDrop.start(...args) }, section);
+  const plantUnits = createPlantUnitWorkspace({ ...api, isBranch: () => mode === 'BRANCH',
+    onSelectBaseUnit: () => { if (unitEditor.enabled) unitEditor.deactivate(); api.select(null); },
+    startUnitDrag: (...args) => unitEditor.unitDrop.start(...args) }, section);
   const unitEditor = createUnitEditor({...api,isBranch:()=>mode==='BRANCH',isBusy:()=>busy},section);
   const unitRules = createUnitRulesUI({...api,isBranch:()=>mode==='BRANCH',isBusy:()=>busy},section);
   const assemblyGrowth = createAssemblyGrowthControls({...api,isTree:()=>mode==='TREE',canUse:()=>!busy&&!api.getSkeletonEditMode()});
@@ -174,6 +178,8 @@ export function createBranchWorkbench(api) {
   const unitBrushes=createUnitBrushTools({...api,isTree:()=>mode==='TREE',isBusy:()=>busy,selectedAsset:assetById,
     unitMode:()=>api.getTreeEditMode()==='UNIT'?Promise.resolve():api.requestUnitMode(),toastStatus:api.status,async ensureSource(id){if(busy)throw Error('工作区正在更新，请稍后再刷生成');busy=true;try{await ensureManagedAsset(id,true);await ensureGroupAssets([id]);await api.flush();}finally{busy=false;refresh();}}},context);
   const assemblyLinks = createUnitAssemblyUI({ ...api, isTree:()=>mode==='TREE', isBusy:()=>busy, library:()=>library,
+    unitAssetApplyState: unitAssetApplyPlan,
+    applySelectedUnitAsset: runSelectedUnitAsset,
     async editSource(assetId, role, instanceId) { const instance=api.getAuthoring().branch_instances.find(i=>instanceId?i.id===instanceId:i.asset_id===assetId&&(role==='EXTRA'?!i.linked||!['MATURE','MIXED','YOUNG'].includes(i.shootRole):i.shootRole===role)); if(instance)await editUnitSource(instance);else await openAsset(library.find(item=>item.id===assetId)); } });
   const hangDirections={X:[1,0,0],'-X':[-1,0,0],Y:[0,1,0],'-Y':[0,-1,0],Z:[0,0,1],'-Z':[0,0,-1]};
   $('wbHangDirection').onchange=()=>{if(mode!=='BRANCH'||busy||$('wbHangDirection').value==='CUSTOM')return;const value=hangDirections[$('wbHangDirection').value];api.transact('标定完整单元枝悬垂方向',a=>{if(!a.branch_shape?.connector)return;if(value)a.branch_shape.connector.hang_direction=[...value];else delete a.branch_shape.connector.hang_direction;},{bypassLayers:true});};
@@ -513,6 +519,77 @@ export function createBranchWorkbench(api) {
     const branches=api.getAsset().masterBranches,byId=new Map(branches.map(b=>[b.id,b]));
     return instances.flatMap(i=>branches.filter(b=>b.stableId.startsWith(i.id+'.')&&!byId.get(b.parentId)?.stableId.startsWith(i.id+'.')).map(b=>b.stableId));
   }
+  let applySelectionCache;
+  function unitAssetApplyPlan(assetId, role) {
+    if (mode !== 'TREE' || api.getSkeletonEditMode() || api.getTreeEditMode() !== 'UNIT')
+      return { count: 0, reason: '先在整树上点选或框选要更换的单元枝' };
+    const a = api.getAuthoring(), selection = assemblyLinks.state;
+    if (applySelectionCache?.selection !== selection)
+      applySelectionCache = { selection, data: unitAssetApplySelection(a, selection) };
+    const cards = role === 'EXTRA' ? selection.extra.cards : selection.zones[role]?.cards;
+    const card = cards?.find(entry => entry.asset_id === assetId);
+    const revision = card?.revisions.length === 1 ? card.revisions[0] : 0;
+    const target = resolveInstanceAsset({ asset_id: assetId, linked: true, pinned_revision: revision }, library);
+    if (revision && target?.revision !== revision)
+      return { count: 0, reason: '这张卡片的旧版素材已缺失' };
+    return planUnitAssetApply(a, applySelectionCache.data, target);
+  }
+
+  async function runSelectedUnitAsset(assetId, role) {
+    if (busy || !api.canApplySelectedUnitAsset()) throw Error('请先确认或取消当前调整');
+    const sourceDocument = api.getAuthoring();
+    const initial = unitAssetApplyPlan(assetId, role);
+    if (!initial.count) throw Error(initial.reason);
+    await run(async () => {
+      await api.flush();
+      if (!api.canApplySelectedUnitAsset()) throw Error('请先确认或取消当前调整');
+      const plan = unitAssetApplyPlan(assetId, role);
+      if (!plan.count) throw Error(plan.reason);
+      if (api.getAuthoring() !== sourceDocument || plan.target.revision !== initial.target.revision || plan.count !== initial.count ||
+          plan.rows.some((row, i) => row.instance.id !== initial.rows[i].instance.id))
+        throw Error('单元枝选区已变化，请重新点击应用');
+      const { authoring, roots } = applyUnitAssetPlan(api.getAuthoring(), plan);
+      const { sample } = plan.target;
+      const added = [];
+      if (sample) {
+        const currentLeaves = api.getLeafSources();
+        const leaves = new Map(currentLeaves.map(source => [source.id, source]));
+        const organs = new Map(authoring.tree_organs.units.map(unit => [unit.id, unit]));
+        const { references } = importSampleMaterials(authoring, sample);
+        // The global palette is shared by every branch. Add missing resources
+        // without overwriting a source that is already in use elsewhere.
+        if (sample.leaf_meshes?.length && !currentLeaves.length) {
+          const geometry = createDefaultLeafGeometry(api.getSettings().leaf_aspect);
+          try {
+            let id = 'ASSEMBLY_DEFAULT_LEAF';
+            while (sample.leaf_meshes.some(source => source.id === id)) id += '_';
+            added.push({ id, name: '内置阔叶', geometry: serializeGeometry(geometry) });
+          } finally { geometry.dispose(); }
+        }
+        for (const source of sample.leaf_meshes || []) {
+          const existing = leaves.get(source.id);
+          if (!existing) added.push(remapSampleMaterial(source, references));
+          else {
+            const geometry = serializeGeometry(existing.geometry), incoming = source.geometry;
+            if (!['position', 'uv', 'index'].every(key => equalData(geometry[key], incoming?.[key] ?? null)) ||
+                incoming?.normal && !equalData(geometry.normal, incoming.normal))
+              throw Error('目标单元枝与当前工程有同编号的不同叶片，请检查目标素材的叶片来源');
+          }
+        }
+        for (const unit of sample.authoring?.tree_organs?.units || []) {
+          const existing = organs.get(unit.id);
+          if (!existing) organs.set(unit.id, remapSampleMaterial(unit, references));
+          else if (existing.role !== unit.role || !equalData(existing.geometry, unit.geometry))
+            throw Error('目标单元枝与当前工程有同编号的不同花果，请检查目标素材的花果来源');
+        }
+        if (organs.size > 24) throw Error('应用后超过 24 种花果素材上限');
+        authoring.tree_organs = { ...authoring.tree_organs, units: [...organs.values()] };
+      }
+      await api.commitSelectedUnitAsset(authoring, roots, added);
+      api.toast(`已将 ${plan.count} 支单元枝换为「${plan.target.name}」${plan.skipped ? `，保留 ${plan.skipped} 支受保护单元枝` : ''}。可一次撤销`);
+    })();
+  }
+
   async function replaceAssembly(assetId,role,nextId=selectedAsset) {
     if(!nextId || nextId===assetId || !library.some(a=>a.id===nextId))throw Error('先在左侧选择一款不同的单元枝，再点击替换');
     await api.flush();const doc=api.capture(),next=library.find(a=>a.id===nextId);
@@ -620,6 +697,8 @@ export function createBranchWorkbench(api) {
     return sourceWorkflow.open();
   }
   function captureDraft() {
+    const baseAssembly=api.getAuthoring().base_branch_assembly;
+    if(baseAssembly)return baseBranchShape(baseAssembly);
     if(api.getAuthoring().workbench?.source?.instance_id)return captureCompleteDraftShape(api.getAsset(),api.getAuthoring());
     const asset = api.getAsset(); const captured = captureBranchShape(asset.masterBranches, asset.masterBranches[0]?.stableId, true);
     const original = api.getAuthoring().branch_shape?.connector;
@@ -977,9 +1056,9 @@ export function createBranchWorkbench(api) {
   $('wbSectionT').oninput = () => { tools.setSection($('wbSectionT').value); context.refresh(); };
   $('wbDiameter').oninput = () => { if ($('wbDiameter').value === '' || !$('wbDiameter').validity.valid) return; api.begin(); tools.setRadius(+$('wbDiameter').value); };
   $('wbDiameter').onchange = () => api.commit();
-  bind('wbRadiusReset', () => { if (tools.getBranch()?.sections?.length) { api.begin(); tools.setSectionValue('radius', 1); api.commit(); } else api.transact('重置截面粗细', (a) => { const id = api.getSelection() || api.getAsset()?.masterBranches[0]?.stableId; if (a.overrides[id]) a.overrides[id].radius_profile = null; }, { bypassLayers: true }); });
-  $('wbLockRoot').onchange = () => api.transact('根部锁定', (a) => { a.curve_editor.lock_root = $('wbLockRoot').checked; a.branch_shape.connector.locked = a.curve_editor.lock_root; });
-  bind('wbConnectorReset', () => api.transact('连接点归根', (a) => { const branch = api.getAsset().masterBranches[0]; a.branch_shape.connector.position = branch.points[0].toArray(); a.branch_shape.connector.direction = branch.points[1].clone().sub(branch.points[0]).normalize().toArray(); }, { bypassLayers: true }));
+  bind('wbRadiusReset', () => { if (api.isBaseBranchAssembly?.()) return; if (tools.getBranch()?.sections?.length) { api.begin(); tools.setSectionValue('radius', 1); api.commit(); } else api.transact('重置截面粗细', (a) => { const id = api.getSelection() || api.getAsset()?.masterBranches[0]?.stableId; if (a.overrides[id]) a.overrides[id].radius_profile = null; }, { bypassLayers: true }); });
+  $('wbLockRoot').onchange = () => { if (!api.isBaseBranchAssembly?.()) api.transact('根部锁定', (a) => { a.curve_editor.lock_root = $('wbLockRoot').checked; a.branch_shape.connector.locked = a.curve_editor.lock_root; }); };
+  bind('wbConnectorReset', () => { if (!api.isBaseBranchAssembly?.()) api.transact('连接点归根', (a) => { const branch = api.getAsset().masterBranches[0]; a.branch_shape.connector.position = branch.points[0].toArray(); a.branch_shape.connector.direction = branch.points[1].clone().sub(branch.points[0]).normalize().toArray(); }, { bypassLayers: true }); });
   $('wbInstances').onchange = () => { selectedInstance = $('wbInstances').value; const current = api.getAuthoring().branch_instances.find((i) => i.id === selectedInstance); if (current) api.select(`${current.id}.${(current.shape || assetById()?.shape)?.branches[0].id || 'R1'}`); refresh(); };
   let numericBaseline = null;
   for (const suffix of ['T', 'Angle', 'Azimuth', 'Roll', 'Scale', 'Variation', 'Seed']) {
@@ -1095,7 +1174,7 @@ export function createBranchWorkbench(api) {
     async refreshPackageLibraries(){await assetStorage.refreshPackages();await prefabs.reload();await plantUnits.reload();refresh();},
     async newVineDraft() { await api.flush(); await switchMode('VINE', await vineDraft(api.capture())); },
     serialize({ omitActive = false } = {}) { const docs = { ...parked, [mode]: omitActive ? null : api.capture({includeHistory:false}) }; return { version: 2, active: mode, tree: docs.TREE ? cloneDocument(docs.TREE) : null, branch: docs.BRANCH ? cloneDocument(docs.BRANCH) : null, vine: docs.VINE ? cloneDocument(docs.VINE) : null }; },
-    async load(project, {progress=async()=>{},origin={}}={}) {
+    async load(project, {progress=async()=>{},origin={},compactTrunkControls=false}={}) {
       unitBrushes.reset();
       groupControls.cancel();
       if (busy||prefabs.busy) throw new Error('工作区或预制操作进行中，请完成后再载入');
@@ -1103,7 +1182,7 @@ export function createBranchWorkbench(api) {
       libraryManager.closePicker();
       assemblyGrowth.deactivate();
       localAssembly.cancel();localAssembly.stop();
-      unitEditor.deactivate(); skeletonThickness.resetInputs(); trunkForm.resetInputs();
+      unitEditor.deactivate(); plantUnits.baseBranch.clearSelection(); skeletonThickness.resetInputs(); trunkForm.resetInputs();
       busy = true;
       try {
       api.loadPrefabAssets(project.prefab_assets);prefabs.projectChanged();
@@ -1123,7 +1202,7 @@ export function createBranchWorkbench(api) {
       await progress(1,`整理 ${library.length} 款单元枝素材`);
       for (let n=0;n<stale.length;n++){await progress(1,`更新预览 ${n+1} / ${stale.length}`);stale[n].thumbnail=await sampleThumbnail(stale[n],treeSource);}
       syncParkedLibraries();
-      active.authoring = { ...active.authoring, branch_library: library }; await api.restore(active,progress); parked[mode] = null; refresh();
+      active.authoring = { ...active.authoring, branch_library: library }; await api.restore(active,progress,{compactTrunkControls}); parked[mode] = null; refresh();
       if (mode === 'TREE' && embedded.length) revealAssembly();
       if(mode==='BRANCH')document.dispatchEvent(new CustomEvent('branch-workflow-show',{detail:'ADJUST'}));
       api.projectLoaded?.(origin);

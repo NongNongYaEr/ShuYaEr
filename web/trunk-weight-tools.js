@@ -54,7 +54,7 @@ export function createTrunkWeightTools({dialog,getModel,getView,getSelected,canO
   panel.hidden=!session;dialog.classList.toggle('trunk-weight-editing',!!session);
   if(!session)return;
   q('[data-step-title]').textContent='权重修复';q('[data-transform-kind]').textContent='权重笔刷';
-  q('[data-transform-help]').textContent='左键绘制 · 中键观察';
+  q('[data-transform-help]').textContent='左键绘制';
   const model=getModel(),{guide,tool,angle,comparing,scan,feedback,applied}=session,disabled=isBusy()||isDrawing();
   q('[data-view-note]').textContent=comparing?'对照进入时的绑定':angle?'试弯预览 · 返回静止后可绘制':'颜色显示顶点跟随的控制枝';
   if(guideOptions!==model.guides){

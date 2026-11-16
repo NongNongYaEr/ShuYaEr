@@ -1,5 +1,5 @@
 const fs=require('fs'),path=require('path'),assert=require('node:assert/strict');
-const {chromium}=require('playwright');
+const {chromium}=require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 (async()=>{
  const out=path.resolve('.runtime/unit-branch-workflow');fs.mkdirSync(out,{recursive:true});const report={checks:[],errors:[]};
  const folder=path.resolve('次枝资产/全植物次枝成品V1/朴树'),name=fs.readdirSync(folder).find(n=>n.includes('短弯细梢')&&n.includes('混合')&&n.endsWith('.branchasset.json')),item=JSON.parse(fs.readFileSync(path.join(folder,name))).asset;

@@ -1,7 +1,8 @@
 import * as THREE from './vendor/three.module.min.js';
-import {axisTime,axisSegment,withAxisTimes,sampleAxis,normalizeAxisTimes} from './branch-axis.js';
+import {axisTime,axisTimes,axisSegment,withAxisTimes,sampleAxis,normalizeAxisTimes,nearestAxis} from './branch-axis.js';
 import {branchMountAt} from './branch-mount-frame.js';
 import {transformLegacyRigidGeometry} from './legacy-unit-placement.js';
+import {simplifyCurvePoints} from './v4-tools.js';
 
 // Shape-preserving Hermite interpolation: each coordinate stays between its
 // neighbouring controls. A level pair cannot acquire a hidden hump from old R.
@@ -68,19 +69,39 @@ export function writeControlCurve(authoring,operation,name='控制点驱动走�
   else authoring.sculpt_layers.push({id:'CONTROL_'+Date.now()+'_'+operation.root,name,enabled:true,strength:1,operation,branches:{}});
   authoring.active_sculpt_layer='';
 }
+
+function deformCompactAxis(root,knots){
+  const times=axisTimes(root.points);
+  if(!times||knots.length!==root.controlPoints.length)return null;
+  const stations=normalizeAxisTimes(root.controlPoints.map((point,i)=>i===0?0:i===knots.length-1?1:nearestAxis(root.points,point)),knots.length);
+  if(!stations)return null;
+  // Move the dense samples by the change at each handle. Re-fitting through only
+  // the sparse handles would also change the shape between untouched handles.
+  const deltas=withAxisTimes(knots.map((point,i)=>point.clone().sub(root.controlPoints[i])),stations);
+  const points=root.points.map((point,i)=>{
+    const {index,u}=axisSegment(deltas,times[i]);
+    return point.clone().add(deltas[index].clone().lerp(deltas[index+1],u*u*(3-2*u)));
+  });
+  return withAxisTimes(points,times,root.points.axisCuts);
+}
+
 export function evaluateControlCurve(branches,operation,strength=1,overrides={}){
   const root=branches.find(b=>b.stableId===operation.root);
   if(!root||root.unitOwner||root.instanceId||root.symmetryGroup||strength<=0)return branches;
   const knots=operation.knots.map((p,i)=>{const v=new THREE.Vector3(...p);return strength<1&&root.controlPoints.length===operation.knots.length?root.controlPoints[i].clone().lerp(v,strength):v;});
   if(root.controlPoints.length===knots.length&&(overrides[root.stableId]?.pinned_points||[]).some(i=>knots[i]&&knots[i].distanceToSquared(root.controlPoints[i])>1e-16))return branches;
-  const points=controlCurveAxis(knots,{times:root.points.axisCuts,previous:root.points,previousControls:root.controlPoints});if(!points)return branches;
+  const deformed=root.compactControlCurve&&!operation.edit_knot_limit?deformCompactAxis(root,knots):null;
+  const points=deformed||controlCurveAxis(knots,{times:root.points.axisCuts,previous:root.points,previousControls:root.controlPoints});if(!points)return branches;
+  const editKnots=operation.edit_knot_limit
+    ?simplifyCurvePoints(knots.map(point=>point.toArray()),Number.MAX_VALUE,[],operation.edit_knot_limit).map(point=>new THREE.Vector3(...point))
+    :knots;
   const old={...root},before=axisFrame(root.points,root.phase),after=axisFrame(points,root.phase),motion=t=>after(t).multiply(before(t).invert()),identity=new THREE.Matrix4();
   const at=t=>motion(t).multiply(branchMountAt(old,t)||identity),frames=points.slice(1).map((_,i)=>at((axisTime(points,i)+axisTime(points,i+1))*.5));
   const byId=new Map(branches.map(b=>[b.id,b])),moves=new Map(),visiting=new Set();
   function move(b){if(moves.has(b.id))return moves.get(b.id);if(visiting.has(b.id))return null;visiting.add(b.id);const p=byId.get(b.parentId),m=p===root?motion(b.parentT):p?move(p):null;visiting.delete(b.id);moves.set(b.id,m);return m;}
   if(branches.some(b=>b!==root&&move(b)&&(overrides[b.stableId]?.pinned_points?.length)))return branches;
   return branches.map(b=>{
-    if(b===root)return {...b,points,controlPoints:knots,controlDriven:true,length:points.slice(1).reduce((n,p,i)=>n+p.distanceTo(points[i]),0),mountFrames:frames,mountFrameBinding:{points,frames,at},legacyRigidGeometry:undefined,surfaceNormals:null};
+    if(b===root)return {...b,points,controlPoints:editKnots,controlDriven:true,compactControlCurve:!!(deformed||operation.edit_knot_limit),length:points.slice(1).reduce((n,p,i)=>n+p.distanceTo(points[i]),0),mountFrames:frames,mountFrameBinding:{points,frames,at},legacyRigidGeometry:undefined,surfaceNormals:null};
     const m=move(b);if(!m)return b;const q=new THREE.Quaternion().setFromRotationMatrix(m),p=byId.get(b.parentId),movedPoints=b.points.map(p=>p.clone().applyMatrix4(m));
     if(b.points.axisTimes)withAxisTimes(movedPoints,b.points.axisTimes,b.points.axisCuts);
     return {...b,points:movedPoints,controlPoints:b.controlPoints.map(p=>p.clone().applyMatrix4(m)),surfaceNormals:b.surfaceNormals?.map(n=>n.clone().applyQuaternion(q)),mountMatrix:m.clone().multiply(b.mountMatrix||identity),mountFrames:b.mountFrames?.map(f=>m.clone().multiply(f)),mountFrameBinding:undefined,

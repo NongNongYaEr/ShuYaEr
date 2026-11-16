@@ -1,5 +1,5 @@
 const fs=require('fs'),path=require('path'),assert=require('node:assert/strict'),crypto=require('crypto');
-const {chromium}=require(process.env.BRANCHFORGE_PLAYWRIGHT||'playwright');
+const {chromium}=require(process.env.BRANCHFORGE_PLAYWRIGHT||'C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 (async()=>{
  const artifacts=path.resolve('.runtime/pve-history-acceptance');fs.mkdirSync(artifacts,{recursive:true});
  const name='验收_历史备份开关_'+crypto.randomUUID().slice(0,8),exportRoot=path.resolve('导出'),project=path.join(exportRoot,name+'.branch.json'),output=path.join(exportRoot,name+'_PVE_Complete'),history=path.join(exportRoot,'历史备份',name+'_PVE_Complete');

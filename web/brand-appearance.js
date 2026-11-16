@@ -2,8 +2,8 @@
 (() => {
   const valid = ['graphite', 'cream', 'forest'];
   let current = 'graphite';
-  const defaultViewportBackground='#0b100d';
-  const defaultGroundColor='#101711';
+  const defaultViewportBackground='#34383d';
+  const defaultGroundColor='#383d40';
   const lightingPresets=['default','overcast','side','warm','studio'];
   const defaultViewportLighting={preset:'default',angle:0};
   const lightingSettings=value=>lightingPresets.includes(value?.preset)&&Number.isInteger(value.angle)&&value.angle>=0&&value.angle<=360

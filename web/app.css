@@ -154,7 +154,7 @@ input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var
 .branch-outliner button[data-overridden="true"]::after { color: var(--yellow); content: '●'; font-size: 7px; }
 .branch-outliner button svg { width: 12px; }
 
-.viewport-area { --prefab-tray-height:clamp(212px,26vh,260px); --prefab-clearance:calc(var(--prefab-tray-height) + 24px); position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #0b100d; }
+.viewport-area { --prefab-tray-height:clamp(212px,26vh,260px); --prefab-clearance:calc(var(--prefab-tray-height) + 24px); position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #34383d; }
 body[data-branch-workflow="on"] .viewport-area, body[data-workbench="BRANCH"] .viewport-area, body[data-workbench="VINE"] .viewport-area, body.trunk-adjusting .viewport-area, .viewport-area.multiview { --prefab-clearance:78px; }
 body[data-workbench="BRANCH"] .variant-tray, body[data-workbench="VINE"] .variant-tray { display:none; }
 .native-viewport-active, .native-viewport-active .app-shell, .native-viewport-active .workspace, .native-viewport-active .viewport-area { background: transparent !important; }

@@ -8,13 +8,14 @@ import { legacyUnitBranches, legacyUnitInstances } from '../web/legacy-unit-plac
 import { applySculptLayers } from '../web/generator-geometry.js';
 import { resolveUnitEditScope } from '../web/unit-branch-boundary.js';
 import { buildUnitAssemblySelection } from '../web/unit-assembly-selection.js';
+import { baseBranchBrushEntry } from '../web/base-branch-brush.js';
 
 function fixture() {
   const previous=globalThis.document,nodes=new Map();
   class Element {
     constructor(){this.children=[];this.style={};this.attributes=new Map();const classes=new Set();this.classList={add:v=>classes.add(v),contains:v=>classes.has(v),toggle(v,on){if(on??!classes.has(v))classes.add(v);else classes.delete(v);}};this.hidden=false;this.selectors=new Map();this.listeners=new Map();}
     append(...nodes){this.children.push(...nodes);for(const node of nodes)node.parentElement=this;}
-    setAttribute(key,value){this.attributes.set(key,value);}removeAttribute(key){this.attributes.delete(key);}remove(){}
+    getAttribute(key){return this.attributes.get(key)??null;}setAttribute(key,value){this.attributes.set(key,value);}removeAttribute(key){this.attributes.delete(key);}remove(){}
     querySelector(selector){if(!this.selectors.has(selector))this.selectors.set(selector,new Element());return this.selectors.get(selector);}
     addEventListener(type,listener){if(!this.listeners.has(type))this.listeners.set(type,[]);this.listeners.get(type).push(listener);}
     dispatchEvent(event){for(const listener of this.listeners.get(event.type)||[])listener(event);}
@@ -206,6 +207,66 @@ test('a click or a foreign pointer does not create history or commit another poi
     f.controller.begin(f.event());f.controller.move(f.event(500,330,{pointerId:2}));f.controller.end(f.event(500,330,{pointerId:2}));
     assert.equal(f.controller.active,true);assert.equal(f.transactions,0);f.controller.cancel();assert.equal(f.previews[1].restores,1);
   }finally{f.restore();}
+});
+
+test('base-branch comb batches drag input, keeps its full path and flushes before committing', () => {
+  const run = ({ deferred, cancel, renderOwned }) => {
+    const f = fixture();
+    try {
+      const placement = { id: 'LEAF', scale: 1, roll: 0 };
+      const unit = { size_m: 1, geometry: { position: [-.2, 0, -.1, .2, 1, .1] } };
+      const anchor = { position: new THREE.Vector3(), normal: new THREE.Vector3(1, 0, 0), tangent: new THREE.Vector3(1, 0, 0) };
+      const entry = baseBranchBrushEntry({}, unit, placement, anchor);
+      const initialTip = entry.displayLines[0][1].clone();
+      const frames = [];
+      let commits = 0, restores = 0, committed;
+      const preview = {
+        updateTransforms(transforms) {
+          frames.push(initialTip.clone().applyMatrix4(transforms.get(placement.id).matrix));
+        },
+        restore() { restores++; },
+      };
+      const mesh = {
+        deferStrokeInput: deferred,
+        entries: () => [entry],
+        summary: () => ({ selected: 1 }),
+        preview: () => preview,
+        commitPreview(updates, _label, livePreview) {
+          assert.equal(livePreview, preview);
+          assert.ok(frames.length, 'final live pose is available before handing off');
+          assert.equal(restores, 0, 'the preview remains in place until handoff');
+          commits++;
+          committed = updates.get(placement.id);
+        },
+      };
+      f.api.getMeshBrush = () => mesh;
+      f.api.flushDeferredBeforeRender = renderOwned;
+      f.controller.begin(f.event(450, 400));
+      for (const [x, y] of [[452, 380], [471, 360], [484, 377], [488, 392]]) f.controller.move(f.event(x, y));
+      assert.equal(frames.length, 0, 'drawing waits for the next frame');
+      if (deferred) assert.equal(f.controller.debug.units, 0, 'queued events do not run brush math before that frame');
+      if (renderOwned && !cancel) {
+        f.flush();
+        assert.equal(frames.length, 0, 'the independent animation callback cannot consume a renderer-owned stroke');
+        assert.equal(f.controller.flushFrame(false), true);
+        assert.equal(f.controller.flushFrame(false), false, 'a frame without new input does no preview work');
+        assert.equal(frames.length, 1, 'the new pose is available before rendering');
+        f.controller.refreshStrokeFeedback();
+      }
+      if (cancel) f.controller.cancel();
+      else f.controller.end(f.event(490, 398));
+      f.flush();
+      assert.equal(commits, cancel ? 0 : 1);
+      assert.equal(restores, cancel ? 1 : 0);
+      assert.equal(frames.length, cancel ? 0 : renderOwned ? 2 : 1);
+      assert.deepEqual(entry.displayLines[0][1].toArray(), initialTip.toArray());
+      return committed;
+    } finally { f.restore(); }
+  };
+  run({ deferred: true, cancel: true });
+  run({ deferred: true, cancel: true, renderOwned:true });
+  assert.deepEqual(run({ deferred: true }), run({ deferred: false }));
+  assert.deepEqual(run({ deferred: true, renderOwned:true }), run({ deferred: false }));
 });
 
 test('direction selector change cancels a live preview and preserves the current saved document and history',()=>{

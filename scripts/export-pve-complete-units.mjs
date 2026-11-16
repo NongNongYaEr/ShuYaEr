@@ -13,6 +13,7 @@ import { createHash } from 'node:crypto';
 import { packageTransaction } from './pve-package.mjs';
 import { checkPveGeometry } from './pve-geometry-quality.mjs';
 import { exportResolvedAssembly } from './export_branchforge_resolved_assembly.mjs';
+import { baseBranchAtlasRole } from '../web/base-branch-export-materials.js';
 import { exportVineComplete } from './export-pve-vine.mjs';
 import { createPveAtlas } from './pve-merged-atlas.mjs';
 import { generateFinalCompletePackage } from './pve-final-package.mjs';
@@ -26,6 +27,7 @@ const destination = path.resolve(option('--out'));
 if (!option('--project') || !option('--out')) throw Error('需要 --project 整树.branch.json --out 交付目录');
 const geometry = args.includes('--geometry');
 const radiusVariants = args.includes('--radius-variants');
+const allowGeometryCleanup = !args.includes('--require-cleanup-consent');
 const generatePackage = async (out, sourceBytes, progress) => {
 const qualityWarnings = [];
 const barkExporter = createPveBarkExporter(out);
@@ -55,7 +57,7 @@ if (authoring.mesh_units?.instances.length && (!geometry || radiusVariants || ar
 if (authoring.vine || authoring.surface_growth?.enabled) {
   if (authoring.mesh_units?.instances.length) throw Error('完整网格装配的 UE/PVE 导出需要整树承重枝');
   if (!geometry || radiusVariants || args.includes('--metadata-only')) throw Error('藤蔓完整包需要 --geometry，不支持半包或粗细变体模式');
-  return exportVineComplete({ tool, input, document: doc, sourceBytes, output: out, progress });
+  return exportVineComplete({ tool, input, document: doc, sourceBytes, output: out, progress, allowGeometryCleanup });
 }
 const library = authoring.branch_library || [];
 const instances = authoring.branch_instances || [];
@@ -65,7 +67,7 @@ if (geometry && !radiusVariants && !args.includes('--metadata-only')) {
   // an empty unit library is not evidence that this is an incomplete project.
   if (!authoring.branch_shape?.branches?.length && !authoring.mesh_units?.instances.length)
     throw Error('工程缺少可导出的承重骨架，请先完成树干整理或装配整树');
-  return generateFinalCompletePackage({ tool, input, document: doc, sourceBytes, output: out, progress });
+  return generateFinalCompletePackage({ tool, input, document: doc, sourceBytes, output: out, progress, allowGeometryCleanup });
 }
 if (!authoring.recipe.tags.includes('WHOLE_PLANT') || !library.length || !instances.length ||
     !authoring.branch_shape?.branches?.length) throw Error('工程不是已装配完整样本枝的整树');
@@ -216,7 +218,8 @@ try {
         barkExporter.capture(unit.group);
         unit.group.traverse(node => {
           if (!node.material) return;
-          if (atlas && !Array.isArray(node.material) && (node.material.name === 'M_Leaf' || node.material.sampleLeafMaterial)) {
+          if (atlas && !Array.isArray(node.material) && baseBranchAtlasRole(node) !== 'bark'
+              && (node.material.name === 'M_Leaf' || node.material.sampleLeafMaterial)) {
             const uv=node.geometry.getAttribute('uv');
             const texture=node.material.sampleLeafMaterial || unitAuthoring.leaf_material;
             for(let i=0;i<uv.count;i++) uv.setXY(i,...atlas.uv(texture,uv.getX(i),uv.getY(i)));
@@ -226,7 +229,7 @@ try {
             material.needsUpdate = true;
           }
         });
-        const bytes = Buffer.from(await exportGlb(unit.group, { connector, singleMesh: true }));
+        const bytes = Buffer.from(await exportGlb(unit.group, { connector, singleMesh: true, mergeUnitMaterials: false }));
         fs.writeFileSync(path.join(out, plan.glb), bytes);
         plan.glb_sha256 = sha(bytes);
         const barkBindings = barkExporter.glbBindings(bytes);
@@ -267,7 +270,8 @@ try {
 
 };
 if (geometry && !radiusVariants && !args.includes('--metadata-only')) {
-  await packageTransaction({ input, destination, statusPath: option('--status'), generate: generatePackage, keepHistory: args.includes('--keep-history') });
+  await packageTransaction({ input, destination, statusPath: option('--status'), generate: generatePackage,
+    keepHistory: args.includes('--keep-history'), expectedSourceSha256: option('--expected-source-sha256') });
 } else {
   console.log(JSON.stringify(await generatePackage(destination, fs.readFileSync(input), (stage, detail) => console.log(stage, detail))));
 }

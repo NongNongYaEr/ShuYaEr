@@ -1,21 +1,28 @@
 import {createBrushGeometry,inverseMatrix,projectBrushPoint,brushRay,brushOperation} from './brush-preview-geometry.js';
-import {cameraBasis} from './blender-navigation.js';
+import {cameraBasis,materialPointerAllowsEdit,materialViewportNavigationAction} from './blender-navigation.js';
 export function createBrushFeedback(api){
  const r=api.renderer,canvas=r.canvas,zone=canvas.parentElement,events=new AbortController(),ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg'),label=document.createElement('div');
  svg.id='brushFootprint';svg.classList.add('brush-footprint');svg.setAttribute('aria-hidden','true');label.id='brushFootprintLabel';label.className='brush-footprint-label';
  const paths={};for(const name of ['reference','outer-shadow','inner-shadow','outer','inner','cross']){const p=document.createElementNS(ns,'path');p.dataset.brushPath=name;svg.append(p);paths[name]=p;}zone.append(svg,label);
- let mesh=null,displayPositions=null,geometry=null,pointer=null,hover=false,keys={},navigating=false,down=false,anchor=null,modalBefore=false,frame=0,lastAt=0,lastKey='',state={visible:false},disposed=false;
+ let mesh=null,displayPositions=null,geometry=null,pointer=null,hover=false,keys={},navigationButton=null,down=false,anchor=null,modalBefore=false,frame=0,lastAt=0,lastKey='',state={visible:false},disposed=false;
  const listen=(el,type,fn,options={})=>el.addEventListener(type,fn,{...options,signal:events.signal}),hide=()=>{svg.style.display=label.style.display='none';canvas.classList.remove('brush-feedback-active');state={...state,visible:false};};hide();
- listen(canvas,'pointermove',e=>{if(!(e.buttons&4)&&!(r.emulateThreeButton&&(e.buttons&1)&&e.altKey))navigating=false;if(!(e.buttons&1))down=false;pointer={x:e.clientX,y:e.clientY};hover=true;keys={ctrlKey:e.ctrlKey,shiftKey:e.shiftKey,altKey:e.altKey};});
- listen(canvas,'lostpointercapture',()=>{navigating=down=false;lastKey='';});listen(canvas,'pointerenter',e=>{hover=true;pointer={x:e.clientX,y:e.clientY};});listen(canvas,'pointerleave',()=>{hover=false;});
- listen(canvas,'pointerdown',e=>{pointer={x:e.clientX,y:e.clientY};hover=true;keys={ctrlKey:e.ctrlKey,shiftKey:e.shiftKey,altKey:e.altKey};if(e.button===1||e.altKey)navigating=true;else if(e.button===0&&!api.modal())down=true;},{capture:true});
- for(const type of ['pointerup','pointercancel'])listen(window,type,()=>{navigating=down=false;lastKey='';},{capture:true});
- for(const type of ['keydown','keyup'])listen(document,type,e=>{keys={ctrlKey:e.ctrlKey,shiftKey:e.shiftKey,altKey:e.altKey};if(e.key==='Escape')down=false;if(api.modal()&&!modalBefore){anchor=pointer?{...pointer}:null;modalBefore=true;}lastKey='';});
- listen(window,'blur',()=>{hover=false;pointer=null;anchor=null;keys={};down=navigating=false;hide();});
+ const readModifiers=e=>({ctrlKey:e.ctrlKey,shiftKey:e.shiftKey,altKey:e.altKey,metaKey:e.metaKey});
+ const resetPointer=()=>{navigationButton=null;down=false;lastKey='';};
+ listen(canvas,'pointermove',e=>{if(navigationButton!==null&&!(e.buttons&[1,4,2][navigationButton]))navigationButton=null;if(!(e.buttons&1))down=false;pointer={x:e.clientX,y:e.clientY};hover=true;keys=readModifiers(e);});
+ listen(canvas,'lostpointercapture',resetPointer);listen(canvas,'pointerenter',e=>{hover=true;pointer={x:e.clientX,y:e.clientY};});listen(canvas,'pointerleave',()=>{hover=false;});
+ listen(canvas,'pointerdown',e=>{
+  pointer={x:e.clientX,y:e.clientY};hover=true;keys=readModifiers(e);
+  if(materialViewportNavigationAction(r,e))navigationButton=e.button;
+  else if(materialPointerAllowsEdit(e)&&!api.modal())down=true;
+ },{capture:true});
+ for(const type of ['pointerup','pointercancel'])listen(window,type,resetPointer,{capture:true});
+ for(const type of ['keydown','keyup'])listen(document,type,e=>{keys=readModifiers(e);if(e.key==='Escape')down=false;if(api.modal()&&!modalBefore){anchor=pointer?{...pointer}:null;modalBefore=true;}lastKey='';});
+ listen(window,'blur',()=>{hover=false;pointer=null;anchor=null;keys={};resetPointer();hide();});
  const line=(a,b)=>`M${a[0].toFixed(2)},${a[1].toFixed(2)}L${b[0].toFixed(2)},${b[1].toFixed(2)}`;
  function update(){
   const context=api.context(),modal=!!api.modal();if(modal&&!modalBefore)anchor=pointer?{...pointer}:null;if(!modal)anchor=null;modalBefore=modal;
-  if(!context||!r.model||!r.lastVP||api.busy()||navigating||keys.altKey||!hover&&!anchor){hide();state.reason=!context?'inactive':!r.model?'no-model':!r.lastVP?'no-frame':api.busy()?'busy':navigating?'navigation':keys.altKey?'alt':'outside';return;}
+  const navigating=navigationButton!==null,heldAlt=keys.altKey&&!keys.ctrlKey&&!keys.metaKey;
+  if(!context||!r.model||!r.lastVP||api.busy()||navigating||heldAlt||!hover&&!anchor){hide();state.reason=!context?'inactive':!r.model?'no-model':!r.lastVP?'no-frame':api.busy()?'busy':navigating?'navigation':heldAlt?'alt':'outside';return;}
   const source=api.source();if(!source){hide();return;}if(mesh!==source||displayPositions!==r.positions){geometry=createBrushGeometry(source,{positions:r.positions,indices:r.model.indices,min:r.model.min,height:r.model.height});mesh=source;displayPositions=r.positions;lastKey='';}
   api.syncControls?.();const rect=canvas.getBoundingClientRect(),position=anchor||pointer;if(!position||rect.width<=0||rect.height<=0){hide();return;}
   const key=JSON.stringify([position,keys,down,rect.left,rect.top,rect.width,rect.height,Array.from(r.lastVP),context,api.height(),modal]);if(key===lastKey&&state.visible)return;lastKey=key;

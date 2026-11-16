@@ -202,6 +202,8 @@ function Get-PlantUnitPath {
 . (Join-Path $script:AppDir 'scripts/unit-preparation-server.ps1')
 $script:AppearancePath = Join-Path $script:ConfigDir 'appearance.json'
 if ($env:BRANCHFORGE_SESSION_TEST_DIR) { $script:AppearancePath = Join-Path $script:SessionDir 'appearance.json' }
+$script:ViewportNavigationPath = Join-Path (Split-Path -Parent $script:AppearancePath) 'viewport-navigation.txt'
+$script:ViewportNavigationModes = @('blender', 'max', 'maya')
 
 function Confirm-ViewportLighting($Value) {
     if ($null -eq $Value) { return [ordered]@{ preset = 'default'; angle = 0 } }
@@ -255,10 +257,31 @@ try {
         $path = $context.Request.Url.AbsolutePath
         try {
             if(Invoke-MaterialHandoffRoute $context $path){continue}
+            if ($path -eq '/api/viewport-navigation' -and $context.Request.HttpMethod -eq 'GET') {
+                $mode = $null
+                if (Test-Path -LiteralPath $script:ViewportNavigationPath -PathType Leaf) {
+                    $value = ([string](Get-Content -LiteralPath $script:ViewportNavigationPath -Raw -Encoding UTF8)).Trim()
+                    if ($script:ViewportNavigationModes -ccontains $value) { $mode = $value }
+                }
+                Send-Json $context @{ success = $true; mode = $mode }; continue
+            }
+            if ($path -eq '/api/viewport-navigation' -and $context.Request.HttpMethod -eq 'PUT') {
+                try {
+                    $body = Read-RequestJson $context.Request
+                    if ($body.mode -isnot [string] -or $script:ViewportNavigationModes -cnotcontains $body.mode) {
+                        throw '无效的导航方式'
+                    }
+                } catch {
+                    Send-Json $context @{ success = $false; message = '无效的导航方式。' } 400; continue
+                }
+                $bytes = [Text.Encoding]::UTF8.GetBytes($body.mode)
+                $null = Write-AtomicBytes $script:ViewportNavigationPath $bytes
+                Send-Json $context @{ success = $true; mode = $body.mode }; continue
+            }
             if ($path -eq '/api/appearance' -and $context.Request.HttpMethod -eq 'GET') {
                 $saved = Test-Path -LiteralPath $script:AppearancePath
                 $appearance = if ($saved) { Confirm-AppearanceSettings (Get-Content -LiteralPath $script:AppearancePath -Raw -Encoding UTF8 | ConvertFrom-Json) }
-                    else { Confirm-AppearanceSettings @{ palette = 'graphite'; background = '#0b100d'; ground = '#101711' } }
+                    else { Confirm-AppearanceSettings @{ palette = 'graphite'; background = '#34383d'; ground = '#383d40' } }
                 Send-Json $context @{ success = $true; saved = $saved; settings = $appearance }; continue
             }
             if ($path -eq '/api/appearance' -and $context.Request.HttpMethod -eq 'POST') {
@@ -358,12 +381,36 @@ try {
                 if ($bytes.Length -gt 125829120) { throw '植物素材套装超过 120 MB' }
                 $json = [Text.Encoding]::UTF8.GetString($bytes)
                 $pack = $json | ConvertFrom-Json
-                if ($pack.format -ne 'BranchForgePlantUnits' -or $pack.version -ne 1 -or @($pack.units).Count -gt 64 -or -not [string]$pack.name) { throw '植物素材套装无效' }
+                $baseBranchCount = if ($null -eq $pack.base_branches) { 0 } else { @($pack.base_branches).Count }
+                $unitCount = @($pack.units).Count + $baseBranchCount
+                if ($pack.format -ne 'BranchForgePlantUnits' -or $pack.version -ne 1 -or $unitCount -gt 64 -or -not [string]$pack.name) { throw '植物素材套装无效' }
                 $target = Get-PlantUnitPath ([string]$pack.id)
                 $summaryTarget = Get-PlantUnitPath ([string]$pack.id) -Summary
-                $saved = Write-AtomicText $target $json
-                $summary = [ordered]@{ id = [string]$pack.id; name = [string]$pack.name; count = @($pack.units).Count; revision = [int]$pack.revision; local = $true }
-                $null = Write-AtomicText $summaryTarget ($summary | ConvertTo-Json -Compress)
+                $expectedRevision = [string]$context.Request.Headers['X-BranchForge-Expected-Revision']
+                $mutex = [Threading.Mutex]::new($false, ('Local\BranchForgePlantUnit_' + [IO.Path]::GetFileNameWithoutExtension($target)))
+                $locked = $false
+                try {
+                    try { $locked = $mutex.WaitOne(20000) } catch [Threading.AbandonedMutexException] { $locked = $true }
+                    if (-not $locked) { throw '套装正在保存，请稍后重试。' }
+                    if ($expectedRevision) {
+                        if ($expectedRevision -notmatch '^[0-9]{1,9}$') { throw '套装版本参数无效。' }
+                        $currentRevision = 0
+                        if (Test-Path -LiteralPath $target -PathType Leaf) {
+                            $previous = Get-Content -LiteralPath $target -Encoding UTF8 -Raw | ConvertFrom-Json
+                            $currentRevision = [Math]::Max(1, [int]$previous.revision)
+                        }
+                        if ([int]$expectedRevision -ne $currentRevision) {
+                            Send-Json $context @{ success=$false; message='套装已有新版，请读取库中新版后重试。' } 409; continue
+                        }
+                        if ([int]$pack.revision -lt 1 -or ($currentRevision -gt 0 -and [int]$pack.revision -ne ($currentRevision + 1))) { throw '套装版本须在当前版本上递增一次。' }
+                    }
+                    $saved = Write-AtomicBytes $target $bytes
+                    $summary = [ordered]@{ id = [string]$pack.id; name = [string]$pack.name; count = $unitCount; revision = [int]$pack.revision; local = $true }
+                    $null = Write-AtomicText $summaryTarget ($summary | ConvertTo-Json -Compress)
+                } finally {
+                    if ($locked) { $mutex.ReleaseMutex() }
+                    $mutex.Dispose()
+                }
                 Send-Json $context @{ success = $true; path = $saved }; continue
             }
             if ($context.Request.HttpMethod -eq "POST" -and $path -eq "/api/pick-output") {

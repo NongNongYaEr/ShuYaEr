@@ -11,13 +11,17 @@ import {runSculptBark} from './sculpt-bark-session.js';
 import {adoptLibraryMaterial} from './library-material-adoption.js';
 import {adoptFeaturedBark} from './featured-bark-adoption.js';
 import {createExportWorkspace} from './export-workspace.js';
-import {finalGLBRequest} from './export-presentation.js';
+import {exportUvState,finalGLBRequest,isOnlyMissingAO} from './export-presentation.js';
 import {applyDefaultImportMaterial} from './import-material-default.js';
+import {withDefaultRootFallback} from './default-material-style-a.js';
+import {withBuiltinRootMossFallback} from './effect-library.js';
 import {assertBasicMaterialExport,basicImportSettings} from './renderer-compatibility.js';
-import {prepareGeometryImport,inspectGeometry,geometryRepairSummary} from './geometry-repair.js';
+import {prepareGeometryImport,inspectGeometry,geometryRepairSummary,filterGeometryIndices} from './geometry-repair.js';
+import {filteredCheckpointMesh,prepareRepairedUVSource,rebindRepairedMaterialProject,remapUVIslandRules,restoreRepairedWorkingUV,survivingFaceMap,workspaceGeometry} from './geometry-repair-workspace.js';
 import {parseSourcePbrGLB,rasterSourcePbr} from './source-pbr.js';
 import {repairSourcePbrGLB} from './source-pbr-repair.js';
 import {prepareTreeAsset} from './model-preparation.js';
+import {writeGLB} from './glb-writer.js';
 import {createFlowFieldCacheClient} from './flow-field-cache-client.js';
 import {coalescedUpdate} from './coalesced-update.js';
 import {optimizePreparationMesh} from './model-preparation-mesh.js';
@@ -36,11 +40,14 @@ import {distributionDependencies} from './surface-distribution.js';
 import {packSurfaceRecipe,importSurfaceRecipe} from './surface-recipe.js';
 import {createSurfaceWorkbench} from './surface-workbench.js';
 import {createSurfaceStudio} from './surface-studio-ui.js';
+import {createImageDecalCache} from './image-decal-atlas.js';
+import {prepareImageDecal} from './image-decal-image.js';
+import {imageDecalsInSurface} from './image-decal-rules.js';
 import {applyLibraryCombination} from './material-combinations.js';
 import {syncLegacySurface} from './surface-effects.js';
 import {loadCoatingAssets} from './coating-assets.js';
 import {setupBlenderInput} from './blender-input.js';
-import {BLENDER_NAV_HINT} from './blender-navigation.js';
+import {MATERIAL_VIEWPORT_NAVIGATION_EVENT,materialViewportNavigationHint} from './blender-navigation.js';
 import {setupV040Shell} from './v040-shell.js';
 import {createBakedPreviewController} from './baked-preview-controller.js';
 import {loadLibraryMaterial} from './material-library-session.js';
@@ -81,7 +88,7 @@ import {SurfaceSession} from './surface-session.js';import {remapSurfaceData,REG
 import {encodeAO,decodeAO} from './ao-cache.js';
 import {createModuleApi} from './module-api.js';
 import {readComponentView,applyComponentView} from './component-view.js';
-import {prepareUvRevision,runConstraintWorker} from './uv-processing.js';
+import {prepareUvRevision,prepareUvWithFallback,runConstraintWorker} from './uv-processing.js';
 const $=id=>document.getElementById(id),defaults={scale:16,bump:.65,rough:.84,variation:.22,originalMix:0,tint:'#ffffff',mossEnabled:true,moss:.28,mossColor:'#465336',mossRough:.92,paintEnabled:true,paintHeight:.135,paintWear:.35,paintColor:'#e4e2d5',paintRough:.9,aoAmount:.85,seed:3};
 const ranges={scale:[.01,10000],bump:[0,2],rough:[.2,1],variation:[0,1],originalMix:[0,1],moss:[0,.85],mossRough:[.2,1],paintHeight:[0,.5],paintWear:[0,1],paintRough:[.2,1],aoAmount:[0,1],seed:[0,10000]};
 let exportWorkspace=null,renderer,model=null,settings={...defaults},selectedAsset='/assets/bark-albedo.png',busy=false,toastTimer,previewTimer,autosaveTimer,aoRecord=null,candidate=null,project=null,lastSavedRevision=null;
@@ -128,11 +135,35 @@ function syncBakedPreviewUI(state=bakedPreview?.state){if(!state)return;exportWo
 async function writeEffectPreset(value){return request('effects',{body:JSON.stringify(value)});}
 async function removeEffectPreset(id){return request('effects/'+id+'/delete',{method:'POST'});}
 async function restoreEffectPreset(id){return request('effects/'+id+'/restore',{method:'POST'});}
+const imageDecalPreviews=new Map();
+const imageDecalCache=createImageDecalCache(hash=>request('blobs/'+hash,{binary:true}),{onImage(hash,{width,height,rgba}){
+ if(imageDecalPreviews.has(hash))return;
+ const ratio=Math.min(1,128/Math.max(width,height)),canvas=document.createElement('canvas');
+ canvas.width=Math.max(1,Math.round(width*ratio));canvas.height=Math.max(1,Math.round(height*ratio));
+ const context=canvas.getContext('2d');
+ if(!context)return;
+ const preview=context.createImageData(canvas.width,canvas.height);
+ for(let y=0;y<preview.height;y++)for(let x=0;x<preview.width;x++){
+  const at=(Math.floor(y*height/preview.height)*width+Math.floor(x*width/preview.width))*4;
+  preview.data.set(rgba.subarray(at,at+4),(y*preview.width+x)*4);
+ }
+ context.putImageData(preview,0,0);
+ imageDecalPreviews.set(hash,canvas.toDataURL());
+ if(imageDecalPreviews.size>32)imageDecalPreviews.delete(imageDecalPreviews.keys().next().value);
+}});
+async function importImageDecalAsset(file){
+ const image=await prepareImageDecal(file);
+ const hash=await put(image.bytes);
+ imageDecalCache.remember(hash,{width:image.width,height:image.height,rgba:image.rgba});
+ const stem=String(file.name||'图片').replace(/\.[^.]+$/,'').replace(/[\p{Cc}]/gu,'').trim();
+ const name=Array.from(stem).slice(0,40).join('')||'图片';
+ return {version:1,hash,width:image.width,height:image.height,name};
+}
 function setupSurfaceStudio(){
  materialPaintWorkbench=createMaterialPaintWorkbench({painting:()=>materialPaintController?.drawing,document:()=>project,source:()=>sourceModel,working:()=>model,renderer:()=>renderer,failed:e=>toast(e.message,true)});
- surfaceWorkbench=createSurfaceWorkbench({document:()=>project,settings:()=>settings,source:()=>sourceModel,working:()=>model,renderer:()=>renderer,accepts:task=>gate.accepts(task),selectedEffect:()=>surfaceStudio?.selectedEffectId,queue:()=>updateSurfaceQueued(),recordCurvature:record=>{project.surface.analysis.curvature.preparedFor=record;commit();},changed:()=>surfaceStudio?.sync(),accepted:result=>{materialPaintWorkbench?.queue();surfaceError=null;surfaceStudio?.acceptMasks(result);}});
- materialPaintController=createMaterialPaintController({previewQuality:()=>materialPaintWorkbench.quality,setPreviewQuality:v=>watchMaterialUpdate(materialPaintWorkbench.setQuality(v)),stage:stage=>workspaceView.set({stage}),document:()=>project,source:()=>sourceModel,renderer:()=>renderer,busy:()=>busy||closingRequested,selected:()=>surfaceStudio?.selectedEffectId,live:()=>bakedPreview?.live(),mode,preview:v=>surfaceWorkbench.setPreview(v),notify:toast,changed:()=>surfaceStudio?.sync(),select:id=>surfaceStudio?.selectPaint(id),commit,finished:()=>watchMaterialUpdate(materialPaintWorkbench.queue({finished:true})),edit:(next,{commit:finish=false}={})=>{project=validateDocument(next);surfaceWorkbench.syncMaterial();if(finish)commit();updateSurfaceQueued();bakedPreview?.sync();}});
- surfaceStudio=createSurfaceStudio({setSourceSlot,compareSource,combination:applyMaterialCombination,sculptBark:editSculptBark,sculptMaterial:editSculptMaterial,featuredBark:editFeaturedBark,materialPaint:materialPaintController,currentPreview:()=>surfaceWorkbench.preview,currentPart:()=>selectedPart(),document:()=>project,settings:()=>settings,source:()=>sourceModel,renderer:()=>renderer,busy:()=>busy||closingRequested,analysis:()=>surfaceWorkbench.state,distributionList:()=>request('distributions'),distributionSave:value=>request('distributions',{body:JSON.stringify(value)}),distributionDelete:id=>request('distributions/'+id+'/delete',{method:'POST'}),distributionRestore:id=>request('distributions/'+id+'/restore',{method:'POST'}),libraryList:()=>request('effects'),libraryRead:id=>request('effects/'+id),librarySave:writeEffectPreset,libraryDelete:removeEffectPreset,libraryRestore:restoreEffectPreset,notify:toast,mode,live:()=>bakedPreview?.live(),preview:value=>surfaceWorkbench.setPreview(value),stage:stage=>workspaceView.set({stage}),syncParts:syncPartUI,stopParts:()=>{renderer.finishInteraction?.();partSuggestions?.stopEditing({hidePreview:true});if(renderer.tool==='part')renderer.tool='orbit';syncToolUI();syncPartUI();},commit,
+ surfaceWorkbench=createSurfaceWorkbench({imageDecals:imageDecalCache,document:()=>project,settings:()=>settings,source:()=>sourceModel,working:()=>model,renderer:()=>renderer,accepts:task=>gate.accepts(task),selectedEffect:()=>surfaceStudio?.selectedEffectId,progress:(message,task)=>{if(task)status(message);else processingFeedback?.backgroundProgress(message);},queue:()=>updateSurfaceQueued(),recordCurvature:record=>{project.surface.analysis.curvature.preparedFor=record;commit();},changed:()=>{surfaceStudio?.sync();exportWorkspace?.sync();},accepted:result=>{materialPaintWorkbench?.queue();surfaceError=null;surfaceStudio?.acceptMasks(result);}});
+ materialPaintController=createMaterialPaintController({updateViewportHelp:syncViewportHelp,previewQuality:()=>materialPaintWorkbench.quality,setPreviewQuality:v=>watchMaterialUpdate(materialPaintWorkbench.setQuality(v)),stage:stage=>workspaceView.set({stage}),document:()=>project,source:()=>sourceModel,renderer:()=>renderer,busy:()=>busy||closingRequested,selected:()=>surfaceStudio?.selectedEffectId,live:()=>bakedPreview?.live(),mode,preview:v=>surfaceWorkbench.setPreview(v),notify:toast,changed:()=>surfaceStudio?.sync(),select:id=>surfaceStudio?.selectPaint(id),commit,finished:()=>watchMaterialUpdate(materialPaintWorkbench.queue({finished:true})),edit:(next,{commit:finish=false}={})=>{project=validateDocument(next);surfaceWorkbench.syncMaterial();if(finish)commit();updateSurfaceQueued();bakedPreview?.sync();}});
+ surfaceStudio=createSurfaceStudio({loadImageDecal:importImageDecalAsset,imageDecalURL:hash=>imageDecalPreviews.get(hash),setSourceSlot,compareSource,combination:applyMaterialCombination,sculptBark:editSculptBark,sculptMaterial:editSculptMaterial,featuredBark:editFeaturedBark,materialPaint:materialPaintController,currentPreview:()=>surfaceWorkbench.preview,currentPart:()=>selectedPart(),document:()=>project,settings:()=>settings,source:()=>sourceModel,renderer:()=>renderer,busy:()=>busy||closingRequested,analysis:()=>surfaceWorkbench.state,burlPlacement:id=>surfaceWorkbench.burlPlacement(id),distributionList:()=>request('distributions'),distributionSave:value=>request('distributions',{body:JSON.stringify(value)}),distributionDelete:id=>request('distributions/'+id+'/delete',{method:'POST'}),distributionRestore:id=>request('distributions/'+id+'/restore',{method:'POST'}),libraryList:()=>request('effects'),libraryRead:id=>request('effects/'+id),librarySave:writeEffectPreset,libraryDelete:removeEffectPreset,libraryRestore:restoreEffectPreset,notify:toast,mode,live:()=>bakedPreview?.live(),preview:value=>surfaceWorkbench.setPreview(value),stage:stage=>workspaceView.set({stage}),syncParts:syncPartUI,stopParts:()=>{renderer.finishInteraction?.();partSuggestions?.stopEditing({hidePreview:true});if(renderer.tool==='part')renderer.tool='orbit';syncToolUI();syncPartUI();},commit,
  edit:(next,{commit:finish=true,restoreSettings}={})=>{const valid=validateDocument(next);project=valid;if(restoreSettings)settings=restoreSettings;surfaceWorkbench.syncMaterial();if(finish)commit();updateSurfaceQueued();bakedPreview?.sync();},
  microdetail:raw=>editMicrodetail(raw),
  base:(key,value,finish)=>{settings[key]=value;if(project?.sculptMaterial&&['normalStrength','barkReliefMm','reliefMm','detail'].includes(key))delete project.sculptMaterial;renderer.setSettings(settings);if(finish)commit();bakedPreview?.sync();},
@@ -161,13 +192,28 @@ function setupPartMaterials(){
  $('partMaterialSaveRecipe').onclick=savePartMaterialRecipe;
 }
 async function savePartMaterialRecipe(){if(busy||!project)return;const entry=project.partMaterials.find(entry=>entry.partId===selectedPartId);if(!entry)return;const task=gate.begin('part recipe');setBusy(true);try{const bytes=await Promise.all(['bark','height','roughness','normal'].map(channel=>entry.refs[channel]?request('blobs/'+entry.refs[channel],{binary:true}):null)),data=await packRecipe({settings:{...defaults,...entry.settings,scale:project.actualHeightMeters/entry.settings.physicalWidthMeters},layers:defaultLayers(),bark:new Uint8Array(bytes[0]),heightMap:bytes[1]&&new Uint8Array(bytes[1]),roughnessMap:bytes[2]&&new Uint8Array(bytes[2]),normalMap:bytes[3]&&new Uint8Array(bytes[3]),physicalWidthMeters:entry.settings.physicalWidthMeters,paintHeightMeters:0});if(!gate.accepts(task))throw abort();const url=URL.createObjectURL(new Blob([data])),link=document.createElement('a');link.href=url;link.download='部位树皮配方.treemat';link.click();setTimeout(()=>URL.revokeObjectURL(url),3000);toast('部位树皮配方已准备下载，不包含源面选区。');}catch(error){if(error.name!=='AbortError')toast(error.message,true);}finally{gate.finish(task);setBusy(false);}}
+function syncViewportHelp(){
+ const tool=renderer?.tool;
+ let editingHint='';
+ if(materialPaintController?.active)editingHint='直接绘制材质 · Ctrl 临时擦除 · F 半径 · Shift F 流量 · Esc 退出';
+ else if(tool==='part')editingHint='部位刷选完整面 · Ctrl 移除 · F 半径';
+ else if(tool==='flow')editingHint='两点校正 · 点起点和终点';
+ else if(tool==='uvSeam')editingHint='点边标记/切换 · Shift 连线 · Ctrl 擦除';
+ else if(tool==='mask'){
+  const operation={paint:'增加',erase:'擦除',smooth:'平滑'}[$('brushOperation').value]||'遮罩';
+  editingHint='左键'+operation+' · Ctrl 擦除 · F 半径 · Shift+F 强度';
+ }
+ $('viewportHelp').textContent=[editingHint,materialViewportNavigationHint()].filter(Boolean).join(' · ');
+}
+window.addEventListener(MATERIAL_VIEWPORT_NAVIGATION_EVENT,syncViewportHelp,{signal:appEvents.signal});
+syncViewportHelp();
 function selectedPart(){return project?.parts?.groups.find(group=>group.id===selectedPartId)||null;}
 function syncPartUI(){
  partSuggestions?.sync();const suggestionPreview=!!partSuggestions?.hasPreview;
  const groups=project?.parts?.groups||[];if(!groups.some(group=>group.id===selectedPartId))selectedPartId='';
  const optionsKey=JSON.stringify(groups.map(group=>[group.id,group.name]));if(optionsKey!==partOptionsKey){partOptionsKey=optionsKey;for(const [id,label]of [['partSelect','未选择部位'],['layerPart','全树（不限定部位）']]){const options=[['',label],...groups.map(group=>[group.id,group.name])].map(([value,text])=>{const option=document.createElement('option');option.value=value;option.textContent=text;return option;});$(id).replaceChildren(...options);}}
  const selected=selectedPart(),binding=project?.regions.find(region=>region.layer===$('maskLayer').value)?.partId||'',bound=groups.find(group=>group.id===binding),valid=!!project&&!!sourceModel&&!!model,within=valid&&model.indices.length/3<=250000;
- if(!selected&&renderer?.tool==='part'&&!partSuggestions?.editing){renderer.tool='orbit';renderer.finishInteraction?.();syncToolUI();$('viewportHelp').textContent=BLENDER_NAV_HINT;}
+ if(!selected&&renderer?.tool==='part'&&!partSuggestions?.editing){renderer.tool='orbit';renderer.finishInteraction?.();syncToolUI();syncViewportHelp();}
  $('partSelect').value=selectedPartId;$('layerPart').value=binding;$('partName').value=selected?.name||'';$('partSummary').textContent=selected?`${selected.faces.length.toLocaleString()} 个源三角面 · 当前层${bound?'限定到“'+bound.name+'”':'未限定部位'}`:'先新建部位，再刷选或从UV图加入。';
  $('contextPart').textContent=suggestionPreview?'候选部位：'+partSuggestions.previewName+'（未采用）':'选中部位：'+(selected?.name||'无');$('layerPartNote').textContent=project?.maskMode==='vertex'?'部位范围需使用像素模式；旧顶点遮罩不能表示精确的面边界。':bound?'当前层只作用于“'+bound.name+'”，并与下方高度范围、手绘遮罩相交。':'当前层未按部位限制；紫色仅表示当前选区。';
  $('contextTargetPart').textContent='目标部位：'+(bound?.name||'全树');syncPartRendering();syncPartMaterialUI();
@@ -188,7 +234,7 @@ function setupParts(){
  $('deletePart').onclick=()=>{if(project&&(project.regions.some(region=>region.partId===selectedPartId)||project.surface.areas.some(a=>a.partId===selectedPartId)))return toast('请先解除图层对这个部位的引用。',true);editPart(parts=>{parts.groups=parts.groups.filter(group=>group.id!==selectedPartId);});};
  $('layerPart').onchange=()=>{if(busy||!project||project.maskMode!=='pixel')return;renderer.finishInteraction?.();const r=region(),id=$('layerPart').value;if(id)r.partId=id;else delete r.partId;commit();syncPartUI();updateSurfaceQueued();};
  $('showPartSelection').onchange=()=>{renderer.showPartOverlay=!!partSuggestions?.hasPreview||$('showPartSelection').checked;renderer.dirty=true;};
- $('partTool').onclick=()=>{if(busy||!selectedPart())return;renderer.finishInteraction?.();partSuggestions?.stopEditing({hidePreview:true});renderer.tool=renderer.tool==='part'?'orbit':'part';$('viewportHelp').textContent=renderer.tool==='part'?'部位刷选完整面 · Ctrl 移除 · 中键旋转 · Shift+中键平移 · F 半径':BLENDER_NAV_HINT;syncToolUI();syncPartUI();};
+ $('partTool').onclick=()=>{if(busy||!selectedPart())return;renderer.finishInteraction?.();partSuggestions?.stopEditing({hidePreview:true});renderer.tool=renderer.tool==='part'?'orbit':'part';syncViewportHelp();syncToolUI();syncPartUI();};
  renderer.onPartPaintStart=()=>{partGesture=project&&{id:project.id,parts:structuredClone(project.parts)};partSuggestions?.beginStroke();};
  renderer.onPartPaintCancel=()=>{if(partSuggestions?.editing){partSuggestions.cancelStroke();partGesture=null;return;}if(partGesture&&project?.id===partGesture.id&&partStrokeDirty){project=validateDocument({...project,parts:partGesture.parts});renderer.setPartBindings(project.parts,project.partMaterials);partStrokeDirty=false;syncPartUI();refreshUV();updateSurfaceQueued();}partGesture=null;};
  renderer.onPartPaint=(hit,event)=>{if(busy)return;if(partSuggestions?.paint(hit,event))return;if(!selectedPart())return;try{const bary=hit.bary.map(v=>Math.max(0,v)),sum=bary.reduce((a,b)=>a+b,0),faces=selectPartBrush(sourceTopology(),{face:hit.face,bary:bary.map(v=>v/sum)},Number($('partBrushRadius').value),project.actualHeightMeters);applyPartFaces(faces,{remove:event.ctrlKey,gesture:true});}catch(error){toast(error.message,true);}};
@@ -221,7 +267,7 @@ function syncScopeUI(){
 function changeScope(scope){if(busy||!project)return;renderer.finishInteraction?.();try{scope=validateScope(scope);const r=region();if(scope)r.scope=scope;else delete r.scope;commit();syncScopeUI();updateSurfaceQueued();}catch(e){syncScopeUI();toast(e.message,true);}}
 function selectEditingLayer(id,{scroll=false}={}){if(busy||!REGION_LAYERS.includes(id))return;renderer.finishInteraction?.();$('maskLayer').value=id;syncMaskUI();syncScopeUI();if(scroll){workspaceView.set({stage:'material'});const section={moss:'moss',paint:'paint',aging:'bark',lichen:'weather',dirt:'weather',wet:'weather'}[id];document.body.classList.add('controls-open');$('toggleControls').setAttribute('aria-expanded','true');$('section-'+section).scrollIntoView({behavior:'smooth',block:'start'});}}
 function setupWorkspace(){
- workspaceView=new WorkspaceView({root:document.body,finishInteraction:()=>renderer.finishInteraction?.(),getTool:()=>renderer.tool,exitTool:()=>{renderer.tool='orbit';flowPickStart=null;lastSeamEdge=null;syncToolUI();$('viewportHelp').textContent=BLENDER_NAV_HINT;},changed:state=>{$('workspaceHint').textContent=STAGE_LABELS[state.stage]+' · '+(state.mode==='quick'?'主要参数；精修规则仍保留':'展开接缝、画笔、流向和图层通道');syncToolUI();partSuggestions?.workspaceChanged();surfaceStudio?.stopPaint();if(state.catalog==='base')surfaceStudio?.showBaseMaterials();surfaceStudio?.sync();exportWorkspace?.workspaceChanged(state);}});
+ workspaceView=new WorkspaceView({root:document.body,finishInteraction:()=>renderer.finishInteraction?.(),getTool:()=>renderer.tool,exitTool:()=>{renderer.tool='orbit';flowPickStart=null;lastSeamEdge=null;syncToolUI();syncViewportHelp();},changed:state=>{$('workspaceHint').textContent=STAGE_LABELS[state.stage]+' · '+(state.mode==='quick'?'主要参数；精修规则仍保留':'展开接缝、画笔、流向和图层通道');syncToolUI();partSuggestions?.workspaceChanged();surfaceStudio?.stopPaint();if(state.catalog==='base')surfaceStudio?.showBaseMaterials();surfaceStudio?.sync();exportWorkspace?.workspaceChanged(state);}});
  $('workspaceMode').onchange=e=>{if(!busy)workspaceView.set({mode:e.target.value});};
  for(const e of document.querySelectorAll('[data-stage-button],[data-go-stage]'))e.onclick=()=>{if(!busy){workspaceView.set({stage:e.dataset.stageButton||e.dataset.goStage});if(e.hasAttribute('data-open-material-base'))surfaceStudio?.showBaseMaterials();}};
  for(const e of document.querySelectorAll('[data-layer-choice]'))e.onclick=()=>selectEditingLayer(e.dataset.layerChoice,{scroll:true});
@@ -264,11 +310,26 @@ const treeUvFields={refitJoins:'treeUvRefit',algorithm:'treeUvAlgorithm',profile
 function syncTreeUvUI(){const config=project?.treeUV;$('treeUV').disabled=busy||!model;for(const [key,id]of Object.entries(treeUvFields)){const el=$(id);el.disabled=busy||!config;if(config){if(key==='refitJoins')el.checked=config[key];else el.value=key==='rootHeight'?config[key]*100:config[key];}}$('treeUvLegacySettings').hidden=config?.algorithm!=='legacy';$('treeUvStructureSettings').hidden=config?.algorithm==='legacy';}
 function changeTreeUvOptions(){if(busy||!project)return;try{const next={version:1};for(const [key,id]of Object.entries(treeUvFields))next[key]=key==='refitJoins'?$(id).checked:['quality','algorithm','profile'].includes(key)?$(id).value:Number($(id).value)/(key==='rootHeight'?100:1);if(next.algorithm==='regions'&&project.treeUV.algorithm!=='regions')Object.assign(next,{profile:'continuous',quality:'fine',structureScaleCm:35,densityRatio:2.25,maxAspect:12,refitJoins:true});project.treeUV=validateTreeUvOptions(next);if(next.algorithm==='regions')syncTreeUvUI();if(candidate?.mode==='tree')candidate=null;commit();refreshUV();}catch(e){toast(e.message,true);syncTreeUvUI();}}
 function treeUvPreset(){const presets={balanced:{structureScaleCm:35,densityRatio:1.5,maxAspect:8},continuous:{structureScaleCm:35,densityRatio:2.25,maxAspect:12,quality:'fine'},uniform:{structureScaleCm:25,densityRatio:1.2,maxAspect:6}},p=presets[$('treeUvProfile').value];if(p)for(const [key,value]of Object.entries(p))$(treeUvFields[key]).value=value;changeTreeUvOptions();}
-function uvDependencies(task,{source=sourceModel,output=null}={}){return{trees:(input,options)=>createTreeUvSession(input,options,{source,setCancel:cancel=>task.cancel=cancel,onProgress:p=>status(p.phase,p.progress)}),native:(input,mode)=>nativeResult(input,mode,task,output),guides:(input,options)=>createGuideWorkerSession(input,options,{setCancel:cancel=>task.cancel=cancel,onProgress:p=>status('保护展开与指定接缝打包…',p*.8)}),pack:(input,options)=>runConstraintWorker(input,options,{setCancel:cancel=>task.cancel=cancel,onProgress:p=>status(options.contourFill?'移动小岛、填补排布空隙…':options.shapeCoverage?'保留接缝、优化岛形…':options.repairSourceOverlap?'分离重叠面并整理工作 UV…':'保留锁定位置、分配像素…',p*.8)})};}
+function uvDependencies(task,{source=sourceModel,output=null}={}){
+ const setCancel=cancel=>task.cancel=cancel;
+ const pack=(input,options,label)=>runConstraintWorker(input,options,{setCancel,onProgress:p=>status(label,p*.8)});
+ return {
+  trees:(input,options)=>createTreeUvSession(input,options,{source,setCancel,onProgress:p=>status(p.phase,p.progress)}),
+  native:(input,mode)=>nativeResult(input,mode,task,output),
+  guides:(input,options)=>createGuideWorkerSession(input,options,{setCancel,onProgress:p=>status('保护展开与指定接缝打包…',p*.8)}),
+  pack:(input,options)=>pack(input,options,options.contourFill?'移动小岛、填补排布空隙…':options.shapeCoverage?'保留接缝、优化岛形…':options.repairSourceOverlap?'分离重叠面并整理工作 UV…':'保留锁定位置、分配像素…'),
+  projectUv:(input,{resolution,padding})=>pack(input,{resolution,padding,projectFromGeometry:true},'按表面方向分区并排布备用 UV…')
+ };
+}
 let surfacePending=Promise.resolve(),surfaceError=null;
 const surfaceUpdates=coalescedUpdate(async()=>{const source=sourceModel;try{materialPaintWorkbench?.queue();await updateSurface();await materialPaintWorkbench?.wait();}catch(e){if(source===sourceModel&&e.name!=='AbortError'){surfaceError=e;toast(e.message,true);}}});
 function watchMaterialUpdate(promise){if(model)processingFeedback?.background(promise,'正在更新材质覆盖',{error:()=>surfaceError?.message||surfaceWorkbench?.state.error||materialPaintWorkbench?.state.error||null});return promise;}
-function updateSurfaceQueued(){bakedPreview?.sync();surfacePending=surfaceUpdates.queue();return watchMaterialUpdate(surfacePending);}
+function updateSurfaceQueued(){
+ bakedPreview?.sync();
+ const diagnostic=model?.diagnostic;
+ if(diagnostic?.triangles&&diagnostic.zeroUvFaces===diagnostic.triangles)return surfacePending=Promise.resolve();
+ surfacePending=surfaceUpdates.queue();return watchMaterialUpdate(surfacePending);
+}
 const flowFieldCache=createFlowFieldCacheClient(request);
 async function prepareSurface(source,doc,task,{preparedFlow=null}={}){validatePartSource(doc?.parts,source);if(!preparedFlow&&doc?.barkFlow?.version===5)preparedFlow=await flowFieldCache.load(source,doc,()=>gate.accepts(task)&&!appDisposed);if(!gate.accepts(task))throw abort();const session=new SurfaceSession();task.cancel=()=>session.dispose();try{const data=await session.request({mesh:source,regions:doc?.maskMode==='vertex'?doc.regions:[],actualHeightMeters:doc?.actualHeightMeters||10,barkFlow:preparedFlow?null:doc?.barkFlow,directionCorrections:doc?.directionCorrections,flowTransition:doc?.flowTransition});if(!gate.accepts(task))throw abort();source.growth=data.growth;source.barkFlow=preparedFlow||data.flow||null;source.barkFlowKey=flowKey(doc);source.regionMasks=data.masks;if(source.barkFlow&&!source.barkFlow.cacheHit)await flowFieldCache.save(source,doc,source.barkFlow,()=>gate.accepts(task)&&!appDisposed);if(!gate.accepts(task))throw abort();return session;}catch(e){session.dispose();throw e;}}
 async function updateSurface({size=1024,task=null}={}){
@@ -288,7 +349,7 @@ async function updateSurface({size=1024,task=null}={}){
 function region(layer=$('maskLayer').value){let r=project.regions.find(r=>r.layer===layer);if(!r){r={layer,mode:'all',strokes:[]};project.regions.push(r);}return r;}
 function syncLayerUI(){if(!project)return;const id=$('maskLayer').value,l=project.layers.find(l=>l.id===id),index=project.layers.indexOf(l);$('layerOrder').textContent=project.layers.map(l=>LAYER_NAMES[l.id]).join(' → ');$('layerEnabled').checked=l.enabled;$('layerLocked').checked=l.locked;$('layerOpacity').value=l.opacity;$('layerSeed').value=l.seed;for(const c of ['color','roughness','height','ao']){const e=$('layerChannel-'+c),supported=LAYER_CHANNELS[l.id].includes(c);e.checked=supported&&(l.channels[c]??true);e.disabled=busy||!supported;e.title=supported?'':'此层不影响这个通道';}$('layerMoveDown').disabled=busy||index===0;$('layerMoveUp').disabled=busy||index===project.layers.length-1;}
 function changeLayer(change){if(!project||busy)return;change(project.layers.find(l=>l.id===$('maskLayer').value));commit();renderer.setLayers(project.layers);syncLayerUI();apply();}
-function syncMaskUI(){if(!project)return;const layer=$('maskLayer').value,r=project.regions.find(r=>r.layer===layer);$('maskMode').value=r?.mode||'all';renderer.maskChannel=Math.max(0,REGION_LAYERS.indexOf(layer));renderer.dirty=true;$('maskCount').textContent=(r?.strokes.length||0)+' / 512 遮罩采样点';$('maskPrecision').value=project.maskMode;const smooth=project.regions.some(r=>r.strokes.some(s=>s.operation==='smooth'));$('vertexPrecisionOption').disabled=!!smooth||project.regions.some(r=>r.partId);$('smoothBrushOption').disabled=project.maskMode!=='pixel';if(project.maskMode!=='pixel'&&$('brushOperation').value==='smooth')$('brushOperation').value='paint';if(renderer.tool==='mask')$('viewportHelp').textContent='左键'+({paint:'增加',erase:'擦除',smooth:'平滑'}[$('brushOperation').value])+' · Ctrl 擦除 · 中键旋转 · Shift+中键平移 · F 半径 · Shift+F 强度';syncLayerUI();syncScopeUI();syncPartUI();syncToolUI();}
+function syncMaskUI(){if(!project)return;const layer=$('maskLayer').value,r=project.regions.find(r=>r.layer===layer);$('maskMode').value=r?.mode||'all';renderer.maskChannel=Math.max(0,REGION_LAYERS.indexOf(layer));renderer.dirty=true;$('maskCount').textContent=(r?.strokes.length||0)+' / 512 遮罩采样点';$('maskPrecision').value=project.maskMode;const smooth=project.regions.some(r=>r.strokes.some(s=>s.operation==='smooth'));$('vertexPrecisionOption').disabled=!!smooth||project.regions.some(r=>r.partId);$('smoothBrushOption').disabled=project.maskMode!=='pixel';if(project.maskMode!=='pixel'&&$('brushOperation').value==='smooth')$('brushOperation').value='paint';if(renderer.tool==='mask')syncViewportHelp();syncLayerUI();syncScopeUI();syncPartUI();syncToolUI();}
 const abort=()=>{const e=Error('任务已取消。');e.name='AbortError';return e;},tick=()=>new Promise(r=>requestAnimationFrame(()=>setTimeout(r,0)));
 function status(s,p){if(appDisposed)return;preparationUI?.taskStatus(s,p);processingFeedback?.report(s,p);$('status').textContent=s;$('progress').style.width=(Number.isFinite(p)?Math.max(0,Math.min(1,p)):0)*100+'%';}
 function toast(s,error=false){if(appDisposed)return;clearTimeout(toastTimer);$('toast').textContent=s;$('toast').className='toast'+(error?' error':'');toastTimer=setTimeout(()=>$('toast').classList.add('hidden'),error?11000:6500);}
@@ -304,21 +365,66 @@ let previewRevision=0;
 async function previewMaps(){const revision=++previewRevision,input=model;if(appDisposed||!model||busy||closingRequested||exportWorkspace?.showingFinal||model.diagnostic?.zeroUvFaces===model.indices.length/3)return;const size=workspaceView?.state.stage==='export'?512:256,cancelled=()=>appDisposed||closingRequested||busy||model!==input||revision!==previewRevision||exportWorkspace?.showingFinal;try{const maps=[];for(const pass of [0,1,2]){if(cancelled())return;maps.push(await renderer.bakeAsync(pass,size,{shouldCancel:cancelled}));}if(cancelled())return;for(const [i,id]of ['mapColor','mapNormal','mapORM'].entries()){const canvas=$(id);canvas.width=canvas.height=size;canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(maps[i].buffer),size,size),0,0);}exportWorkspace?.noteDraft(size);}catch(e){if(!cancelled()&&e.name!=='AbortError')toast(e.message,true);}}
 function mode(value){renderer.mode=value;renderer.dirty=true;document.querySelectorAll('[data-mode]').forEach(e=>e.classList.toggle('active',Number(e.dataset.mode)===value));}
 function diagnostics(next,output=project?.output||{resolution:2048,padding:3}){const d=attachClearance(next,analyzeUV(next,{resolution:output.resolution,actualHeightMeters:project?.actualHeightMeters||10,includeFaces:true}),output);d.treeStrips=(next.packing||(next===model?project?.uvPacking:null))?.treeStrips;d.packingSummary=next.packing||(next===model?project?.uvPacking:null);return d;}
-function showModel(next,{reset=true,sourceOverlay=null}={}){renderer.acceptSourceOverlay(sourceOverlay);if(flowCandidate?.source!==sourceModel)flowCandidate=null;flowPickStart=null;flowLineKey=null;flowFieldKey=sourceModel?.barkFlowKey||null;partOverlayKey=null;partStrokeDirty=false;next.barkFlow=remapFlow(sourceModel?.barkFlow,next);surfaceWorkbench?.reset();materialPaintWorkbench?.reset();pixelSession?.dispose();pixelSession=null;model=next;strokeDirty=false;if(sourceTopologyRecord?.source!==sourceModel)sourceTopologyRecord=null;guideSignature=null;lastSeamEdge=null;if(sourceModel?.ao)next.ao=remapSurfaceData(sourceModel.ao,next,1);if(sourceModel?.regionMasks){next.regionMasks=remapSurfaceData(sourceModel.regionMasks,next,6);next.growth=remapSurfaceData(sourceModel.growth,next,3);}const camera=reset?null:{yaw:renderer.yaw,pitch:renderer.pitch,radius:renderer.radius,pan:[...renderer.pan]};renderer.setModel(next);if(camera)Object.assign(renderer,camera);model.diagnostic=diagnostics(next);$('modelName').textContent=next.name;$('modelStats').textContent=`${(next.indices.length/3).toLocaleString()} 三角面 · ${(next.pos.length/3).toLocaleString()} 顶点`+(next.normalRepair?.correctedVertices?' · 已修复 '+next.normalRepair.correctedVertices+' 个异常法线':'');$('emptyState').classList.add('hidden');refreshUV();apply();updateSurfaceQueued();}
-function refreshUV(){if(!model)return;pruneClearances();queueClearance(model);if(candidate)queueClearance(candidate.mesh);model.diagnostic=diagnostics(model);$('uvInfo').textContent=`UV ${model.diagnostic.islands} 岛 · ${(model.diagnostic.coverage*100).toFixed(1)}%`;$('currentUVStats').textContent=describeUV(model.diagnostic);const safety=model.diagnostic.clearance;$('uvSafetyNote').textContent=safety?.status==='measured'&&!safety.safe?(model.uvSHA256===model.sourceUvSHA256?'原UV存在间距/重叠风险；仍可保留UV出图并记录风险，也可自动重展。':'当前新UV未达到扩边/重叠要求，暂不能导出；请检查红色区域、解除冲突保护或重新重展。'):'实测按基础像素扩边检查；引擎mip、过滤与近中景观感仍须验收。';syncNearQualityUI();drawUV($('currentUV'),model,model.diagnostic,{selectedIsland:selectedUVIsland,lockedIslands:readUVRules().pins,protectedFaces:readCutRules().protectedFaces,seamMarks:readCutRules().seams,selectedFaces:partSuggestions?.previewFaces??(selectedPart()?.faces||[]),clearance:$('showClearance').checked?model.clearanceReport:null});syncUVSelection();syncPartUI();$('uvRevision').textContent=`${project?.uvMode||'original'} · UV v${project?.uvRevision||0}`;if(candidate){candidate.diagnostic=diagnostics(candidate.mesh,candidate.output||project.output);$('candidateUVStats').textContent=describeUV(candidate.diagnostic);drawUV($('candidateUV'),candidate.mesh,candidate.diagnostic,{highlight:true,lockedIslands:candidate.mesh.packing?.pinnedIslands||[],protectedFaces:readCutRules().protectedFaces,seamMarks:readCutRules().seams,selectedFaces:partSuggestions?.previewFaces??(selectedPart()?.faces||[]),clearance:$('showClearance').checked?candidate.mesh.clearanceReport:null});}else{$('candidateUVStats').textContent='运行重排或重展后，先比较再采用。';$('candidateUV').getContext('2d').clearRect(0,0,512,512);}}
+function showModel(next,{reset=true,sourceOverlay=null}={}){renderer.acceptSourceOverlay(sourceOverlay);if(flowCandidate?.source!==sourceModel)flowCandidate=null;flowPickStart=null;flowLineKey=null;flowFieldKey=sourceModel?.barkFlowKey||null;partOverlayKey=null;partStrokeDirty=false;next.barkFlow=remapFlow(sourceModel?.barkFlow,next);surfaceWorkbench?.reset();materialPaintWorkbench?.reset();pixelSession?.dispose();pixelSession=null;model=next;strokeDirty=false;if(sourceTopologyRecord?.source!==sourceModel)sourceTopologyRecord=null;guideSignature=null;lastSeamEdge=null;if(sourceModel?.ao)next.ao=remapSurfaceData(sourceModel.ao,next,1);if(sourceModel?.regionMasks){next.regionMasks=remapSurfaceData(sourceModel.regionMasks,next,6);next.growth=remapSurfaceData(sourceModel.growth,next,3);}const camera=reset?null:{yaw:renderer.yaw,pitch:renderer.pitch,radius:renderer.radius,pan:[...renderer.pan]};renderer.setModel(next);
+ // Wait for masks belonging to the current model before drawing authored effects.
+ renderer.setSurfaceStack(project?.surface?.active?{active:true,effects:[]}:null);
+ if(camera)Object.assign(renderer,camera);model.diagnostic=diagnostics(next);$('modelName').textContent=next.name;$('modelStats').textContent=`${(next.indices.length/3).toLocaleString()} 三角面 · ${(next.pos.length/3).toLocaleString()} 顶点`+(next.normalRepair?.correctedVertices?' · 已修复 '+next.normalRepair.correctedVertices+' 个异常法线':'');$('emptyState').classList.add('hidden');refreshUV();apply();updateSurfaceQueued();}
+function refreshUV(){if(!model)return;pruneClearances();queueClearance(model);if(candidate)queueClearance(candidate.mesh);model.diagnostic=diagnostics(model);$('uvInfo').textContent=`UV ${model.diagnostic.islands} 岛 · ${(model.diagnostic.coverage*100).toFixed(1)}%`;$('currentUVStats').textContent=describeUV(model.diagnostic);const safety=model.diagnostic.clearance;$('uvSafetyNote').textContent=safety?.status==='measured'&&!safety.safe?(model.uvSHA256===model.sourceUvSHA256?'原UV存在间距/重叠风险；仍可保留UV出图并记录风险，也可自动重展。':'当前新UV未达到扩边/重叠要求，暂不能导出；请检查红色区域、解除冲突保护或重新重展。'):'实测按基础像素扩边检查；引擎mip、过滤与近中景观感仍须验收。';syncNearQualityUI();drawUV($('currentUV'),model,model.diagnostic,{selectedIsland:selectedUVIsland,lockedIslands:readUVRules().pins,protectedFaces:readCutRules().protectedFaces,seamMarks:readCutRules().seams,selectedFaces:partSuggestions?.previewFaces??(selectedPart()?.faces||[]),clearance:$('showClearance').checked?model.clearanceReport:null});syncUVSelection();syncPartUI();$('uvRevision').textContent=`${project?.uvMode||'original'} · UV v${project?.uvRevision||0}`;if(candidate){candidate.diagnostic=diagnostics(candidate.mesh,candidate.output||project.output);$('candidateUVStats').textContent=describeUV(candidate.diagnostic);drawUV($('candidateUV'),candidate.mesh,candidate.diagnostic,{highlight:true,lockedIslands:candidate.mesh.packing?.pinnedIslands||[],protectedFaces:readCutRules().protectedFaces,seamMarks:readCutRules().seams,selectedFaces:partSuggestions?.previewFaces??(selectedPart()?.faces||[]),clearance:$('showClearance').checked?candidate.mesh.clearanceReport:null});}else{$('candidateUVStats').textContent='运行重排或重展后，先比较再采用。';$('candidateUV').getContext('2d').clearRect(0,0,512,512);}exportWorkspace?.sync();}
 function commit(){if(appDisposed||!project)return;project={...project,settings:structuredClone(settings),output:{resolution:Number($('resolution').value),padding:Number($('padding').value),includeModel:!!project.output.includeModel}};project.surface=syncLegacySurface(project);const changed=history.commit(project);project=history.value;if(changed){$('downloadResult').classList.add('hidden');$('exportState').textContent='工程已更新 · 需重新导出';}setBusy(busy);scheduleAutosave();}
 function scheduleAutosave(){if(appDisposed||!project||closingRequested)return;clearTimeout(autosaveTimer);const snapshot=persistence.capture(project);autosaveTimer=setTimeout(()=>request('projects',{body:JSON.stringify({...snapshot,autosave:true})}).then(result=>{if(!appDisposed&&!result.stale&&persistence.isCurrent(snapshot,project?.id))$('projectState').textContent='已自动恢复保存';}).catch(e=>{if(!appDisposed&&persistence.isCurrent(snapshot,project?.id)){$('projectState').textContent='恢复保存失败';toast(e.message,true);}}),900);}
 async function persistCurrentDraft({checkpoint=false}={}){if(!project||appDisposed)return;commit();clearTimeout(autosaveTimer);const snapshot=persistence.capture(project),result=await request('projects',{body:JSON.stringify({...snapshot,autosave:true,checkpoint})});if(!appDisposed&&!result.stale&&persistence.isCurrent(snapshot,project?.id))$('projectState').textContent=checkpoint?'已留存切换前版本':'恢复点已保存';}
 async function nativeResult(input,mode,task,output=null){const started=await request(`uv/jobs?mode=${mode}&resolution=${output?.resolution??$('resolution').value}&padding=${output?.padding??$('padding').value}`,{body:encodeMeshInput(input)}),cancel=()=>request('uv/jobs/'+started.id+'/cancel',{method:'POST',keepalive:true}).catch(()=>{});task.cancel=cancel;if(!gate.accepts(task)){cancel();throw abort();}for(;;){if(!gate.accepts(task))throw abort();const state=await request('uv/jobs/'+started.id);if(!gate.accepts(task))throw abort();status((mode==='repack'?'重排 UV':mode==='unwrap'?'自动重展 UV':'计算 Mikk 切线')+' · '+Math.round(state.progress*100)+'%',state.progress);if(state.state==='complete'){const bytes=await request('uv/jobs/'+started.id+'/result',{binary:true});if(!gate.accepts(task))throw abort();return decodeUvResult(bytes);}if(state.state==='failed')throw Error(state.error);if(state.state==='cancelled')throw abort();await new Promise(r=>setTimeout(r,120));}}
 async function submitExport(body,task){const j=await request('export/jobs',{body}),cancel=()=>request('export/jobs/'+j.id+'/cancel',{method:'POST',keepalive:true});task.cancel=()=>cancel().catch(()=>{});for(;;){const state=gate.accepts(task)?await request('export/jobs/'+j.id):await cancel();if(state.state==='complete')return {...state.result,completedBeforeCancellation:!gate.accepts(task)};if(!gate.accepts(task)||state.state==='cancelled')throw abort();if(state.state==='failed')throw Error(state.error);await new Promise(r=>setTimeout(r,150));}}
-async function confirmModelNormalRepair(source,name,task){
- if(!source.normalRepair?.correctedVertices&&!source.geometryRepair?.removedFaces)return true;
- const dialog=$('modelRepairDialog'),accept=$('modelRepairConfirm'),cancel=$('modelRepairCancel');accept.textContent=source.geometryRepair?.reprepare?'修复并重新准备':'修复并导入';cancel.textContent=source.geometryRepair?.reprepare?'取消':'取消导入';
- $('modelRepairFile').textContent=name;const geometry=source.geometryRepair,normalCount=source.normalRepair?.correctedVertices||0;$('modelRepairSummary').textContent=[geometry?.removedFaces?'检测到 '+geometry.removedFaces+' 个零面积/共线三角面，将仅清理这些面。':'',normalCount?'检测到 '+normalCount+' 个异常法线，可根据相邻三角面重建。':''].filter(Boolean).join(' ');$('modelRepairDetails').textContent=geometry?.removedFaces?'保留其余有效三角面、顶点位置、UV和原素材，创建修复副本，原文件不会覆盖。'+(geometry.reprepare?'面序改变后会重新准备走势和UV；原工程可回退，已有手绘区域需在副本中重新绘制。':''):'仅补齐异常法线，保留模型形状、UV和其他有效法线。原文件不会覆盖；导出会附带配套模型。';
- return new Promise((resolve,reject)=>{let finished=false;const previousCancel=task.cancel;
-  const finish=value=>{if(finished)return;finished=true;task.cancel=previousCancel;accept.removeEventListener('click',yes);cancel.removeEventListener('click',no);dialog.removeEventListener('cancel',escape);dialog.removeEventListener('close',no);accept.disabled=cancel.disabled=true;if(dialog.open)dialog.close();resolve(value);},yes=()=>finish(true),no=()=>finish(false),escape=e=>{e.preventDefault();finish(false);};
-  task.cancel=no;accept.disabled=cancel.disabled=false;accept.addEventListener('click',yes);cancel.addEventListener('click',no);dialog.addEventListener('cancel',escape);dialog.addEventListener('close',no);try{dialog.showModal();accept.focus();}catch(error){finish(false);reject(error);}
+function confirmModelPreparationIssue(task,{name,heading,summary,details,action,cancelLabel,focusCancel=false}){
+ const dialog=$('modelRepairDialog'),accept=$('modelRepairConfirm'),cancel=$('modelRepairCancel');
+ $('modelRepairHeading').textContent=heading;
+ $('modelRepairFile').textContent=name;
+ $('modelRepairSummary').textContent=summary;
+ $('modelRepairDetails').textContent=details;
+ accept.textContent=action;
+ cancel.textContent=cancelLabel;
+ return new Promise((resolve,reject)=>{
+  const previousCancel=task.cancel;
+  let finished=false;
+  function finish(value){
+   if(finished)return;
+   finished=true;
+   task.cancel=previousCancel;
+   accept.removeEventListener('click',yes);
+   cancel.removeEventListener('click',no);
+   dialog.removeEventListener('cancel',escape);
+   dialog.removeEventListener('close',onClose);
+   accept.disabled=cancel.disabled=true;
+   if(dialog.open)dialog.close();
+   resolve(value);
+  }
+  const yes=()=>finish(true),no=()=>finish(false),escape=event=>{event.preventDefault();no();};
+  const onClose=()=>{if(!dialog.open)no();};
+  task.cancel=no;
+  accept.disabled=cancel.disabled=false;
+  accept.addEventListener('click',yes);
+  cancel.addEventListener('click',no);
+  dialog.addEventListener('cancel',escape);
+  dialog.addEventListener('close',onClose);
+  try{dialog.showModal();(focusCancel?cancel:accept).focus();}
+  catch(error){reject(error);no();}
  });
+}
+async function confirmModelNormalRepair(source,name,task,{preserveUV=false,action=null,details=null,cancelLabel=null}={}){
+ const geometry=source.geometryRepair,normalCount=source.normalRepair?.correctedVertices||0;
+ if(!normalCount&&!geometry?.removedFaces)return true;
+ return confirmModelPreparationIssue(task,{
+  name,heading:'修复模型后继续？',
+  summary:[geometry?.removedFaces?'检测到 '+geometry.removedFaces+' 个零面积/共线三角面，将仅清理这些面。':'',normalCount?'检测到 '+normalCount+' 个异常法线，可根据相邻三角面重建。':''].filter(Boolean).join(' '),
+  details:details||(preserveUV?'只在工作副本中清理这些面，保留其余面和原 UV。清理后继续校验原 UV 并制作材质，原 GLB 保留。':geometry?.removedFaces?'保留其余有效三角面、顶点位置、UV和原素材，创建修复副本，原文件不会覆盖。':'仅补齐异常法线，保留模型形状、UV和其他有效法线。原文件不会覆盖；导出会附带配套模型。'),
+  action:action||(preserveUV?'清理并继续制作材质':'修复并导入'),
+  cancelLabel:cancelLabel||(action?'取消':'取消导入')
+ });
+}
+async function confirmWorkspaceGeometry(mesh,geometry,task,action,details){
+ if(!geometry.outputTriangles)throw Error('所有三角面均已退化，无法自动修复。');
+ const geometryRepair=geometryRepairSummary(geometry,mesh.sourceSHA256);
+ if(!await confirmModelNormalRepair({geometryRepair},mesh.name,task,{action,details})||!gate.accepts(task))throw abort();
 }
 function sourceSlots(source){return [...new Set(source.sourcePbr.primitives.map(p=>p.materialIndex))];}
 function defaultSourceSlots(source){const slots=sourceSlots(source);return source.sourcePbr.materials.filter(m=>!m.hasEmissive&&slots.includes(m.index)&&(slots.length===1||/树干|树皮|木材|枝条|bark|trunk|wood|branch/i.test(m.name))).map(m=>m.index);}
@@ -340,13 +446,38 @@ async function stageSourceAtlas(source,mesh,doc,task){
  if(!gate.accepts(task))throw abort();
  const stage=await renderer.stageSourceOverlay(atlas,doc.materialBase.affectedSlots);if(!gate.accepts(task)){stage.dispose();throw abort();}return stage;
 }
-async function runModelPreparation(file,options,{geometryConsent=null}={}){
+function invalidPreservedUV(){
+ return Object.assign(Error('只制作材质需要有效的原 UV。请整理 UV，或改用完整处理。'),{suggestFullPreparation:true});
+}
+async function confirmSourceUvOverlap(mesh,diagnostic,task){
+ const accepted=await confirmModelPreparationIssue(task,{
+  name:mesh.name,heading:'保留原 UV 并继续？',
+  summary:'原 UV 重叠率约 '+(diagnostic.overlap*100).toFixed(3)+'%，超过 0.1% 的建议上限。',
+  details:'选择「接受并继续」会沿用这份原 UV 制作和导出材质。重叠的面会共用贴图像素，烘焙后局部可能串色或丢失细节。',
+  action:'接受并继续',cancelLabel:'暂不接受',focusCancel:true
+ });
+ if(!gate.accepts(task))throw abort();
+ if(!accepted){
+  const retry=task.preparationRoute==='material'?'可重新进入「表面材质」并接受，或改用「高模完整处理」重展 UV。':'可重试并接受，或先重展 UV。';
+  throw Object.assign(Error('未接受保留重叠的原 UV。'+retry),{name:'AbortError'});
+ }
+ return {source:mesh.sourceSHA256,uv:mesh.uvSHA256};
+}
+async function validateMaterialUV(mesh,task,document,{requireSource=false}={}){
+ const diagnostic=analyzeUV(mesh),state=exportUvState(document,mesh,diagnostic);
+ if((requireSource&&!mesh.hasSourceUV)||state==='invalid')throw invalidPreservedUV();
+ const acceptedOverlap=state==='confirm-overlap'?await confirmSourceUvOverlap(mesh,diagnostic,task):
+  state==='accepted-overlap'?document.acceptedSourceUvOverlap:null;
+ return {diagnostic,acceptedOverlap};
+}
+async function runModelPreparation(file,options,checkpoint=null){
  if(appDisposed||busy||closingRequested)return;renderer.finishInteraction?.();if(project)commit();clearTimeout(autosaveTimer);
  const previous={document:project?structuredClone(project):null,settings:{...settings},asset:selectedAsset,references:structuredClone(pendingReferences),layers:structuredClone(pendingLayers),microdetail:pendingMicrodetail?structuredClone(pendingMicrodetail):null,workspace:{...workspaceView.state}},oldSource=sourceModel;
+ let materialUV=null;
  const task=gate.begin('model preparation');task.preparationRoute=options.route||'full';setBusy(true);let staged=null,images=[],materialStage=null,overlayStage=null,committed=false,useDefaultMaterial=false;
  try{
   await persistCurrentDraft({checkpoint:true});if(!gate.accepts(task))throw abort();
-  const input=file?{name:file.name,file}:{name:previous.document?.sourceName||previous.document?.name,hash:previous.document?.resources.source};if(!input.name)throw Error('请先选择 GLB 模型。');
+  const input=checkpoint?{name:checkpoint.name,checkpoint}:file?{name:file.name,file}:{name:previous.document?.sourceName||previous.document?.name,hash:previous.document?.resources.source};if(!input.name)throw Error('请先选择 GLB 模型。');
   const result=await prepareTreeAsset(input,options,{
    current:()=>gate.accepts(task)&&!appDisposed,
    phase:id=>{preparationUI?.phase(id);processingFeedback?.stage(id);},
@@ -354,31 +485,49 @@ async function runModelPreparation(file,options,{geometryConsent=null}={}){
    inspect:inspectOptimizationGLB,put,
    repair:(source,name)=>confirmModelNormalRepair(source,name,task),
    optimize:(original,values)=>optimizePreparationMesh(original,values,{request,current:()=>gate.accepts(task),setCancel:cancel=>task.cancel=cancel,repair:(source,name)=>confirmModelNormalRepair(source,name,task),progress:p=>status('保形减面 · '+meshProcessingLabel(p.phase)+' · '+Math.round(p.progress*100)+'%',p.progress)}),
-   parse:options.route==='overlay'?parseSourcePbrGLB:parseGLB,
-   validatePreserved(source,values){
+   parse:(bytes,name)=>(options.route==='overlay'?parseSourcePbrGLB:parseGLB)(bytes,name,{allowGeometryRepair:true}),
+   async validatePreserved(source,values){
     if(values.route==='overlay'){
      if(renderer.graphicsMaterialProfile==='basic')throw Error('原材质叠加需要 DX12 材质视口。');
-      return;
-    }if(inspectGeometry(source).removedFaces)throw Error('只制作材质模式保留网格；模型含退化三角面，请先修复或选择高模完整处理。');if(!(previous.document?.resources.source===source.sourceSHA256&&previous.document.resources.working)){const d=analyzeUV(source);if(!source.hasSourceUV||d.zeroUvFaces||d.outOfRangeFaces||d.overlap>.001)throw Error('只制作材质需要有效原UV，请先整理UV或选择高模完整处理。');}},
-   async repairInput(value){
-    if(options.route==='overlay'){
+     return;
+    }
+    const old=previous.document;
+    const usesWorking=old?.resources.source===source.sourceSHA256&&!old.materialBase&&old.resources.working;
+    if(!usesWorking)materialUV=await validateMaterialUV(source,task,old,{requireSource:true});
+   },
+   async repairInput(value,values){
+    if(values.route==='overlay'){
      const geometry=inspectGeometry(value.source);
      if(!geometry.removedFaces)return value;
+     if(!geometry.outputTriangles)throw Error('所有三角面均已退化，无法自动修复。');
+     const geometryRepair=geometryRepairSummary(geometry,value.source.sourceSHA256);
+     const allowed=await confirmModelNormalRepair({geometryRepair},value.name,task,{
+      action:'清理并继续原材质叠加',details:'只清理工作副本的退化面，保留原 GLB、原材质槽、贴图和采样 UV。叠加需要的烘焙 UV 仍按当前工作流程生成。'
+     });
+     if(!allowed||!gate.accepts(task))throw abort();
      status('正在清理工作副本中的零面积面，保留原材质…',0);
      const bytes=repairSourcePbrGLB(value.bytes,value.source,geometry),source=await parseSourcePbrGLB(bytes,value.name);
      if(source.indices.length/3!==geometry.outputTriangles||inspectGeometry(source).removedFaces)throw Error('原材质工作副本的面映射校验失败。');
-     return {bytes,name:value.name,source,geometryRepair:geometryRepairSummary(geometry,value.source.sourceSHA256)};
+     return {bytes,name:value.name,source,geometryRepair};
     }
-    return prepareGeometryImport(value.bytes,value.name,{source:value.source,current:()=>gate.accepts(task)&&!appDisposed,confirm:(source,name)=>source.geometryRepair&&source.sourceSHA256===geometryConsent?true:confirmModelNormalRepair(source,name,task)});
+    const preserveUV=values.route==='material';
+    return prepareGeometryImport(value.bytes,value.name,{
+     source:value.source,current:()=>gate.accepts(task)&&!appDisposed,
+     confirm:(source,name)=>{
+      if(preserveUV&&!source.geometryRepair)return true;
+      return confirmModelNormalRepair(source,name,task,{preserveUV});
+     },
+    });
    },
    document({source,sourceHash,originalHash,optimization,name,options:values}){
-    const same=!optimization&&previous.document?.resources.source===sourceHash&&!!previous.document.materialBase===(values.route==='overlay'),doc=same?structuredClone(previous.document):createDocument({source:sourceHash,name,settings:{...settings},bark:previous.document?.resources.bark||null,actualHeightMeters:values.height});
+    const same=values.route!=='staged'&&!optimization&&previous.document?.resources.source===sourceHash&&!!previous.document.materialBase===(values.route==='overlay'),doc=same?structuredClone(previous.document):createDocument({source:sourceHash,name,settings:{...settings},bark:previous.document?.resources.bark||null,actualHeightMeters:values.height});
     if(same){doc.id=crypto.randomUUID();doc.name=(doc.name.slice(0,160)+' · 准备副本');doc.createdAt=new Date().toISOString();if(doc.actualHeightMeters!==values.height){const tile=doc.actualHeightMeters/doc.settings.scale;doc.settings.scale=Math.min(10000,Math.max(.01,values.height/tile));doc.resources.ao=null;}}
     else{useDefaultMaterial=true;doc.layers=structuredClone(pendingLayers);if(pendingMicrodetail)doc.microdetail=structuredClone(pendingMicrodetail);Object.assign(doc.resources,pendingReferences);doc.resources.highPoly=originalHash;if(optimization)doc.meshOptimization=validateMeshOptimization(optimization,doc.resources);}
     if(values.route==='overlay'){
      useDefaultMaterial=false;
      if(!same){doc.materialBase={version:1,kind:'source-pbr',affectedSlots:defaultSourceSlots(source)};for(const layer of doc.layers)layer.enabled=false;doc.surface={...doc.surface,active:true,effects:[],masks:[],areas:[],layers:[]};doc.settings={...doc.settings,directional:false,originalMix:0};}
     }
+    if(values.route==='staged'&&doc.settings.directionMode===3)doc.settings={...doc.settings,directionMode:2};
     doc.actualHeightMeters=values.height;doc.resources.highPoly||=originalHash;doc.output={...doc.output,resolution:values.resolution,padding:values.padding,includeModel:true};if(!same&&values.route!=='material')doc.treeUV=validateTreeUvOptions({...doc.treeUV,algorithm:'regions',profile:'continuous',quality:'fine',structureScaleCm:35,densityRatio:2.25,maxAspect:12,refitJoins:true});return doc;
    },
    async flow(source,doc,values){
@@ -418,8 +567,10 @@ async function runModelPreparation(file,options,{geometryConsent=null}={}){
     }
     if(same&&old.resources.working){const b=await request('blobs/'+old.resources.working,{binary:true});input=await restoreWorkingMesh(source,decodeUvResult(b),{mode:old.uvMode,revision:old.uvRevision});if(!gate.accepts(task))throw abort();}
     if(values.route==='material'){
-     const d=analyzeUV(input);if(d.zeroUvFaces||d.outOfRangeFaces||d.overlap>.001)throw Error('只制作材质需要有效UV；当前UV缺失、越界或明显重叠，请先整理UV或选择高模完整处理。');
-     const existing=!!(same&&old.resources.working),next=existing?input:await prepareUvRevision(input,{mode:'tangents',revision:0,resolution:values.resolution,padding:values.padding},uvDependencies(task,{source,output:values}));if(!gate.accepts(task))throw abort();
+     const existing=!!(same&&old.resources.working);
+     const {diagnostic:d,acceptedOverlap}=materialUV??await validateMaterialUV(input,task,doc);
+     if(acceptedOverlap)doc.acceptedSourceUvOverlap=acceptedOverlap;
+     const next=existing?input:await prepareUvRevision(input,{mode:'tangents',revision:0,resolution:values.resolution,padding:values.padding},uvDependencies(task,{source,output:values}));if(!gate.accepts(task))throw abort();
      const original=next.uvSHA256===next.sourceUvSHA256,raw=await ensureClearance(next,{task,retry:true}),clearance=assertUvClearance(raw,values,{allowOriginal:original});
      doc.resources.working=existing?old.resources.working:await put(encodeUvResult(next));doc.uvMode=existing?old.uvMode:'original';doc.uvRevision=existing?old.uvRevision:0;doc.uvPacking=existing?old.uvPacking:next.packing;
      return{mesh:next,clearance,preserved:true,reused:true,statistics:{islands:d.islands,coverage:d.coverage,mode:'preserve'}};
@@ -428,22 +579,30 @@ async function runModelPreparation(file,options,{geometryConsent=null}={}){
     let clearanceSafe=false;if(same&&old.resources.working&&sameOutput)clearanceSafe=clearanceAtResolution(await ensureClearance(input,{task,retry:true}),values).safe;
     const layoutMode=preparationUvMode({sameSource:same,hasWorking:!!old?.resources.working,diagnostic,sameOutput,clearanceSafe}),reuse=layoutMode==='reuse';
     status(layoutMode==='tree'?'准备新的树结构展开':reuse?'保留现有UV岛和排布':'保留现有UV岛，仅重新排布',0);
-    const next=reuse?input:await prepareUvRevision(input,{mode:layoutMode,revision:same?old.uvRevision+1:1,resolution:values.resolution,padding:values.padding,rules:same?old.uvOptions:null,cutRules:same?old.uvCutRules:null,flow:doc.barkFlow,structureCache:flow.field.structureCache,treeOptions:doc.treeUV,actualHeightMeters:values.height,corrections:doc.directionCorrections,transition:doc.flowTransition},uvDependencies(task,{source,output:values}));if(!gate.accepts(task))throw abort();
+    const next=reuse?input:await buildUvCandidate(input,{mode:layoutMode,revision:same?old.uvRevision+1:1,resolution:values.resolution,padding:values.padding,rules:same?old.uvOptions:null,cutRules:same?old.uvCutRules:null,flow:doc.barkFlow,structureCache:flow.field.structureCache,treeOptions:doc.treeUV,actualHeightMeters:values.height,corrections:doc.directionCorrections,transition:doc.flowTransition},task,values,source);if(!gate.accepts(task))throw abort();
     const report=await ensureClearance(next,{task,retry:true}),clearance=assertUvClearance(report,{resolution:values.resolution,padding:values.padding}),statistics=analyzeUV(next,{resolution:values.resolution,actualHeightMeters:values.height});if(statistics.zeroUvFaces||statistics.outOfRangeFaces)throw Error('UV存在无效面，当前工程未改变。');
-    if(!reuse){doc.resources.working=await put(encodeUvResult(next));if(layoutMode!=='repack')delete doc.resources.uvDensityReference;doc.uvMode=layoutMode;doc.uvRevision=next.uvRevision;doc.uvPacking=next.packing;doc.uvOptions={revision:doc.uvRevision,pins:next.packing?.pinnedIslands||[],weights:next.packing?.relativeDensityWeights||{}};}if(reuse)status('沿用已验证的整块 UV',1);return{mesh:next,clearance,statistics:{islands:statistics.islands,coverage:statistics.coverage,mode:layoutMode},reused:reuse};
+    if(!reuse){doc.resources.working=await put(encodeUvResult(next));if(next.uvMode!=='repack')delete doc.resources.uvDensityReference;doc.uvMode=next.uvMode;doc.uvRevision=next.uvRevision;doc.uvPacking=next.packing;doc.uvOptions={revision:doc.uvRevision,pins:next.packing?.pinnedIslands||[],weights:next.packing?.relativeDensityWeights||{}};}
+    if(reuse)status('沿用已验证的整块 UV',1);
+    const recovery=uvRecoveryMessage(layoutMode,next);
+    const warning=recovery?recovery+'，通过检查。':null;
+    return{mesh:next,clearance,statistics:{islands:statistics.islands,coverage:statistics.coverage,mode:next.uvMode},reused:reuse,warning};
    },
    async publish({source,draft,flow,mesh,report,originalHash}){
     if(useDefaultMaterial){
      if(renderer.graphicsMaterialProfile==='basic'){status('应用兼容模式基础材质…');draft.settings=basicImportSettings(draft.settings);}
      else{status('应用默认材质组合样式A…');draft.surface=applyDefaultImportMaterial(draft);}
     }
-    if(!draft.resources.bark){const b=await(await fetch(selectedAsset)).arrayBuffer();draft.resources.bark=await put(b);}draft=validateDocument(draft);staged=await prepareSurface(source,draft,task,{preparedFlow:flow});overlayStage=await stageSourceAtlas(source,mesh,draft,task);let cachedAO=null;if(draft.resources.ao){cachedAO=decodeAO(await request('blobs/'+draft.resources.ao,{binary:true}),source);source.ao=cachedAO.ao;}
+    if(!draft.resources.bark){const b=await(await fetch(selectedAsset)).arrayBuffer();draft.resources.bark=await put(b);}
+    draft=validateDocument(draft);draft.surface=withBuiltinRootMossFallback(draft.surface);
+    staged=await prepareSurface(source,draft,task,{preparedFlow:flow});overlayStage=await stageSourceAtlas(source,mesh,draft,task);
+    const cachedAO=await prepareStoredAO(source,draft,task);
     const bark=await request('blobs/'+draft.resources.bark,{binary:true});images=await decodeTaskImages({bark,original:source.original,references:draft.resources},task);if(!gate.accepts(task))throw abort();materialStage=await stageProjectMaterialImages(draft,images,task);images=[];if(!gate.accepts(task))throw abort();
     const saved=await request('projects',{body:JSON.stringify({...persistence.capture(draft),autosave:true,checkpoint:true})});if(saved.stale)throw Error('准备结果保存被更新，请重新准备。');if(!gate.accepts(task))throw abort();
     materialStage.commit();materialStage=null;surfaceSession?.dispose();surfaceSession=staged;sourceModel=source;surfaceError=null;maskSerial++;project=draft;settings=validateSettings(draft.settings);selectedAsset=blobURL(draft.resources.bark);pendingReferences={height:draft.resources.height||null,roughness:draft.resources.roughness||null,normal:draft.resources.normal||null};pendingLayers=structuredClone(draft.layers);pendingMicrodetail=draft.microdetail?structuredClone(draft.microdetail):null;selectedUVIsland=-1;candidate=null;aoRecord=cachedAO?.meta||null;history.reset(draft);committed=true;batchRestoreFailure=null;
-    $('flowAlgorithm').value='banyan';$('flowQuality').value=draft.barkFlow?.summary?.quality||'fine';$('flowPreviewMode').value='material';$('showFlowLines').checked=false;showModel(mesh,{sourceOverlay:overlayStage});overlayStage=null;syncMaskUI();workspaceView.set({stage:'material'});if(!draft.materialBase)surfaceStudio?.showBaseMaterials();$('aoBadge').textContent=cachedAO?'AO 已复用':'AO 待烘焙';$('projectState').textContent='准备完成 · 已保存工作副本';status(draft.materialBase?'已保留原材质 · 在右侧添加薄雪或苔藓':'模型、UV 与榕根走势已就绪，可以制作材质。',1);return{rollback:previous,projectId:draft.id,originalHash};
+    $('flowAlgorithm').value='banyan';$('flowQuality').value=draft.barkFlow?.summary?.quality||'fine';$('flowPreviewMode').value='material';$('showFlowLines').checked=false;showModel(mesh,{sourceOverlay:overlayStage});overlayStage=null;syncMaskUI();workspaceView.set({stage:report.route==='staged'?'model':'material'});if(!draft.materialBase&&report.route!=='staged')surfaceStudio?.showBaseMaterials();$('aoBadge').textContent=cachedAO?'AO 已复用':'AO 待烘焙';$('projectState').textContent='准备完成 · 已保存工作副本';status(report.route==='staged'?'拓扑已就绪 · 可导出 GLB 或继续整理 UV':draft.materialBase?'已保留原材质 · 在右侧添加薄雪或苔藓':'模型、UV 与榕根走势已就绪，可以制作材质。',1);return{rollback:previous,projectId:draft.id,originalHash};
    }
   });return result;
+ }catch(error){if(error.name==='AbortError')status(error.message);throw error;
  }finally{if(!committed){overlayStage?.dispose();materialStage?.rollback();staged?.dispose();for(const image of images)image?.close();if(previous.document&&!appDisposed)await request('projects',{body:JSON.stringify({...persistence.capture(previous.document),autosave:true,checkpoint:true})}).catch(()=>{});}gate.finish(task);setBusy(false);apply();}
 }
 async function rollbackModelPreparation(result){
@@ -456,30 +615,319 @@ async function rollbackModelPreparation(result){
 async function loadModel(bytes,name,{optimization=null}={}){if(appDisposed||busy)return;if(!optimization){try{const counts=inspectOptimizationGLB(bytes);if(counts.triangles>250000)return await meshOptimizer.open(bytes,name);}catch(e){toast(e.message,true);return;}}clearTimeout(autosaveTimer);const task=gate.begin('import');setBusy(true);let staged=null,images=[],materialStage=null,committed=false;try{
   await persistCurrentDraft({checkpoint:true});if(!gate.accepts(task))throw abort();status('读取树模型与表面方向…',.05);const originalBytes=bytes,loaded=await prepareGeometryImport(bytes,name,{current:()=>gate.accepts(task),confirm:(source,name)=>confirmModelNormalRepair(source,name,task)}),source=loaded.source;bytes=loaded.bytes;name=loaded.name;if(!gate.accepts(task))throw abort();const sourceHash=await put(bytes),barkBytes=await(await fetch(selectedAsset)).arrayBuffer(),barkHash=await put(barkBytes),doc=createDocument({source:sourceHash,name,settings,bark:barkHash,...(optimization?{actualHeightMeters:optimization.metadata.options.actualHeightMeters}:{})});if(optimization){doc.resources.highPoly=await put(optimization.highPolyBytes);doc.meshOptimization=validateMeshOptimization(optimization.metadata,doc.resources);}if(loaded.geometryRepair){doc.resources.highPoly||=await put(originalBytes);doc.output.includeModel=true;}doc.layers=structuredClone(pendingLayers);if(pendingMicrodetail)doc.microdetail=structuredClone(pendingMicrodetail);Object.assign(doc.resources,pendingReferences);if(renderer.graphicsMaterialProfile==='basic')doc.settings=basicImportSettings(doc.settings);else doc.surface=applyDefaultImportMaterial(doc);if(!gate.accepts(task))throw abort();
   status('自动分析榕根表面走势…',.1);const importedFlow=await prepareImportedBarkFlow(source,doc,{isCurrent:()=>gate.accepts(task),setCancel:cancel=>task.cancel=cancel,onProgress:p=>status('自动榕根走势 · '+p.phase,.1+p.progress*.4)});if(!gate.accepts(task))throw abort();
-  staged=await prepareSurface(source,doc,task,{preparedFlow:importedFlow.field});let next=source,working=null;const d=analyzeUV(source);if(source.hasSourceUV&&d.zeroUvFaces<d.triangles&&d.outOfRangeFaces===0){next=await applyUvResult(source,await nativeResult(source,'tangents',task),{mode:'original',revision:0});working=await put(encodeUvResult(next));}task.cancel=()=>staged.dispose();
+  staged=await prepareSurface(source,doc,task,{preparedFlow:importedFlow.field});
+  let next=source,working=null;
+  const uv=analyzeUV(source);
+  if(source.hasSourceUV&&!uv.zeroUvFaces&&!uv.outOfRangeFaces&&uv.overlap<=.001){
+   next=await applyUvResult(source,await nativeResult(source,'tangents',task),{mode:'original',revision:0});
+   working=await put(encodeUvResult(next));
+  }
+  task.cancel=()=>staged.dispose();
   images=await decodeTaskImages({bark:barkBytes,original:source.original,references:doc.resources},task);if(!gate.accepts(task))throw abort();
-  materialStage=await stageProjectMaterialImages(doc,images,task);images=[];doc.resources.working=working;doc.bake={aoSamples:Number($('aoSamples').value)};materialStage.commit();materialStage=null;surfaceSession?.dispose();surfaceSession=staged;sourceModel=source;surfaceError=null;maskSerial++;project=doc;settings=validateSettings(doc.settings);selectedUVIsland=-1;history.reset(doc);candidate=null;aoRecord=null;committed=true;batchRestoreFailure=null;$('flowAlgorithm').value='banyan';$('flowQuality').value='fine';$('flowPreviewMode').value='material';$('showFlowLines').checked=false;showModel(next);syncMaskUI();$('aoBadge').textContent='AO 待烘焙';$('projectState').textContent='新工程 · 自动恢复保存中';if(importedFlow.warning)toast(importedFlow.warning,true);status((working?'模型就绪':'模型已载入 · 请先自动重展 UV')+' · '+(importedFlow.field?'已自动采用榕根表面走势':importedFlow.warning));scheduleAutosave();return structuredClone(project);
+  materialStage=await stageProjectMaterialImages(doc,images,task);images=[];doc.resources.working=working;doc.bake={aoSamples:Number($('aoSamples').value)};materialStage.commit();materialStage=null;surfaceSession?.dispose();surfaceSession=staged;sourceModel=source;surfaceError=null;maskSerial++;project=doc;settings=validateSettings(doc.settings);selectedUVIsland=-1;history.reset(doc);candidate=null;aoRecord=null;committed=true;batchRestoreFailure=null;$('flowAlgorithm').value='banyan';$('flowQuality').value='fine';$('flowPreviewMode').value='material';$('showFlowLines').checked=false;showModel(next);syncMaskUI();$('aoBadge').textContent='AO 待烘焙';$('projectState').textContent='新工程 · 自动恢复保存中';if(importedFlow.warning)toast(importedFlow.warning,true);
+  const message=working?'模型就绪':'模型已载入 · UV 待整理，请在「模型准备」点「自动拆分并排布 UV」';
+  status(message+' · '+(importedFlow.field?'已自动采用榕根表面走势':importedFlow.warning));scheduleAutosave();return structuredClone(project);
 }catch(e){if(e.name!=='AbortError')toast(e.message,true);status(e.message);}finally{if(!committed){materialStage?.rollback();staged?.dispose();for(const b of images)b?.close();}gate.finish(task);setBusy(false);apply();}}
-async function restore(doc,{preserveCurrent=false,reuseLoaded=false}={}){doc=validateDocument(doc);clearTimeout(autosaveTimer);const task=gate.begin('restore');setBusy(true);let staged=null,images=[],materialStage=null,overlayStage=null,committed=false;try{
-  if(reuseLoaded&&!preserveCurrent&&sourceModel&&model&&surfaceSession&&!surfaceSession.disposed&&sourceModel.sourceSHA256===doc.resources.source&&!!project?.materialBase===!!doc.materialBase&&(!doc.materialBase||project.output.resolution===doc.output.resolution&&project.output.padding===doc.output.padding)&&canReuseHistoryResources(project,doc)){
+async function restore(doc,{preserveCurrent=false,reuseLoaded=false,resetView=true,saveCopy=false}={}){
+ doc=validateDocument(doc);
+ doc.surface=withBuiltinRootMossFallback(withDefaultRootFallback(doc.surface));
+ clearTimeout(autosaveTimer);const task=gate.begin('restore');setBusy(true);let staged=null,images=[],materialStage=null,overlayStage=null,committed=false;try{
+  if(reuseLoaded&&!preserveCurrent&&sourceModel&&model&&surfaceSession&&!surfaceSession.disposed&&sourceModel.sourceSHA256===doc.resources.source&&!!project?.materialBase===!!doc.materialBase&&(!doc.materialBase||project.output.resolution===doc.output.resolution&&project.output.padding===doc.output.padding)&&canReuseHistoryResources(project,doc)&&(!needsDistributionAO(doc)||!!aoRecord)){
    validatePartSource(doc.parts,sourceModel);surfaceError=null;maskSerial++;project=structuredClone(doc);settings=validateSettings(doc.settings);candidate=null;batchRestoreFailure=null;renderer.setPartBindings(project.parts,project.partMaterials);selectedUVIsland=-1;committed=true;syncMaskUI();refreshUV();surfaceWorkbench.setPreview(null);$('aoSamples').value=doc.bake?.aoSamples||32;$('projectState').textContent='已恢复材质编辑';status('已撤销/重做 · 模型和素材保持加载');scheduleAutosave();return;
   }
-  if(preserveCurrent){await persistCurrentDraft({checkpoint:true});if(!gate.accepts(task))throw abort();}const nextSettings=validateSettings(doc.settings),bytes=await request('blobs/'+doc.resources.source,{binary:true}),source=await (doc.materialBase?parseSourcePbrGLB:parseGLB)(bytes.buffer,doc.sourceName||doc.name);if(hasCutRules(doc.uvCutRules)){if(source.indices.length/3>250000)throw Error('此工程的接缝/保护规则超出当前25万面预算。');validateGuideSource(buildUvTopology(source),doc.uvCutRules);}staged=await prepareSurface(source,doc,task);let cachedAO=null;if(doc.resources.ao){try{cachedAO=decodeAO(await request('blobs/'+doc.resources.ao,{binary:true}),source);source.ao=cachedAO.ao;}catch(e){doc=structuredClone(doc);doc.resources.ao=null;toast('AO缓存需要重新烘焙：'+e.message);}}const next=doc.resources.working?await restoreWorkingMesh(source,decodeUvResult(await request('blobs/'+doc.resources.working,{binary:true})),{mode:doc.uvMode,revision:doc.uvRevision}):source;
+  if(preserveCurrent){await persistCurrentDraft({checkpoint:true});if(!gate.accepts(task))throw abort();}const nextSettings=validateSettings(doc.settings),bytes=await request('blobs/'+doc.resources.source,{binary:true}),source=await (doc.materialBase?parseSourcePbrGLB:parseGLB)(bytes.buffer,doc.sourceName||doc.name);if(hasCutRules(doc.uvCutRules)){if(source.indices.length/3>250000)throw Error('此工程的接缝/保护规则超出当前25万面预算。');validateGuideSource(buildUvTopology(source),doc.uvCutRules);}
+  staged=await prepareSurface(source,doc,task);
+  const cachedAO=await prepareStoredAO(source,doc,task);
+  const next=doc.resources.working?await restoreWorkingMesh(source,decodeUvResult(await request('blobs/'+doc.resources.working,{binary:true})),{mode:doc.uvMode,revision:doc.uvRevision}):source;
   overlayStage=await stageSourceAtlas(source,next,doc,task);const bark=doc.resources.bark?await request('blobs/'+doc.resources.bark,{binary:true}):await(await fetch('/assets/bark-albedo.png')).arrayBuffer();images=await decodeTaskImages({bark,original:source.original,references:doc.resources},task);if(!gate.accepts(task))throw abort();
-  materialStage=await stageProjectMaterialImages(doc,images,task);images=[];materialStage.commit();materialStage=null;surfaceSession?.dispose();surfaceSession=staged;sourceModel=source;surfaceError=null;maskSerial++;project=structuredClone(doc);selectedUVIsland=-1;settings=nextSettings;selectedAsset=doc.resources.bark?blobURL(doc.resources.bark):'/assets/bark-albedo.png';candidate=null;aoRecord=cachedAO?.meta||null;committed=true;batchRestoreFailure=null;showModel(next,{sourceOverlay:overlayStage});overlayStage=null;syncMaskUI();$('aoBadge').textContent=cachedAO?'AO 已恢复':'AO 待重烘焙';$('aoSamples').value=doc.bake?.aoSamples||32;$('projectState').textContent='工程已载入';status('工程已恢复 · 模型、UV、遮罩和材质版本一致');scheduleAutosave();
+  materialStage=await stageProjectMaterialImages(doc,images,task);images=[];
+  if(saveCopy){
+   const result=await request('projects',{body:JSON.stringify(persistence.capture(doc))});
+   if(result.stale)throw Error('修复副本保存未完成，请重试。');
+  }
+  if(!gate.accepts(task))throw abort();
+  materialStage.commit();materialStage=null;surfaceSession?.dispose();surfaceSession=staged;sourceModel=source;surfaceError=null;maskSerial++;project=structuredClone(doc);selectedUVIsland=-1;settings=nextSettings;selectedAsset=doc.resources.bark?blobURL(doc.resources.bark):'/assets/bark-albedo.png';candidate=null;aoRecord=cachedAO?.meta||null;committed=true;batchRestoreFailure=null;showModel(next,{sourceOverlay:overlayStage,reset:resetView});overlayStage=null;syncMaskUI();$('aoBadge').textContent=cachedAO?'AO 已恢复':'AO 待重烘焙';$('aoSamples').value=doc.bake?.aoSamples||32;$('projectState').textContent='工程已载入';status('工程已恢复 · 模型、UV、遮罩和材质版本一致');scheduleAutosave();
 }finally{if(!committed){overlayStage?.dispose();materialStage?.rollback();staged?.dispose();for(const b of images)b?.close();}gate.finish(task);setBusy(false);apply();}}
-async function runUV(uvMode,{shapeCoverage=false,contourFill=false}={}){if(busy||!model)return;if(project.materialBase)return toast('原材质叠加的工作 UV 随准备生成。可从模型准备重新建立工作副本。',true);const geometry=inspectGeometry(sourceModel||model);if(geometry.removedFaces){if(uvMode==='repack')return toast('模型包含无效三角面，无法只重排。请先修复模型；当前UV保留，未重新展开。',true);const task=gate.begin('geometry repair'),source=sourceModel||model;setBusy(true);let allowed=false;try{allowed=await confirmModelNormalRepair({...source,geometryRepair:{...geometryRepairSummary(geometry,source.sourceSHA256),reprepare:true}},source.name,task);if(!gate.accepts(task))allowed=false;}finally{gate.finish(task);setBusy(false);}if(allowed)return preparationUI.importFile(null,{options:{height:project.actualHeightMeters,target:Math.max(100,Math.min(50000,Number($('prepareTarget').value)||50000)),resolution:Math.max(1024,project.output.resolution),padding:project.output.padding},geometryConsent:source.sourceSHA256});return;}commit();const task=gate.begin('UV');setBusy(true);try{const output=uvMode==='repack'?uvLayoutOutput(project.output,Number($('uvPackingPadding').value)):{...project.output},input=model,revision=project.uvRevision+1,trackDensity=shapeCoverage||contourFill,anchorHash=trackDensity&&project.resources.uvDensityReference;const densityReference=anchorHash?decodeMeshInput(await request('blobs/'+anchorHash,{binary:true})):null;if(!gate.accepts(task))throw abort();const next=await prepareUvRevision(input,{mode:uvMode,revision,resolution:output.resolution,padding:output.padding,rules:readUVRules(),cutRules:readCutRules(),flow:project.barkFlow,treeOptions:project.treeUV,actualHeightMeters:project.actualHeightMeters,corrections:project.directionCorrections,transition:project.flowTransition,shapeCoverage,contourFill,densityReference},uvDependencies(task,{output}));if(!gate.accepts(task))throw abort();candidate={mesh:next,mode:uvMode,output,densityAnchor:trackDensity&&!anchorHash?input:null,baseRevision:project.uvRevision,rules:structuredClone(readUVRules()),diagnostic:diagnostics(next,output)};refreshUV();status('UV 候选已生成 · 比较后采用');toast('候选仅供比较，当前模型尚未改变。');}catch(e){if(e.name!=='AbortError')toast(e.message,true);status(e.message);}finally{gate.finish(task);setBusy(false);}}
-async function restoreSourceUV(){if(busy||!sourceModel||!project)return;if(project.materialBase)return toast('源 UV 已随原材质保留。当前 UV 专用于烘焙。');const d=analyzeUV(sourceModel);if(!sourceModel.hasSourceUV||d.zeroUvFaces||d.outOfRangeFaces)return toast('源模型没有可恢复的有效UV。',true);const task=gate.begin('source UV candidate');setBusy(true);try{const next=await prepareUvRevision(sourceModel,{mode:'tangents',revision:project.uvRevision+1,resolution:project.output.resolution,padding:project.output.padding},uvDependencies(task));if(!gate.accepts(task))throw abort();candidate={mesh:next,mode:'original',baseRevision:project.uvRevision,rules:{pins:[],weights:{}},diagnostic:diagnostics(next)};refreshUV();status('源UV已作为候选恢复，采用后才改变工作副本。');}catch(e){if(e.name!=='AbortError')toast(e.message,true);}finally{gate.finish(task);setBusy(false);}}
-async function acceptUV(){if(busy||!candidate)return;const chosen=candidate;if(chosen.baseRevision!==project.uvRevision)return toast('候选已过期，请重新生成。',true);if(chosen.diagnostic.overlap>Math.max(model.diagnostic.overlap,.00001)+.00001||chosen.diagnostic.outOfRangeFaces||chosen.diagnostic.zeroUvFaces)return toast('候选存在重叠或无效UV，不能采用。',true);const task=gate.begin('adopt UV');setBusy(true);try{const output=chosen.output||project.output,clearance=await ensureClearance(chosen.mesh,{task,retry:true});if(!gate.accepts(task))throw abort();assertUvClearance(clearance,output,{allowOriginal:chosen.mode==='original'});const hash=await put(encodeUvResult(chosen.mesh));if(!gate.accepts(task))throw abort();const resources={...project.resources,working:hash};if(chosen.mode!=='repack')delete resources.uvDensityReference;if(chosen.densityAnchor)resources.uvDensityReference=await put(encodeMeshInput(chosen.densityAnchor));if(!gate.accepts(task))throw abort();const adopted=validateDocument({...project,output:{...output},resources,uvMode:chosen.mode,uvRevision:project.uvRevision+1,uvOptions:{revision:project.uvRevision+1,pins:chosen.mesh.packing?.pinnedIslands||[],weights:chosen.mesh.packing?.relativeDensityWeights||{}},uvPacking:chosen.mesh.packing});project=adopted;candidate=null;selectedUVIsland=-1;setValues();showModel(chosen.mesh,{reset:false});commit();$('aoBadge').textContent=aoRecord?'新 UV · 表面 AO 已复用':'新 UV · AO 待烘焙';status('新 UV 已采用 · 导出会附带配套 GLB 模型');}catch(e){if(e.name!=='AbortError')toast(e.message,true);}finally{gate.finish(task);setBusy(false);apply();}}
-async function computeAO(task,{persistDocument=true}={}){if(!model)throw Error('请先导入模型。');const input=sourceModel||model,displayModel=model,worker=new Worker('./ao-worker.js',{type:'module'}),start=performance.now();try{const result=await new Promise((resolve,reject)=>{task.cancel=()=>{worker.terminate();reject(abort());};worker.onmessage=({data})=>{if(!gate.accepts(task))return reject(abort());if(data.error)return reject(Error(data.error));if(data.done)return resolve(data);status('几何 AO · '+Math.round(data.progress*100)+'%',data.progress);};worker.onerror=e=>reject(Error(e.message||'AO失败'));const pos=input.pos.slice(),normal=input.normal.slice(),indices=input.indices.slice();worker.postMessage({pos,normal,indices,height:input.height,samples:Number($('aoSamples').value),range:.12},[pos.buffer,normal.buffer,indices.buffer]);});if(!gate.accepts(task)||model!==displayModel)throw abort();const record={method:'cosine-weighted hemisphere rays at source vertices',samples:result.samples,rangeInTreeHeight:result.range,seconds:(performance.now()-start)/1000,sourceSHA256:input.sourceSHA256,vertices:input.pos.length/3,sourceHeightUnits:input.height},hash=await put(encodeAO(result.ao,record));if(!gate.accepts(task))throw abort();input.ao=result.ao;renderer.setAO(remapSurfaceData(result.ao,model,1));aoRecord=record;project.resources.ao=hash;project.bake={aoSamples:result.samples};if(persistDocument)commit();$('aoBadge').textContent=`AO 已就绪 · ${result.samples} 射线`;return result;}finally{worker.terminate();task.cancel=()=>{};}}
+async function runUV(uvMode,{shapeCoverage=false,contourFill=false,fromSource=false,forExport=false}={}){
+ if(busy||!model)return;
+ if(project.materialBase&&!forExport)return toast(fromSource?'源 UV 已随原材质保留。当前 UV 专用于烘焙。':'原材质叠加的工作 UV 随准备生成。可从模型准备重新建立工作副本。',!fromSource);
+ commit();const task=gate.begin('UV');setBusy(true);
+ try{
+  const output=uvMode==='repack'?uvLayoutOutput(project.output,Number($('uvPackingPadding').value)):{...project.output};
+  const revision=project.uvRevision+1,trackDensity=shapeCoverage||contourFill,anchorHash=trackDensity&&project.resources.uvDensityReference;
+  let source=sourceModel,input=fromSource?sourceModel:model,draft=project,repair=null;
+  let rules=fromSource?{pins:[],weights:{}}:readUVRules();
+  const geometry=workspaceGeometry(source);
+  if(geometry.removedFaces){
+   const action=forExport?'清理并导出材质':fromSource?'清理并恢复原 UV':uvMode==='repack'?'清理并只重排':'清理并继续自动展开';
+   const details=forExport?'保留有效面当前的 UV 和材质编辑。清理后校验 UV、另存修复工程，再生成配套 GLB 和贴图。原工程和原素材保留。':'仅清理零面积三角面。生成 UV 候选供比较，采用时另存修复工程。原工程和原素材保留。';
+   await confirmWorkspaceGeometry(source,geometry,task,action,details);
+   const cleaned=await prepareRepairedUVSource(source,input,geometry,{mode:project.uvMode,revision:project.uvRevision}),faces=survivingFaceMap(geometry);
+   rules=remapUVIslandRules(rules,input,cleaned.input,faces);
+   repair={source:cleaned.source,faces,originalHash:source.sourceSHA256};
+   source=cleaned.source;input=cleaned.input;draft=rebindRepairedMaterialProject(project,source,faces);
+  }
+  if(fromSource||forExport){
+   const d=analyzeUV(input);
+   if(forExport&&(d.zeroUvFaces||d.outOfRangeFaces||d.overlap>.001))throw Error('清理后保留面的 UV 仍无效或重叠，请先整理 UV，再导出材质。');
+   if(fromSource&&(!source.hasSourceUV||d.zeroUvFaces||d.outOfRangeFaces))throw Error('源模型没有可恢复的有效 UV。');
+  }
+  let densityReference=anchorHash?decodeMeshInput(await request('blobs/'+anchorHash,{binary:true})):null;
+  if(repair&&densityReference)densityReference={...densityReference,indices:filterGeometryIndices(densityReference.indices,geometry)};
+  if(!gate.accepts(task))throw abort();
+  const next=await buildUvCandidate(input,{mode:uvMode,revision,resolution:output.resolution,padding:output.padding,rules,
+   cutRules:draft.uvCutRules,flow:draft.barkFlow,treeOptions:draft.treeUV,actualHeightMeters:draft.actualHeightMeters,
+   corrections:draft.directionCorrections,transition:draft.flowTransition,shapeCoverage,contourFill,densityReference},task,output,source);
+  if(!gate.accepts(task))throw abort();
+  if(forExport){
+   next.uvMode=draft.uvMode;
+   const {method,resolution,padding}=draft.uvPacking||next.packing;
+   next.packing={method,resolution,padding,pinnedIslands:rules.pins,relativeDensityWeights:rules.weights};
+   assertRecordedPadding(next.packing,output);
+  }
+  candidate={mesh:next,mode:next.uvMode,output,densityAnchor:trackDensity&&(!anchorHash||repair)?densityReference||input:null,
+   baseRevision:project.uvRevision,geometryRepair:repair,rules:structuredClone(rules),diagnostic:diagnostics(next,output)};
+  const recovery=uvRecoveryMessage(uvMode,next);
+  refreshUV();status(fromSource?'源 UV 已作为候选恢复 · 比较后采用':(recovery||'UV 候选已生成')+' · 比较后采用');
+  if(!fromSource&&!forExport)toast(recovery?recovery+'。请比较并采用候选。':'候选仅供比较，当前模型尚未改变。');
+  return candidate;
+ }catch(e){if(e.name!=='AbortError')toast(e.message,true);status(e.name==='AbortError'?'已取消，当前工程保留。':e.message);}
+ finally{gate.finish(task);setBusy(false);}
+}
+async function restoreSourceUV(){return runUV('tangents',{fromSource:true});}
+async function acceptUV(){
+ if(busy||!candidate)return;
+ const chosen=candidate,repair=chosen.geometryRepair;
+ if(chosen.baseRevision!==project.uvRevision||repair&&repair.originalHash!==project.resources.source)return toast('候选已过期，请重新生成。',true);
+ if(chosen.diagnostic.overlap>Math.max(model.diagnostic.overlap,.00001)+.00001||chosen.diagnostic.outOfRangeFaces||chosen.diagnostic.zeroUvFaces)return toast('候选存在重叠或无效 UV，不能采用。',true);
+ const task=gate.begin('adopt UV');setBusy(true);
+ try{
+  const output=chosen.output||project.output,clearance=await ensureClearance(chosen.mesh,{task,retry:true});
+  if(!gate.accepts(task))throw abort();
+  assertUvClearance(clearance,output,{allowOriginal:chosen.mode==='original'});
+  const hash=await put(encodeUvResult(chosen.mesh));
+  if(!gate.accepts(task))throw abort();
+  let draft=project;
+  if(repair){
+   const sourceHash=await put(repair.source.sourceBytes);
+   if(sourceHash!==repair.source.sourceSHA256)throw Error('修复源模型保存校验失败。');
+   draft=rebindRepairedMaterialProject(project,repair.source,repair.faces);
+   draft.id=crypto.randomUUID();draft.name=project.name.slice(0,160)+'_几何修复';draft.createdAt=new Date().toISOString();
+  }
+  const resources={...draft.resources,working:hash};
+  if(chosen.mode!=='repack')delete resources.uvDensityReference;
+  if(chosen.densityAnchor)resources.uvDensityReference=await put(encodeMeshInput(chosen.densityAnchor));
+  if(!gate.accepts(task))throw abort();
+  const revision=project.uvRevision+1;
+  const adopted=validateDocument({...draft,output:{...output,includeModel:repair?true:output.includeModel},resources,uvMode:chosen.mode,uvRevision:revision,
+   uvOptions:{revision,pins:chosen.mesh.packing?.pinnedIslands||[],weights:chosen.mesh.packing?.relativeDensityWeights||{}},uvPacking:chosen.mesh.packing});
+  if(repair){
+   gate.finish(task);
+   await restore(adopted,{preserveCurrent:true,resetView:false,saveCopy:true});
+   history.reset(project);setValues();
+   status('修复副本已采用 UV · 导出会附带配套 GLB 模型');
+   return true;
+  }
+  project=adopted;candidate=null;selectedUVIsland=-1;setValues();showModel(chosen.mesh,{reset:false});commit();
+  $('aoBadge').textContent=aoRecord?'新 UV · 表面 AO 已复用':'新 UV · AO 待烘焙';status('新 UV 已采用 · 导出会附带配套 GLB 模型');
+  return true;
+ }catch(e){if(e.name!=='AbortError')toast(e.message,true);}
+ finally{gate.finish(task);setBusy(false);apply();}
+}
+
+function needsDistributionAO(doc){
+ if(!doc?.surface.active&&doc?.maskMode!=='pixel')return false;
+ const surface=flattenLayerSurface(syncLegacySurface(doc));
+ return distributionDependencies(surface,{hasCurvature:true}).some(item=>item.type==='ao');
+}
+async function bakeSourceAO(input,task,samples){
+ const worker=new Worker('./ao-worker.js',{type:'module'}),start=performance.now(),previousCancel=task.cancel;
+ try{
+  const result=await new Promise((resolve,reject)=>{
+   task.cancel=()=>{worker.terminate();reject(abort());};
+   worker.onmessage=({data})=>{
+    if(!gate.accepts(task))return reject(abort());
+    if(data.error)return reject(Error(data.error));
+    if(data.done)return resolve(data);
+    status('几何 AO · '+Math.round(data.progress*100)+'%',data.progress);
+   };
+   worker.onerror=error=>reject(Error(error.message||'AO失败'));
+   const pos=input.pos.slice(),normal=input.normal.slice(),indices=input.indices.slice();
+   worker.postMessage({pos,normal,indices,height:input.height,samples,range:.12},[pos.buffer,normal.buffer,indices.buffer]);
+  });
+  if(!gate.accepts(task))throw abort();
+  const meta={method:'cosine-weighted hemisphere rays at source vertices',samples:result.samples,rangeInTreeHeight:result.range,
+   seconds:(performance.now()-start)/1000,sourceSHA256:input.sourceSHA256,vertices:input.pos.length/3,sourceHeightUnits:input.height};
+  const hash=await put(encodeAO(result.ao,meta));
+  if(!gate.accepts(task))throw abort();
+  return {result,meta,hash};
+ }finally{worker.terminate();task.cancel=previousCancel;}
+}
+async function prepareStoredAO(source,doc,task){
+ const needed=needsDistributionAO(doc);
+ if(doc.resources.ao){
+  try{
+   const bytes=await request('blobs/'+doc.resources.ao,{binary:true});
+   if(!gate.accepts(task))throw abort();
+   const cached=decodeAO(bytes,source);
+   source.ao=cached.ao;
+   return cached;
+  }catch(error){
+   if(!gate.accepts(task)||error.name==='AbortError')throw abort();
+   doc.resources.ao=null;
+   if(!needed)toast('AO缓存需要重新烘焙：'+error.message);
+  }
+ }
+ if(!needed)return null;
+ status('正在为材质分布计算模型 AO…');
+ const {result,meta,hash}=await bakeSourceAO(source,task,doc.bake?.aoSamples||32);
+ source.ao=result.ao;
+ doc.resources.ao=hash;
+ return {ao:result.ao,meta};
+}
+async function computeAO(task,{persistDocument=true}={}){
+ if(!model)throw Error('请先导入模型。');
+ const input=sourceModel||model,displayModel=model;
+ const {result,meta,hash}=await bakeSourceAO(input,task,Number($('aoSamples').value));
+ if(!gate.accepts(task)||model!==displayModel)throw abort();
+ input.ao=result.ao;
+ renderer.setAO(remapSurfaceData(result.ao,model,1));
+ aoRecord=meta;
+ project.resources.ao=hash;project.bake={aoSamples:result.samples};
+ if(persistDocument)commit();
+ $('aoBadge').textContent=`AO 已就绪 · ${result.samples} 射线`;
+ return result;
+}
 async function runAO({strict=false}={}){if(busy||!model){if(strict)throw Error('工作台当前无法准备模型 AO。');return;}const task=gate.begin('AO');setBusy(true);try{await computeAO(task);status('几何 AO 完成');}catch(e){if(e.name!=='AbortError')toast(e.message,true);status(e.message);if(strict)throw e;}finally{gate.finish(task);setBusy(false);updateSurfaceQueued();}}
 async function ensureWorking(task){if(project.resources.working)return;const next=await applyUvResult(model,await nativeResult(model,'tangents',task),{mode:'original',revision:0}),hash=await put(encodeUvResult(next));if(!gate.accepts(task))throw abort();project.resources.working=hash;showModel(next,{reset:false});commit();}
 async function bakeOutput(task,{persistDocument=true,forceModel=false}={}){
  if(renderer.graphicsMaterialProfile==='basic')assertBasicMaterialExport(project,settings,renderer);
  if(project.materialBase&&renderer.sourceOverlay?.atlas.width!==project.output.resolution){const staged=await stageSourceAtlas(sourceModel,model,project,task);renderer.acceptSourceOverlay(staged);}
- if(partMaterialError)throw Error(partMaterialError);if(settings.directional&&settings.directionMode===3&&(!project.barkFlow||flowFieldKey!==flowKey()))throw Error('枝干流向尚未更新，请采用候选或更新当前流向。');assertRecordedPadding(project.uvPacking,project.output);const d=model.diagnostic;if(d.outOfRangeFaces||d.zeroUvFaces||d.overlap>.001)throw Error('当前UV有越界、零面积或重叠，请先整理UV。');await prepareBakeSurface({isCancelled:()=>!gate.accepts(task)||appDisposed,waitSurface:async()=>{if(project.surface.active||project.maskMode==='pixel')task.cancel=()=>{pixelSession?.dispose();surfaceWorkbench?.reset();};await surfacePending;if(surfaceError)throw Error('遮罩尚未完整更新：'+surfaceError.message);},ensureWorking:()=>ensureWorking(task),refineMasks:async()=>{if(!aoRecord)await computeAO(task,{persistDocument});if(project.maskMode==='pixel'||project.surface.active){status('生成最终分辨率的表面遮罩…',.04);await updateSurface({size:project.output.resolution,task});}}});const clearance=await ensureClearance(model,{task,retry:true}),clearanceMetrics=assertUvClearance(clearance,project.output,{allowOriginal:model.uvSHA256===model.sourceUvSHA256});if(!aoRecord)await computeAO(task,{persistDocument});const size=project.output.resolution,maps=project.surface.effects.some(e=>e.paint)?await materialPaintWorkbench.bake(size,{shouldCancel:()=>!gate.accepts(task),onProgress:p=>status('烘焙材质笔触 · '+Math.round(p*100)+'%',.1+p*.6)}):[];for(const [pass,label]of (maps.length?[]:['BaseColor','Normal','ORM']).entries()){if(!gate.accepts(task))throw abort();status('烘焙 '+label+' · '+size,.1+pass*.2);await tick();if(!gate.accepts(task))throw abort();maps.push(await renderer.bakeAsync(pass,size,{shouldCancel:()=>!gate.accepts(task),onProgress:p=>status('烘焙 '+label+' · '+Math.round(p*100)+'%',.1+pass*.2+p*.2)}));}const emStrength=emissionMaximum(flattenLayerSurface(syncLegacySurface({...project,settings})));let emissivePNG=null;if(emStrength>0){status('烘焙 Emissive · '+size,.74);const rgba=await renderer.bakeAsync(14,size,{shouldCancel:()=>!gate.accepts(task)});emissivePNG=await encodeEmissionPNG(size,rgba,{shouldCancel:()=>!gate.accepts(task)||appDisposed});}const meta={...(emissivePNG?{emission:{version:1,encoding:'png-srgb',byteLength:emissivePNG.length,strength:emStrength}}:{}),sculptMaterial:project.sculptMaterial,...(project.materialBase?{materialBase:{...project.materialBase,affectedSlots:flattenLayerSurface(syncLegacySurface({...project,settings})).effects.some(e=>e.enabled&&e.opacity>0)?project.materialBase.affectedSlots:[]}}:{}),includeModel:!!project.materialBase||forceModel||project.uvRevision>0||!!project.output.includeModel||!!model.requiresPairedMesh,width:size,height:size,padding:project.output.padding,settings:{...settings,originalMix:model.original&&model.hasSourceColorUV?settings.originalMix:0,asset:project.resources.bark},modelName:model.name,sourceSHA256:model.sourceSHA256,uvSHA256:model.uvSHA256,ao:aoRecord,actualHeightMeters:project.actualHeightMeters,resources:project.resources,referenceDataInfo:renderer.referenceInfo,sourceUvSHA256:model.sourceUvSHA256,uvRevision:project.uvRevision,uvMode:project.uvMode,parts:project.parts,partMaterials:project.partMaterials,regions:project.regions,uvOptions:project.uvOptions,uvCutRules:project.uvCutRules,barkFlow:project.barkFlow,barkFlowAnalysis:sourceModel?.barkFlow?.summary||null,directionCorrections:project.directionCorrections,flowTransition:project.flowTransition,uvPacking:project.uvPacking,uvClearance:clearanceMetrics,surfaceAlgorithmVersion:project.partMaterials.some(entry=>entry.enabled)?6:project.regions.some(r=>r.partId)?5:project.regions.some(r=>r.scope)?4:project.maskMode==='pixel'?3:1,maskMode:project.maskMode,surface:syncLegacySurface({...project,settings}),surfaceEffectiveLayers:surfaceWorkbench?.runtime()?.surface.effects.map(e=>({id:e.id,enabled:e.enabled,opacity:e.opacity,parentIds:e.parentIds||[]})),surfaceAnalysis:renderer.surfaceAnalysis,surfaceRuleAlgorithm:project.surface.active&&renderer.surfaceRuleAlgorithm?renderer.surfaceRuleAlgorithm:project.surface.masks.some(m=>m.items.some(r=>['treeauto','distribution'].includes(r.type)))?'surface-rule-stack-v4':'surface-rule-stack-v3',layers:project.layers,microdetail:project.microdetail,microdetailTileSHA256:project.microdetail?.enabled?renderer.microdetailSet?.tile?.contentSHA256:null},json=new TextEncoder().encode(JSON.stringify(meta)),head=new Uint8Array(4);new DataView(head.buffer).setUint32(0,json.length,true);status('扩边、模型和 PNG 打包…',.82);await tick();if(!gate.accepts(task))throw abort();const payload=new Blob([head,json,...maps,...(emissivePNG?[emissivePNG]:[])]);if(payload.size>210000000)throw Error('包含发光的导出超过当前容量，请使用 2K 分辨率。');const result=await submitExport(payload,task);return result;}
-async function exportTextures(options={}){if(busy)return;if(!model)return toast('请先导入GLB。',true);commit();const d=model.diagnostic;if(d.outOfRangeFaces||d.zeroUvFaces||d.overlap>.001)return toast('当前 UV 有越界、零面积或重叠，请先重展并采用有效结果。',true);const task=gate.begin('export');setBusy(true);try{const result=await bakeOutput(task,{forceModel:finalGLBRequest(options)});if(finalGLBRequest(options)&&!result.model)throw Error('最终GLB未生成，请检查模型与UV。');if(!gate.accepts(task)&&!result.committed)throw abort();$('downloadResult').href=result.zip;$('downloadResult').classList.remove('hidden');$('exportState').textContent='已导出 '+result.resolution/1024+'K'+(result.uvClearance?.safe===false?' · 原UV间距/重叠风险':'');$('exportState').title=result.folder;status((result.completedBeforeCancellation?'取消前已完成导出 · ':'导出完成 · ')+result.folder,1);toast((result.model?'已输出配套 GLB、BaseColor、Normal GL / DX、ORM 和版本清单。':'已输出 BaseColor、Normal GL / DX、ORM 和版本清单，可用于原模型UV。')+(result.uvClearance?.safe===false?' 原UV间距/重叠风险或未核实，已记录于清单，请检查mip和接缝。':''));window.lastExport=result;bakedPreview?.noteExport(result);exportWorkspace?.noteExport(result);if(desktopHost){$('openOutput').classList.remove('hidden');$('openOutput').onclick=()=>openOutputFolder(result.folder);}notifyExport(result);return result;}catch(e){if(e.name!=='AbortError')toast(e.message,true);status(e.name==='AbortError'?'导出已取消':e.message);}finally{gate.finish(task);setBusy(false);previewMaps();}}
-async function exportFinalGLB(){if(busy||appDisposed)return;workspaceView.set({stage:'export'});return exportTextures({finalGLB:true});}
+ if(partMaterialError)throw Error(partMaterialError);if(settings.directional&&settings.directionMode===3&&(!project.barkFlow||flowFieldKey!==flowKey()))throw Error('枝干流向尚未更新，请采用候选或更新当前流向。');assertRecordedPadding(project.uvPacking,project.output);
+ if(['invalid','confirm-overlap'].includes(exportUvState(project,model)))throw Error('当前 UV 有越界、零面积或未经确认的重叠，请先整理 UV。');
+ await prepareBakeSurface({isCancelled:()=>!gate.accepts(task)||appDisposed,waitSurface:async()=>{
+  if(project.surface.active||project.maskMode==='pixel')task.cancel=()=>{pixelSession?.dispose();surfaceWorkbench?.reset();};
+  await surfacePending;
+  if(!gate.accepts(task))throw abort();
+  if(!aoRecord&&needsDistributionAO(project)){await computeAO(task,{persistDocument});await updateSurface({task});}
+  if(surfaceError)throw Error('遮罩尚未完整更新：'+surfaceError.message);
+ },ensureWorking:()=>ensureWorking(task),refineMasks:async()=>{if(!aoRecord)await computeAO(task,{persistDocument});if(project.maskMode==='pixel'||project.surface.active){status('生成最终分辨率的表面遮罩…',.04);await updateSurface({size:project.output.resolution,task});}}});const clearance=await ensureClearance(model,{task,retry:true}),clearanceMetrics=assertUvClearance(clearance,project.output,{allowOriginal:model.uvSHA256===model.sourceUvSHA256});if(!aoRecord)await computeAO(task,{persistDocument});const size=project.output.resolution,maps=project.surface.effects.some(e=>e.paint)?await materialPaintWorkbench.bake(size,{shouldCancel:()=>!gate.accepts(task),onProgress:p=>status('烘焙材质笔触 · '+Math.round(p*100)+'%',.1+p*.6)}):[];for(const [pass,label]of (maps.length?[]:['BaseColor','Normal','ORM']).entries()){if(!gate.accepts(task))throw abort();status('烘焙 '+label+' · '+size,.1+pass*.2);await tick();if(!gate.accepts(task))throw abort();maps.push(await renderer.bakeAsync(pass,size,{shouldCancel:()=>!gate.accepts(task),onProgress:p=>status('烘焙 '+label+' · '+Math.round(p*100)+'%',.1+pass*.2+p*.2)}));}const emStrength=emissionMaximum(flattenLayerSurface(syncLegacySurface({...project,settings})));let emissivePNG=null;if(emStrength>0){status('烘焙 Emissive · '+size,.74);const rgba=await renderer.bakeAsync(14,size,{shouldCancel:()=>!gate.accepts(task)});emissivePNG=await encodeEmissionPNG(size,rgba,{shouldCancel:()=>!gate.accepts(task)||appDisposed});}const meta={...(emissivePNG?{emission:{version:1,encoding:'png-srgb',byteLength:emissivePNG.length,strength:emStrength}}:{}),sculptMaterial:project.sculptMaterial,...(project.materialBase?{materialBase:{...project.materialBase,affectedSlots:flattenLayerSurface(syncLegacySurface({...project,settings})).effects.some(e=>e.enabled&&e.opacity>0)?project.materialBase.affectedSlots:[]}}:{}),includeModel:!!project.materialBase||forceModel||project.uvRevision>0||!!project.output.includeModel||!!model.requiresPairedMesh,width:size,height:size,padding:project.output.padding,settings:{...settings,originalMix:model.original&&model.hasSourceColorUV?settings.originalMix:0,asset:project.resources.bark},modelName:model.name,sourceSHA256:model.sourceSHA256,uvSHA256:model.uvSHA256,ao:aoRecord,actualHeightMeters:project.actualHeightMeters,resources:project.resources,referenceDataInfo:renderer.referenceInfo,sourceUvSHA256:model.sourceUvSHA256,uvRevision:project.uvRevision,uvMode:project.uvMode,parts:project.parts,partMaterials:project.partMaterials,regions:project.regions,uvOptions:project.uvOptions,uvCutRules:project.uvCutRules,barkFlow:project.barkFlow,barkFlowAnalysis:sourceModel?.barkFlow?.summary||null,directionCorrections:project.directionCorrections,flowTransition:project.flowTransition,uvPacking:project.uvPacking,uvClearance:clearanceMetrics,surfaceAlgorithmVersion:project.partMaterials.some(entry=>entry.enabled)?6:project.regions.some(r=>r.partId)?5:project.regions.some(r=>r.scope)?4:project.maskMode==='pixel'?3:1,maskMode:project.maskMode,surface:syncLegacySurface({...project,settings}),surfaceEffectiveLayers:surfaceWorkbench?.runtime()?.surface.effects.map(e=>({id:e.id,enabled:e.enabled,opacity:e.opacity,parentIds:e.parentIds||[]})),surfaceAnalysis:renderer.surfaceAnalysis,surfaceRuleAlgorithm:project.surface.active&&renderer.surfaceRuleAlgorithm?renderer.surfaceRuleAlgorithm:project.surface.masks.some(m=>m.items.some(r=>['treeauto','distribution'].includes(r.type)))?'surface-rule-stack-v4':'surface-rule-stack-v3',layers:project.layers,microdetail:project.microdetail,microdetailTileSHA256:project.microdetail?.enabled?renderer.microdetailSet?.tile?.contentSHA256:null},json=new TextEncoder().encode(JSON.stringify(meta)),head=new Uint8Array(4);new DataView(head.buffer).setUint32(0,json.length,true);status('扩边、模型和 PNG 打包…',.82);await tick();if(!gate.accepts(task))throw abort();const payload=new Blob([head,json,...maps,...(emissivePNG?[emissivePNG]:[])]);if(payload.size>210000000)throw Error('包含发光的导出超过当前容量，请使用 2K 分辨率。');const result=await submitExport(payload,task);return result;}
+async function exportTextures(options={}){
+ if(busy||closingRequested||appDisposed)return;
+ if(!model)return toast('请先导入GLB。',true);
+ if(sourceModel&&workspaceGeometry(sourceModel).removedFaces){
+  const cleaned=await runUV('tangents',{forExport:true});
+  if(!cleaned||candidate!==cleaned||!await acceptUV()||closingRequested||appDisposed)return;
+ }
+ commit();
+ const uvState=exportUvState(project,model);
+ if(uvState==='invalid')return toast('当前 UV 有越界、零面积或重叠，请先重展并采用有效结果。',true);
+ const task=gate.begin('export');setBusy(true);
+ try{
+  if(uvState==='confirm-overlap'){
+   project.acceptedSourceUvOverlap=await confirmSourceUvOverlap(model,model.diagnostic,task);
+   commit();
+  }
+  const result=await bakeOutput(task,{forceModel:finalGLBRequest(options)});if(finalGLBRequest(options)&&!result.model)throw Error('最终GLB未生成，请检查模型与UV。');if(!gate.accepts(task)&&!result.committed)throw abort();$('downloadResult').href=result.zip;$('downloadResult').classList.remove('hidden');$('exportState').textContent='已导出 '+result.resolution/1024+'K'+(result.uvClearance?.safe===false?' · 原UV间距/重叠风险':'');$('exportState').title=result.folder;status((result.completedBeforeCancellation?'取消前已完成导出 · ':'导出完成 · ')+result.folder,1);toast((result.model?'已输出配套 GLB、BaseColor、Normal GL / DX、ORM 和版本清单。':'已输出 BaseColor、Normal GL / DX、ORM 和版本清单，可用于原模型UV。')+(result.uvClearance?.safe===false?' 原UV间距/重叠风险或未核实，已记录于清单，请检查mip和接缝。':''));window.lastExport=result;bakedPreview?.noteExport(result);exportWorkspace?.noteExport(result);if(desktopHost){$('openOutput').classList.remove('hidden');$('openOutput').onclick=()=>openOutputFolder(result.folder);}notifyExport(result);return result;}catch(e){if(e.name!=='AbortError')toast(e.message,true);status(e.name==='AbortError'?'导出已取消':e.message);}finally{gate.finish(task);setBusy(false);previewMaps();}}
+function canExportPreparedUV(){
+ const diagnostic=model?.diagnostic;
+ return !!project?.resources.working&&!!diagnostic&&
+  ((!diagnostic.zeroUvFaces&&!diagnostic.outOfRangeFaces&&diagnostic.overlap<=.001)||!!workspaceGeometry(model).removedFaces);
+}
+function uvRecoveryMessage(mode,result){
+ if(mode!=='tree'&&mode!=='unwrap')return null;
+ if(result.packing?.projectionRecovery)return '已用备用分区生成 UV，接缝可能增加';
+ if(result.packing?.sourceOverlayRepair)return '自动展开出现零面积 UV，已修整并重新排布原有 UV';
+ if(mode==='tree'&&result.uvMode==='unwrap')return '树结构展开出现零面积 UV，已改用自动展开';
+ return null;
+}
+function buildUvCandidate(input,options,task,output,source){
+ const dependencies=uvDependencies(task,{source,output});
+ if(options.mode!=='tree'&&options.mode!=='unwrap')return prepareUvRevision(input,options,dependencies);
+ return prepareUvWithFallback(input,options,dependencies,{
+  isCurrent:()=>gate.accepts(task),
+  onFallback:kind=>{
+   const message=kind==='projection'?'正在尝试按表面方向生成备用 UV…':
+    kind==='repair-existing'?'自动展开含零面积 UV，分离原 UV 的重叠面并重新排布…':
+    '树结构展开含零面积 UV，改用自动展开与排布…';
+   status(message,0);
+  }
+ });
+}
+async function prepareAutomaticUV(){
+ if(busy||appDisposed||closingRequested||!model||project?.materialBase)return;
+ const generated=await runUV('tree');
+ if(generated&&candidate===generated)await acceptUV();
+}
+async function exportPreparedMesh(stage){
+ if(busy||appDisposed||closingRequested||!sourceModel||!project)return;
+ const topology=stage==='topology';
+ let mesh=topology?sourceModel:model;
+ if(!topology&&!canExportPreparedUV())return toast('请先拆排并采用有效 UV。',true);
+ const task=gate.begin('stage GLB');setBusy(true);
+ try{
+  const geometry=workspaceGeometry(mesh);
+  if(geometry.removedFaces){
+   const label=topology?'拓扑 GLB':'UV GLB';
+   await confirmWorkspaceGeometry(mesh,geometry,task,'清理并导出 '+label,'仅从本次导出清理零面积三角面。当前工程和原素材保留。');
+   mesh=await filteredCheckpointMesh(mesh,geometry);
+  }
+  if(!topology){
+   if(geometry.removedFaces){
+    const d=analyzeUV(mesh);
+    if(d.zeroUvFaces||d.outOfRangeFaces||d.overlap>.001)throw Error('清理后保留面的 UV 仍无效或重叠，请先整理 UV。');
+   }
+   assertRecordedPadding(project.uvPacking,project.output);
+   const clearance=await ensureClearance(mesh,{task,retry:true});
+   assertUvClearance(clearance,project.output,{allowOriginal:mesh.uvSHA256===mesh.sourceUvSHA256});
+  }
+  if(!gate.accepts(task)||appDisposed||closingRequested)return;
+  const name=(project.meshOptimization?.sourceName||project.sourceName||project.name).replace(/\.glb$/i,'')+(topology?'_拓扑':'_UV');
+  const bytes=writeGLB(mesh,{name,actualHeightMeters:project.actualHeightMeters,geometryOnly:topology});
+  const url=URL.createObjectURL(new Blob([bytes],{type:'model/gltf-binary'}));
+  const link=document.createElement('a');link.href=url;link.download=name+'.glb';link.click();
+  setTimeout(()=>URL.revokeObjectURL(url),30000);
+  toast((topology?'拓扑 GLB 已生成。':'已采用的 UV GLB 已生成。')+(geometry.removedFaces?'本次导出已清理 '+geometry.removedFaces+' 个退化面。':''));
+ }catch(error){if(error.name!=='AbortError')toast(error.message,true);}
+ finally{gate.finish(task);setBusy(false);}
+}
+function exportCompatibilityError(){
+ if(!project||renderer.graphicsMaterialProfile!=='basic')return null;
+ try{assertBasicMaterialExport(project,settings,renderer);return null;}
+ catch(error){return error.message;}
+}
+function recoverExport(action){
+ if(busy||closingRequested||appDisposed)return;
+ if(action==='material'||action==='distribution'){
+  workspaceView.set({stage:'material'});
+  if(action==='distribution')surfaceStudio?.showData();
+  else surfaceStudio?.showLayers();
+  return;
+ }
+ workspaceView.set({stage:'model'});
+ if(action==='uv')$('prepareOpenUv').click();
+ if(action==='overlay-uv'){
+  $('prepareRoute').value='overlay';
+  $('prepareRoute').dispatchEvent(new Event('change'));
+  $('prepareOverview').click();
+ }
+}
+async function exportFinalGLB(){
+ if(busy||appDisposed)return;
+ workspaceView.set({stage:'export'});
+ return exportTextures({finalGLB:true});
+}
+function exportFromWorkspace(){
+ if(busy||appDisposed)return;
+ workspaceView.set({stage:'export'});
+ exportWorkspace?.sync();
+ if(exportWorkspace&&!exportWorkspace.state.canExport){
+  const detail=exportWorkspace.state.recovery?.detail;
+  if(detail)status(detail);
+  return;
+ }
+ return exportFinalGLB();
+}
 function integrationController(){return {
  flushDraft:()=>persistCurrentDraft({checkpoint:true}),
  async restoreProject(id){if(busy||appDisposed||!/^[a-f0-9-]{36}$/.test(id))throw Error('材质草稿引用无效');await persistCurrentDraft({checkpoint:true});const record=await request('projects/'+id+'?recovery=true');if(!record?.document)throw Error('材质草稿未找到');await restore(record.document);history.reset(project);workspaceView.set({stage:'material'});return {projectId:project.id};},
@@ -537,17 +985,137 @@ function syncReferenceUI(){if(!renderer)return;$('paintDepthSource').textContent
 
 async function importReference(channel,file){if(!file||busy||appDisposed)return;const task=gate.begin('reference'),controller=new AbortController();task.cancel=()=>controller.abort();setBusy(true);let image;try{if(file.size>50000000)throw Error('数据图请小于50MB。');const bytes=new Uint8Array(await file.arrayBuffer()),info=inspectDataPNG(bytes,channel);if(!referenceAspectMatches(renderer.barkAspect,info.width,info.height))throw Error('数据图需与树皮颜色图比例一致。');image=await decodeDataImage(bytes,channel,{signal:controller.signal,onProgress:p=>status('解码数据图…',p)});const hash=await put(bytes);if(!gate.accepts(task))throw abort();await renderer.uploadBitmap(image,{height:'heightMap',roughness:'roughMap',normal:'normalMap'}[channel]);image=null;pendingReferences[channel]=hash;if(project)project.resources[channel]=hash;commit();apply();toast(channel==='normal'?'已使用独立切线法线，请确认输入GL/DX约定。':channel==='height'?'已保留高度位深；法线已载入时需选择是否叠加。':'已使用独立粗糙度图，可调整倍率。');}catch(e){if(e.name!=='AbortError')toast(e.message,true);}finally{image?.close();gate.finish(task);setBusy(false);}}
 
-async function saveRecipe(){if(busy||appDisposed)return;const task=gate.begin('recipe save');setBusy(true);try{const bark=new Uint8Array(await(await fetch(selectedAsset)).arrayBuffer()),height=project?.actualHeightMeters||10,refs=await Promise.all(['height','roughness','normal'].map(c=>pendingReferences[c]?request('blobs/'+pendingReferences[c],{binary:true}):null)),data=await packRecipe({settings:structuredClone(settings),layers:project?.layers||pendingLayers,bark,heightMap:refs[0],roughnessMap:refs[1],normalMap:refs[2],physicalWidthMeters:height/settings.scale,paintHeightMeters:height*settings.paintHeight,microdetail:project?.microdetail||pendingMicrodetail||renderer.microdetailSettings,...(project?{surfaceRecipe:packSurfaceRecipe({...project,surface:syncLegacySurface({...project,settings})})}:{})});if(!gate.accepts(task))throw abort();const link=document.createElement('a'),url=URL.createObjectURL(new Blob([data],{type:'application/octet-stream'}));link.href=url;link.download='树材质配方.treemat';link.click();setTimeout(()=>URL.revokeObjectURL(url),3000);toast('配方已包含全树树皮、数据图、叠加层与尺度；独立部位请另存树皮配方，工程保存全套。');}catch(e){if(e.name!=='AbortError')toast(e.message,true);}finally{gate.finish(task);setBusy(false);}}
+async function saveRecipe(){
+ if(busy||appDisposed)return;
+ const task=gate.begin('recipe save');setBusy(true);
+ try{
+  const surfaceRecipe=project?packSurfaceRecipe({...project,surface:syncLegacySurface({...project,settings})}):undefined;
+  const decalHashes=[...imageDecalsInSurface(surfaceRecipe?.surface).keys()];
+  const [bark,refs,decalEntries]=await Promise.all([
+   fetch(selectedAsset).then(async response=>new Uint8Array(await response.arrayBuffer())),
+   Promise.all(['height','roughness','normal'].map(c=>pendingReferences[c]?request('blobs/'+pendingReferences[c],{binary:true}):null)),
+   Promise.all(decalHashes.map(async hash=>[hash,await request('blobs/'+hash,{binary:true})]))
+  ]);
+  if(!gate.accepts(task))throw abort();
+  const height=project?.actualHeightMeters||10;
+  const data=await packRecipe({settings:structuredClone(settings),layers:project?.layers||pendingLayers,bark,heightMap:refs[0],roughnessMap:refs[1],normalMap:refs[2],physicalWidthMeters:height/settings.scale,paintHeightMeters:height*settings.paintHeight,microdetail:project?.microdetail||pendingMicrodetail||renderer.microdetailSettings,surfaceRecipe,imageDecalFiles:Object.fromEntries(decalEntries)});
+  if(!gate.accepts(task))throw abort();
+  const link=document.createElement('a'),url=URL.createObjectURL(new Blob([data],{type:'application/octet-stream'}));
+  link.href=url;link.download='树材质配方.treemat';link.click();setTimeout(()=>URL.revokeObjectURL(url),3000);
+  toast(decalHashes.length?'配方已包含全树树皮、数据图、叠加层、图片贴花与尺度；独立部位请另存树皮配方。':'配方已包含全树树皮、数据图、叠加层与尺度；独立部位请另存树皮配方，工程保存全套。');
+ }catch(e){if(e.name!=='AbortError')toast(e.message,true);}
+ finally{gate.finish(task);setBusy(false);}
+}
 async function loadRecipeFile(file){if(!file||busy||appDisposed)return;const task=gate.begin('recipe load');setBusy(true);let images=[],baseStage=null,microStage=null;try{if(file.size>RECIPE_LIMIT)throw Error('配方文件超过容量限制。');let raw;if(file.name.toLowerCase().endsWith('.json'))raw=JSON.parse(await file.text());else raw=await unpackRecipe(new Uint8Array(await file.arrayBuffer()));if(!gate.accepts(task))throw abort();let next=validateSettings(raw.settings||raw);if(Number.isFinite(raw.physicalWidthMeters))next.scale=Math.max(.01,Math.min(10000,(project?.actualHeightMeters||10)/raw.physicalWidthMeters));if(Number.isFinite(raw.paintHeightMeters))next.paintHeight=Math.max(0,Math.min(.5,raw.paintHeightMeters/(project?.actualHeightMeters||10)));next=applyLayerLocks(settings,next,project?.layers);const layers=raw.layers?mergeRecipeLayers(project?.layers||pendingLayers,raw.layers):(project?.layers||pendingLayers);const nextMicro=microdetailPanel?.recipe(raw.microdetail),nextSurface=raw.surfaceRecipe&&project?importSurfaceRecipe(raw.surfaceRecipe,project):null;if(nextSurface&&project.surface.effects.some(e=>e.locked))throw Error('当前有锁定效果，请先解锁再载入整套实例配方。');let hashes;
+ if(raw.imageDecalFiles&&!nextSurface)throw Error('请先载入模型，再应用含图片贴花的配方。');
+ if(nextSurface){
+  const decals=imageDecalsInSurface(nextSurface.surface);
+  for(const hash of decals.keys()){
+   if(!gate.accepts(task))throw abort();
+   const bytes=raw.imageDecalFiles?.[hash];
+   if(!(bytes instanceof Uint8Array))throw Error('配方缺少图片贴花素材。');
+   if(await put(bytes)!==hash)throw Error('配方贴花素材写入校验失败。');
+  }
+  if(decals.size)await imageDecalCache.validate(nextSurface.surface);
+ }
+ if(!gate.accepts(task))throw abort();
  if(raw.bark){images=await decodeTaskImages({bark:raw.bark,references:{height:raw.heightMap?'heightMap':null,roughness:raw.roughnessMap?'roughnessMap':null,normal:raw.normalMap?'normalMap':null}},task,key=>raw[key]);hashes=await Promise.all([raw.bark,raw.heightMap,raw.roughnessMap,raw.normalMap].map(data=>data?put(data):null));}
  if(hashes){try{baseStage=await renderer.stageMaterialImages(images,{keepOriginal:true});}finally{images=[];}}microStage=await microdetailPanel?.stage(nextMicro,task);if(!gate.accepts(task)||appDisposed||renderer.disposed||microStage&&renderer.microdetailSet!==microStage.previous)throw abort();if(microStage){renderer.acceptMicrodetailStage(microStage);microStage=null;pendingMicrodetail=structuredClone(renderer.microdetailSettings);if(project)project.microdetail=structuredClone(pendingMicrodetail);}if(hashes){renderer.acceptMaterialStage(baseStage);baseStage=null;selectedAsset=blobURL(hashes[0]);pendingReferences={height:hashes[1],roughness:hashes[2],normal:hashes[3]};if(project)project=adoptSculptBark(adoptFeaturedBark(project,null,{bark:hashes[0],...pendingReferences}),null,{});const recipeMaps=Object.fromEntries(['height','roughness','normal'].flatMap((k,i)=>hashes[i+1]?[[k,{url:blobURL(hashes[i+1]),hash:hashes[i+1]}]]:[])),button=addAsset({name:'配方树皮素材',url:selectedAsset,hash:hashes[0],normalConvention:next.normalDirectX?'DirectX':'OpenGL',...(Object.keys(recipeMaps).length?{dataMaps:recipeMaps}:{})});document.querySelectorAll('.asset').forEach(e=>e.classList.toggle('active',e===button));}if(next.directionMode===3&&!project?.barkFlow){next.directionMode=2;toast('当前模型还没有枝干流向，先保留表面近似方向；可生成候选后采用。');}settings=next;if(project)delete project.sculptMaterial;if(layers)pendingLayers=structuredClone(layers);if(project&&layers)project.layers=layers;if(nextSurface)project.surface=nextSurface.surface;commit();syncMaskUI();apply();updateSurfaceQueued();if(nextSurface?.warnings.length)toast(nextSurface.warnings.join(' '));toast('材质配方已载入；保留当前模型、UV和局部笔触。');}catch(e){if(e.name!=='AbortError')toast(e.message,true);}finally{for(const image of images)image?.close();if(baseStage)disposeTextureSet(renderer.gl,baseStage);microStage?.rollback();gate.finish(task);setBusy(false);}}
 let batchItems=[],assetCatalog=[],referenceImportChannel='height';
-function renderBatch(report=null){if(appDisposed)return;$('batchList').replaceChildren();for(const item of batchItems){const job=report?.items.find(j=>j.item.id===item.id),row=document.createElement('div');row.className='batch-item';const name=document.createElement('b');name.textContent=item.name;const label=document.createElement('span');label.textContent=job?({pending:'待处理',running:'处理中',complete:'完成',failed:'失败',cancelled:'已取消',skipped:'未执行'}[job.state]):'待处理';row.append(name,label);const fields=document.createElement('div');fields.className='batch-fields';const height=document.createElement('input');height.type='number';height.min='.1';height.max='200';height.step='.1';height.value=item.actualHeightMeters;height.title='本模型实际高度（米）';height.disabled=busy;height.onchange=()=>{const v=Number(height.value);if(v>=.1&&v<=200)item.actualHeightMeters=v;else height.value=item.actualHeightMeters;};const uv=document.createElement('select');for(const [value,text]of [['keep','当前/原UV'],['repack','重排UV'],['unwrap','自动重展'],['tree','树形条带UV']]){const option=document.createElement('option');option.value=value;option.textContent=text;uv.append(option);}uv.value=item.uvMode;uv.disabled=busy;uv.onchange=()=>item.uvMode=uv.value;fields.append(height,uv);row.append(fields);if(job?.error){const error=document.createElement('small');error.textContent=job.error;row.append(error);}if(job?.result?.zip){const a=document.createElement('a');a.href=job.result.zip;a.textContent=job.result.model?'贴图与模型包':'贴图包';a.download='';row.append(a);}$('batchList').append(row);}}
-async function runBatch(){if(busy||!batchItems.length)return;if(project?.materialBase)return toast('原材质叠加请按每个模型的材质槽单独导出。',true);renderer.finishInteraction?.();commit();const backup=project&&structuredClone(project),previousCandidate=candidate,previousPartId=selectedPartId,previousCamera={yaw:renderer.yaw,pitch:renderer.pitch,radius:renderer.radius,pan:[...renderer.pan],focus:renderer.focus?[...renderer.focus]:null,mode:renderer.mode,orthographic:!!renderer.orthographic,selectionPoint:renderer.selectionPoint?.slice()||null},frozenSettings=structuredClone(settings),frozenMicrodetail=structuredClone(project?.microdetail||pendingMicrodetail),tileMeters=(project?.actualHeightMeters||10)/settings.scale,output=project?.output||{resolution:Number($('resolution').value),padding:Number($('padding').value)},aoSamples=Number($('aoSamples').value),files=new Map(batchItems.map(i=>[i.id,i.file])),task=gate.begin('batch');partSuggestions?.suspend();setBusy(true);let report;
-  try{await persistCurrentDraft({checkpoint:true});if(!gate.accepts(task))throw abort();await surfacePending;if(surfaceError)throw surfaceError;const barkBytes=await(await fetch(selectedAsset)).arrayBuffer(),barkHash=await put(barkBytes);report=await runBatchQueue(batchItems.map(({file,...meta})=>meta),{isCancelled:()=>!gate.accepts(task)||appDisposed,onChange:renderBatch,process:async(item,index)=>{
-    if(!gate.accepts(task))throw abort();status(`批量 ${index+1}/${batchItems.length} · ${item.name}`);const bytes=await files.get(item.id).arrayBuffer(),source=await parseGLB(bytes,item.name),sourceHash=await put(bytes),sameSource=sourceHash===backup?.resources.source,doc=createDocument({source:sourceHash,name:item.name,settings:frozenSettings,bark:barkHash,actualHeightMeters:item.actualHeightMeters});doc.output={...output};if(frozenMicrodetail)doc.microdetail=structuredClone(frozenMicrodetail);Object.assign(doc.resources,pendingReferences);doc.bake={aoSamples};doc.regions=sameSource?structuredClone(backup.regions):[];doc.parts=sameSource?structuredClone(backup.parts):emptyParts(sourceHash);doc.partMaterials=sameSource?structuredClone(backup.partMaterials):[];doc.resources=partMaterialResources(doc.resources,doc.partMaterials);doc.layers=structuredClone(backup?.layers||defaultLayers());doc.maskMode=backup?.maskMode||'pixel';doc.uvCutRules=sameSource?structuredClone(backup.uvCutRules):emptyCutRules();doc.barkFlow=sameSource?structuredClone(backup.barkFlow):null;doc.directionCorrections=sameSource?structuredClone(backup.directionCorrections):[];doc.flowTransition=backup?.flowTransition??1;doc.treeUV=structuredClone(backup.treeUV);doc.partSuggestionOptions=structuredClone(backup.partSuggestionOptions);doc.surface=importSurfaceRecipe(packSurfaceRecipe(backup),doc).surface;let staged=null,images=[],materialStage=null;
-    try{let importedFlow=null;if(frozenSettings.directional&&frozenSettings.directionMode===3&&!doc.barkFlow){importedFlow=await prepareImportedBarkFlow(source,doc,{isCurrent:()=>gate.accepts(task),setCancel:cancel=>task.cancel=cancel,onProgress:p=>status('批量榕根表面走势 · '+p.phase,p.progress*.2)});if(importedFlow.warning)throw Error(importedFlow.warning);}staged=await prepareSurface(source,doc,task,{preparedFlow:importedFlow?.field});let next;if(item.uvMode==='keep'&&sameSource&&backup.resources.working){next=await restoreWorkingMesh(source,decodeUvResult(await request('blobs/'+backup.resources.working,{binary:true})),{mode:backup.uvMode,revision:backup.uvRevision});doc.uvRevision=backup.uvRevision;doc.uvMode=backup.uvMode;doc.uvOptions=backup.uvOptions;doc.uvPacking=backup.uvPacking;doc.resources.working=backup.resources.working;}else{const mode=item.uvMode==='keep'?'tangents':item.uvMode;const d=analyzeUV(source);if(mode==='tangents'&&(d.zeroUvFaces||d.outOfRangeFaces||d.overlap>.001))throw Error('原UV不可直接烘焙，请为这一项选择自动重展。');const input=sameSource&&backup.resources.working?await restoreWorkingMesh(source,decodeUvResult(await request('blobs/'+backup.resources.working,{binary:true})),{mode:backup.uvMode,revision:backup.uvRevision}):source,revision=mode==='tangents'?0:sameSource?backup.uvRevision+1:1;next=await prepareUvRevision(input,{mode,revision,resolution:output.resolution,padding:output.padding,rules:sameSource?backup.uvOptions:null,cutRules:doc.uvCutRules,flow:doc.barkFlow,treeOptions:doc.treeUV,actualHeightMeters:doc.actualHeightMeters,corrections:doc.directionCorrections,transition:doc.flowTransition},uvDependencies(task,{source,output}));doc.uvMode=mode==='tangents'?'original':mode;doc.uvRevision=revision;doc.uvPacking=next.packing;doc.uvOptions={revision,pins:next.packing?.pinnedIslands||[],weights:next.packing?.relativeDensityWeights||{}};doc.resources.working=await put(encodeUvResult(next));}
-      task.cancel=()=>staged?.dispose();images=await decodeTaskImages({bark:barkBytes,original:source.original,references:doc.resources},task);if(!gate.accepts(task))throw abort();materialStage=await stageProjectMaterialImages(doc,images,task);images=[];materialStage.commit();materialStage=null;surfaceSession?.dispose();surfaceSession=staged;staged=null;sourceModel=source;surfaceError=null;maskSerial++;project=doc;settings={...frozenSettings,scale:Math.max(.01,Math.min(10000,item.actualHeightMeters/tileMeters)),originalMix:source.original&&source.hasSourceColorUV?frozenSettings.originalMix:0};project.settings=structuredClone(settings);aoRecord=null;candidate=null;images=[];showModel(next);$('aoSamples').value=aoSamples;await computeAO(task,{persistDocument:false});if(distributionDependencies(project.surface,{hasAO:true,hasCurvature:false}).some(item=>item.type==='curvature'))project.surface.analysis.curvature.preparedFor={sourceSHA256:sourceHash,actualHeightMeters:item.actualHeightMeters,radiusMeters:project.surface.analysis.curvature.radiusMeters};await updateSurface({task});const result=await bakeOutput(task,{persistDocument:false});return{...result,sourceSHA256:sourceHash,uvSHA256:next.uvSHA256,uvMode:doc.uvMode,actualHeightMeters:item.actualHeightMeters,flowPolicy:doc.barkFlow?(sameSource?'same-source flow and corrections':'independent skeleton analysis; no foreign local corrections'):'disabled',localMaskPolicy:sameSource?'same-source named parts, height scopes and surface strokes':'rules only; foreign source parts, height scopes and strokes omitted'};
+async function prepareBatchInput(file,item,backup,originalSource,originalWorking,task){
+ const bytes=await file.arrayBuffer();
+ let prepared;
+ try{
+  prepared=await prepareGeometryImport(bytes,item.name,{
+   current:()=>gate.accepts(task)&&!appDisposed,
+   confirm:(source,name)=>!source.geometryRepair||confirmModelNormalRepair({geometryRepair:source.geometryRepair},name,task,{
+    action:'清理并继续此模型',cancelLabel:'跳过此模型',
+    details:'仅从本次批量输出清理零面积三角面，继续按该模型选定的 UV 方式处理。原工程和原 GLB 保留。'
+   })
+  });
+ }catch(error){
+  if(error.name==='AbortError'&&gate.accepts(task)&&!appDisposed)return {skipped:true,reason:'未确认清理退化面，已跳过此模型。'};
+  throw error;
+ }
+ const {source,geometryRepair}=prepared;
+ const sameOriginal=!!geometryRepair&&geometryRepair.originalSHA256===backup?.resources.source;
+ const sameSource=sameOriginal||source.sourceSHA256===backup?.resources.source;
+ let draft=backup,working=null;
+ if(sameOriginal){
+  const geometry=workspaceGeometry(originalSource),faces=survivingFaceMap(geometry);
+  draft=rebindRepairedMaterialProject(backup,source,faces);
+  if(backup.resources.working){
+   working=await restoreRepairedWorkingUV(source,originalWorking,geometry,{mode:backup.uvMode,revision:backup.uvRevision});
+   draft.uvOptions=remapUVIslandRules(backup.uvOptions||{revision:backup.uvRevision,pins:[],weights:{}},originalWorking,working,faces);
+  }
+ }
+ const sourceHash=await put(prepared.bytes);
+ const originalHash=geometryRepair?await put(bytes):null;
+ if(!gate.accepts(task))throw abort();
+ return {source,sourceHash,sameSource,draft,working,originalHash,geometryRepair};
+}
+function renderBatch(report=null){if(appDisposed)return;$('batchList').replaceChildren();for(const item of batchItems){const job=report?.items.find(j=>j.item.id===item.id),row=document.createElement('div');row.className='batch-item';const name=document.createElement('b');name.textContent=item.name;const label=document.createElement('span');label.textContent=job?({pending:'待处理',running:'处理中',complete:'完成',failed:'失败',cancelled:'已取消',skipped:job.error?'已跳过':'未执行'}[job.state]):'待处理';row.append(name,label);const fields=document.createElement('div');fields.className='batch-fields';const height=document.createElement('input');height.type='number';height.min='.1';height.max='200';height.step='.1';height.value=item.actualHeightMeters;height.title='本模型实际高度（米）';height.disabled=busy;height.onchange=()=>{const v=Number(height.value);if(v>=.1&&v<=200)item.actualHeightMeters=v;else height.value=item.actualHeightMeters;};const uv=document.createElement('select');for(const [value,text]of [['keep','当前/原UV'],['repack','重排UV'],['unwrap','自动重展'],['tree','树形条带UV']]){const option=document.createElement('option');option.value=value;option.textContent=text;uv.append(option);}uv.value=item.uvMode;uv.disabled=busy;uv.onchange=()=>item.uvMode=uv.value;fields.append(height,uv);row.append(fields);if(job?.error){const error=document.createElement('small');error.textContent=job.error;row.append(error);}if(job?.result?.zip){const a=document.createElement('a');a.href=job.result.zip;a.textContent=job.result.model?'贴图与模型包':'贴图包';a.download='';row.append(a);}$('batchList').append(row);}}
+async function runBatch(){if(busy||!batchItems.length)return;if(project?.materialBase)return toast('原材质叠加请按每个模型的材质槽单独导出。',true);renderer.finishInteraction?.();commit();const backup=project&&structuredClone(project),originalSource=sourceModel,originalWorking=model,previousCandidate=candidate,previousPartId=selectedPartId,previousCamera={yaw:renderer.yaw,pitch:renderer.pitch,radius:renderer.radius,pan:[...renderer.pan],focus:renderer.focus?[...renderer.focus]:null,mode:renderer.mode,orthographic:!!renderer.orthographic,selectionPoint:renderer.selectionPoint?.slice()||null},frozenSettings=structuredClone(settings),frozenMicrodetail=structuredClone(project?.microdetail||pendingMicrodetail),tileMeters=(project?.actualHeightMeters||10)/settings.scale,output=project?.output||{resolution:Number($('resolution').value),padding:Number($('padding').value)},aoSamples=Number($('aoSamples').value),files=new Map(batchItems.map(i=>[i.id,i.file])),task=gate.begin('batch');partSuggestions?.suspend();setBusy(true);let report;
+  try{await persistCurrentDraft({checkpoint:true});if(!gate.accepts(task))throw abort();await surfacePending;
+   const surfaceState=surfaceWorkbench?.state,missingAO=surfaceState?.error===surfaceError?.message&&isOnlyMissingAO(surfaceState);
+   if(surfaceError&&!missingAO&&(!originalSource||!workspaceGeometry(originalSource).removedFaces))throw surfaceError;
+   const barkBytes=await(await fetch(selectedAsset)).arrayBuffer(),barkHash=await put(barkBytes);report=await runBatchQueue(batchItems.map(({file,...meta})=>meta),{isCancelled:()=>!gate.accepts(task)||appDisposed,onChange:renderBatch,process:async(item,index)=>{
+
+    if(!gate.accepts(task))throw abort();
+    status('批量 '+(index+1)+'/'+batchItems.length+' · '+item.name);
+    const prepared=await prepareBatchInput(files.get(item.id),item,backup,originalSource,originalWorking,task);
+    if(prepared.skipped)return prepared;
+    const {source,sourceHash,sameSource,draft,working,originalHash,geometryRepair}=prepared;
+    const doc=createDocument({source:sourceHash,name:item.name,settings:frozenSettings,bark:barkHash,actualHeightMeters:item.actualHeightMeters});
+    doc.output={...output};
+    if(geometryRepair){doc.output.includeModel=true;doc.resources.highPoly=originalHash;}
+    if(frozenMicrodetail)doc.microdetail=structuredClone(frozenMicrodetail);
+    Object.assign(doc.resources,pendingReferences);doc.bake={aoSamples};
+    doc.regions=sameSource?structuredClone(draft.regions):[];
+    doc.parts=sameSource?structuredClone(draft.parts):emptyParts(sourceHash);
+    doc.partMaterials=sameSource?structuredClone(draft.partMaterials):[];
+    doc.resources=partMaterialResources(doc.resources,doc.partMaterials);
+    doc.layers=structuredClone(draft?.layers||defaultLayers());doc.maskMode=draft?.maskMode||'pixel';
+    doc.uvCutRules=sameSource?structuredClone(draft.uvCutRules):emptyCutRules();
+    doc.barkFlow=sameSource?structuredClone(draft.barkFlow):null;
+    doc.directionCorrections=sameSource?structuredClone(draft.directionCorrections):[];
+    doc.flowTransition=draft?.flowTransition??1;doc.treeUV=structuredClone(draft?.treeUV||doc.treeUV);
+    doc.partSuggestionOptions=structuredClone(draft?.partSuggestionOptions||doc.partSuggestionOptions);
+    if(draft)doc.surface=importSurfaceRecipe(packSurfaceRecipe(draft),doc).surface;
+    let staged=null,images=[],materialStage=null;
+    try{
+     let importedFlow=null;
+     if(frozenSettings.directional&&frozenSettings.directionMode===3&&!doc.barkFlow){
+      importedFlow=await prepareImportedBarkFlow(source,doc,{isCurrent:()=>gate.accepts(task),setCancel:cancel=>task.cancel=cancel,onProgress:p=>status('批量榕根表面走势 · '+p.phase,p.progress*.2)});
+      if(importedFlow.warning)throw Error(importedFlow.warning);
+     }
+     staged=await prepareSurface(source,doc,task,{preparedFlow:importedFlow?.field});
+     const savedWorking=sameSource&&backup.resources.working;
+     const input=working||(savedWorking?await restoreWorkingMesh(source,decodeUvResult(await request('blobs/'+savedWorking,{binary:true})),{mode:draft.uvMode,revision:draft.uvRevision}):source);
+     let next,uvRecovery=null;
+     if(item.uvMode==='keep'&&savedWorking){
+      next=working?await prepareUvRevision(input,{mode:'tangents',revision:draft.uvRevision,resolution:output.resolution,padding:output.padding},uvDependencies(task,{source,output})):input;
+      doc.uvRevision=draft.uvRevision;doc.uvMode=draft.uvMode;doc.uvOptions=draft.uvOptions;doc.uvPacking=draft.uvPacking;
+      next.uvMode=doc.uvMode;
+      doc.resources.working=working?await put(encodeUvResult(next)):savedWorking;
+     }else{
+      const mode=item.uvMode==='keep'?'tangents':item.uvMode;
+      const d=analyzeUV(input);
+      if(mode==='tangents'&&(d.zeroUvFaces||d.outOfRangeFaces||d.overlap>.001))throw Error('原UV不可直接烘焙，请为这一项选择自动重展。');
+      const revision=mode==='tangents'?0:sameSource?draft.uvRevision+1:1;
+      next=await buildUvCandidate(input,{mode,revision,resolution:output.resolution,padding:output.padding,rules:sameSource?draft.uvOptions:null,cutRules:doc.uvCutRules,flow:doc.barkFlow,treeOptions:doc.treeUV,actualHeightMeters:doc.actualHeightMeters,corrections:doc.directionCorrections,transition:doc.flowTransition},task,output,source);
+      if(!gate.accepts(task))throw abort();
+      uvRecovery=uvRecoveryMessage(mode,next);
+      doc.uvMode=next.uvMode;doc.uvRevision=revision;doc.uvPacking=next.packing;
+      doc.uvOptions={revision,pins:next.packing?.pinnedIslands||[],weights:next.packing?.relativeDensityWeights||{}};
+      doc.resources.working=await put(encodeUvResult(next));
+     }
+      task.cancel=()=>staged?.dispose();images=await decodeTaskImages({bark:barkBytes,original:source.original,references:doc.resources},task);if(!gate.accepts(task))throw abort();materialStage=await stageProjectMaterialImages(doc,images,task);images=[];materialStage.commit();materialStage=null;surfaceSession?.dispose();surfaceSession=staged;staged=null;sourceModel=source;surfaceError=null;maskSerial++;project=doc;settings={...frozenSettings,scale:Math.max(.01,Math.min(10000,item.actualHeightMeters/tileMeters)),originalMix:source.original&&source.hasSourceColorUV?frozenSettings.originalMix:0};project.settings=structuredClone(settings);aoRecord=null;candidate=null;images=[];showModel(next);$('aoSamples').value=aoSamples;await computeAO(task,{persistDocument:false});if(distributionDependencies(project.surface,{hasAO:true,hasCurvature:false}).some(item=>item.type==='curvature'))project.surface.analysis.curvature.preparedFor={sourceSHA256:sourceHash,actualHeightMeters:item.actualHeightMeters,radiusMeters:project.surface.analysis.curvature.radiusMeters};await updateSurface({task});
+      const result=await bakeOutput(task,{persistDocument:false});
+      return {...result,...(geometryRepair&&{geometryRepair}),...(uvRecovery&&{uvRecovery}),
+       sourceSHA256:sourceHash,uvSHA256:next.uvSHA256,uvMode:doc.uvMode,actualHeightMeters:item.actualHeightMeters,
+       flowPolicy:doc.barkFlow?(sameSource?'same-source flow and corrections':'independent skeleton analysis; no foreign local corrections'):'disabled',
+       localMaskPolicy:sameSource?'same-source named parts, height scopes and surface strokes':'rules only; foreign source parts, height scopes and strokes omitted'};
     }finally{materialStage?.rollback();staged?.dispose();for(const b of images)b?.close();}
   }});if(!appDisposed){window.lastBatchReport=report;try{const saved=await request('batch-reports',{body:JSON.stringify(report)});$('batchReport').href=saved.url;}catch(e){$('batchReport').href=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json'}));toast('批量报告未写入输出目录，可下载本地报告：'+e.message,true);}$('batchReport').classList.remove('hidden');}}
   catch(e){if(e.name!=='AbortError')toast(e.message,true);status(e.message);}finally{gate.finish(task);if(!appDisposed){try{if(backup){await restore(backup);selectedPartId=previousPartId;candidate=previousCandidate;Object.assign(renderer,previousCamera);renderer.onViewChanged?.();renderer.dirty=true;refreshUV();}else{surfaceSession?.dispose();pixelSession?.dispose();surfaceWorkbench?.reset();materialPaintWorkbench?.reset();pixelSession=null;surfaceSession=null;sourceModel=null;sourceTopologyRecord=null;lastSeamEdge=null;guideSignature=null;project=null;model=null;renderer.clearModel();settings=frozenSettings;pendingMicrodetail=frozenMicrodetail;$('emptyState').classList.remove('hidden');}}catch(e){batchRestoreFailure='批量前工程恢复未完成：'+e.message+'。请先打开原工程/恢复草稿，或导入模型后再关闭。';toast(batchRestoreFailure,true);}partSuggestions?.resume();setBusy(false);renderBatch(report);apply();if(report)status(`批量结束 · 完成 ${report.counts.complete} · 失败 ${report.counts.failed} · 取消/未执行 ${report.counts.cancelled+report.counts.skipped}`,1);}}
@@ -558,14 +1126,21 @@ async function initialize(){try{processingFeedback=createProcessingFeedback({par
  catch(error){if(startup.signal.aborted)return;throw error;}
  finally{window.removeEventListener('pagehide',cancelStartup);}
  if(appDisposed||closingRequested){renderer.dispose();return;}
- removeV040Shell=setupV040Shell({renderer});setupWorkspace();setupParts();setupPartMaterials();setupPartSuggestionPanel();setupMicrodetail();setupBakedPreview();setupSurfaceStudio();exportWorkspace=createExportWorkspace({context:()=>({project,settings,model}),renderer:()=>renderer,current:()=>!appDisposed&&!closingRequested,bakedState:()=>bakedPreview?.state,readiness:()=>({busy:busy||closingRequested,surface:surfaceWorkbench?.state||{},aoReady:!!aoRecord}),previewMaps,exportArchive:()=>exportTextures(),stage:stage=>workspaceView.set({stage})});exportWorkspace.sync();
+ removeV040Shell=setupV040Shell({renderer});setupWorkspace();setupParts();setupPartMaterials();setupPartSuggestionPanel();setupMicrodetail();setupBakedPreview();setupSurfaceStudio();
+ exportWorkspace=createExportWorkspace({
+  context:()=>({project,settings,model}),renderer:()=>renderer,current:()=>!appDisposed&&!closingRequested,bakedState:()=>bakedPreview?.state,
+  readiness:()=>({busy:busy||closingRequested,surface:surfaceWorkbench?.state||{},aoReady:!!aoRecord,
+   geometryNeedsRepair:!!sourceModel&&workspaceGeometry(sourceModel).removedFaces>0,compatibilityError:exportCompatibilityError()}),
+  previewMaps,exportArchive:()=>exportTextures(),recover:recoverExport
+ });
+ exportWorkspace.sync();
  if(renderer.graphicsMaterialProfile==='basic')settings=basicImportSettings(settings);
  renderer.setSettings(settings);notifyStartupProgress('正在载入材质素材…');await renderer.setTexture(selectedAsset);
  if(renderer.graphicsMaterialProfile!=='basic')await loadCoatingAssets(renderer);const [resources,appHealth]=await Promise.all([request('materials'),request('health')]);assetCatalog=resources.items;resources.items.forEach(addAsset);const initialMaterial=assetCatalog.find(a=>a.url===selectedAsset);if(initialMaterial?.dataMaps)await selectAsset(initialMaterial,document.querySelector('.asset.active'));document.querySelector('.version').textContent=appHealth.version+' 开发版';
-  renderer.onFlowPick=pickFlowCorrection;$('generateFlow').onclick=generateFlow;$('acceptFlow').onclick=acceptFlow;$('rejectFlow').onclick=()=>{flowCandidate=null;flowLineKey=null;$('flowPreviewMode').value='material';syncFlowUI();};$('flowAlgorithm').onchange=()=>syncFlowUI();$('flowPreviewMode').onchange=()=>{if(busy)return;renderer.finishInteraction?.();mode(-1);syncFlowUI();};$('rebuildFlow').onclick=()=>rebuildFlow();$('clearFlowCorrections').onclick=()=>rebuildFlow({corrections:[]});$('branchTransition').onchange=()=>{if(project?.barkFlow)rebuildFlow({transition:Number($('branchTransition').value)});};$('showFlowLines').onchange=()=>{renderer.showFlowLines=$('showFlowLines').checked;renderer.dirty=true;};$('flowTool').onclick=()=>{if(busy||!project?.barkFlow)return;renderer.finishInteraction?.();renderer.tool=renderer.tool==='flow'?'orbit':'flow';flowPickStart=null;$('viewportHelp').textContent=renderer.tool==='flow'?'两点校正：点起点和终点 · 中键旋转 · Shift+中键平移':BLENDER_NAV_HINT;syncFlowUI();};
+  renderer.onFlowPick=pickFlowCorrection;$('generateFlow').onclick=generateFlow;$('acceptFlow').onclick=acceptFlow;$('rejectFlow').onclick=()=>{flowCandidate=null;flowLineKey=null;$('flowPreviewMode').value='material';syncFlowUI();};$('flowAlgorithm').onchange=()=>syncFlowUI();$('flowPreviewMode').onchange=()=>{if(busy)return;renderer.finishInteraction?.();mode(-1);syncFlowUI();};$('rebuildFlow').onclick=()=>rebuildFlow();$('clearFlowCorrections').onclick=()=>rebuildFlow({corrections:[]});$('branchTransition').onchange=()=>{if(project?.barkFlow)rebuildFlow({transition:Number($('branchTransition').value)});};$('showFlowLines').onchange=()=>{renderer.showFlowLines=$('showFlowLines').checked;renderer.dirty=true;};$('flowTool').onclick=()=>{if(busy||!project?.barkFlow)return;renderer.finishInteraction?.();renderer.tool=renderer.tool==='flow'?'orbit':'flow';flowPickStart=null;syncViewportHelp();syncFlowUI();};
   renderer.onPickUV=hit=>{if(surfaceStudio?.pickDecal(hit))return;if(busy||!model?.diagnostic.faceIslands)return;selectedUVIsland=model.diagnostic.faceIslands[hit.face];refreshUV();};
   renderer.onUvSeamPick=pickUvSeam;$('protectUVIsland').onclick=toggleProtectIsland;$('clearSeamRules').onclick=()=>changeCutRules(r=>{r.seams=[];lastSeamEdge=null;});$('clearProtection').onclick=()=>changeCutRules(r=>r.protectedFaces=[]);$('restoreSourceUV').onclick=restoreSourceUV;$('showUVGuides').onchange=syncGuideUI;$('showAutoUVSeams').onchange=syncGuideUI;
-  $('uvSeamTool').onclick=()=>{if(!project||busy)return;renderer.tool=renderer.tool==='uvSeam'?'orbit':'uvSeam';lastSeamEdge=null;$('paintTool').classList.remove('active');$('viewportHelp').textContent=renderer.tool==='uvSeam'?'点边标记/切换 · Shift 连线 · Ctrl 擦除 · 中键旋转':BLENDER_NAV_HINT;syncGuideUI();syncToolUI();};
+  $('uvSeamTool').onclick=()=>{if(!project||busy)return;renderer.tool=renderer.tool==='uvSeam'?'orbit':'uvSeam';lastSeamEdge=null;$('paintTool').classList.remove('active');syncViewportHelp();syncGuideUI();syncToolUI();};
   $('currentUV').onclick=e=>{if(busy||!model?.diagnostic.faceIslands)return;const [u,v]=uvCoordinates(e.target,e.clientX,e.clientY);selectedUVIsland=hitUvIsland(model,model.diagnostic.faceIslands,u,v);refreshUV();};
   $('pinUVIsland').onclick=()=>{if(selectedUVIsland<0)return;changeUVRules(r=>{const pins=new Set(r.pins);if(pins.has(selectedUVIsland))pins.delete(selectedUVIsland);else pins.add(selectedUVIsland);r.pins=[...pins].sort((a,b)=>a-b);});};
   $('uvDensity').onchange=()=>{if(selectedUVIsland<0)return;const value=Number($('uvDensity').value);changeUVRules(r=>{if(value===1)delete r.weights[selectedUVIsland];else r.weights[selectedUVIsland]=value;});};
@@ -577,7 +1152,7 @@ async function initialize(){try{processingFeedback=createProcessingFeedback({par
   renderer.onPaint=(hit,event)=>{if(surfaceStudio?.paint(hit,event))return;if(busy||!project||!sourceModel)return;const r=region();if(r.strokes.length>=512){$('maskCount').textContent='当前层已达512个采样点，请撤销、清空或改用较大半径。';return;}const radius=Number($('brushRadius').value);if(!Number.isFinite(radius)||radius<.01||radius>20)return;const last=r.strokes.at(-1);const bary=hit.bary.map(v=>Math.max(0,v)),sum=bary.reduce((a,v)=>a+v,0);const dab={face:hit.face,bary:bary.map(v=>v/sum),radiusMeters:radius,hardness:Number($('brushHardness').value),strength:Number($('brushStrength').value),value:event.ctrlKey||$('brushOperation').value==='erase'?0:1,...(!event.ctrlKey&&($('brushOperation').value==='smooth'||event.shiftKey&&project.maskMode==='pixel')?{operation:'smooth'}:{})};if(shouldSkipDab(sourceModel,last,dab,{sameGesture:strokeDirty,actualHeightMeters:project.actualHeightMeters}))return;r.strokes.push(dab);strokeDirty=true;syncMaskUI();updateSurfaceQueued();};
   renderer.onPaintEnd=()=>{if(materialPaintController?.end())return;if(surfaceStudio?.paintEnd())return;maskGesture=null;if(strokeDirty){strokeDirty=false;commit();}};
   renderer.onMaterialPaintMotion=e=>materialPaintController?.motion(e);
-  $('paintTool').onclick=()=>{if(!project)return;renderer.tool=renderer.tool==='mask'?'orbit':'mask';$('viewportHelp').textContent=renderer.tool==='mask'?'左键遮罩 · Ctrl 擦除 · 中键旋转 · F 半径 · Shift+F 强度':BLENDER_NAV_HINT;$('paintTool').classList.toggle('active',renderer.tool==='mask');if(renderer.tool==='mask'){if(!project.regions.some(r=>r.layer===$('maskLayer').value)){region().mode='painted';commit();updateSurfaceQueued();}mode(8);}syncMaskUI();syncGuideUI();};
+  $('paintTool').onclick=()=>{if(!project)return;renderer.tool=renderer.tool==='mask'?'orbit':'mask';syncViewportHelp();$('paintTool').classList.toggle('active',renderer.tool==='mask');if(renderer.tool==='mask'){if(!project.regions.some(r=>r.layer===$('maskLayer').value)){region().mode='painted';commit();updateSurfaceQueued();}mode(8);}syncMaskUI();syncGuideUI();};
   $('maskLayer').onchange=()=>selectEditingLayer($('maskLayer').value);$('brushOperation').onchange=syncMaskUI;$('maskPrecision').onchange=()=>{if(!project)return;if($('maskPrecision').value==='vertex'&&project.regions.some(r=>r.partId)){syncMaskUI();return toast('图层已限定部位，请保留像素模式或先解除部位限制。',true);}if($('maskPrecision').value==='vertex'&&project.regions.some(r=>r.strokes.some(s=>s.operation==='smooth'))){syncMaskUI();return toast('含平滑笔触时请保留像素遮罩，或先清空这些笔触。',true);}project.maskMode=$('maskPrecision').value;pixelSession?.dispose();pixelSession=null;commit();syncMaskUI();updateSurfaceQueued();};$('maskMode').onchange=()=>{if(!project)return;region().mode=$('maskMode').value;commit();updateSurfaceQueued();};$('clearMask').onclick=()=>{if(!project)return;region().strokes=[];commit();syncMaskUI();updateSurfaceQueued();};
   for(const c of ['color','roughness','height','ao'])$('layerChannel-'+c).onchange=e=>changeLayer(l=>l.channels[c]=e.target.checked);
   $('layerEnabled').onchange=e=>changeLayer(l=>l.enabled=e.target.checked);$('layerLocked').onchange=e=>changeLayer(l=>l.locked=e.target.checked);$('layerOpacity').oninput=e=>changeLayer(l=>l.opacity=Number(e.target.value));$('layerSeed').onchange=e=>{const v=Number(e.target.value);if(Number.isInteger(v)&&v>=0&&v<=10000)changeLayer(l=>l.seed=v);else syncLayerUI();};
@@ -594,7 +1169,14 @@ async function initialize(){try{processingFeedback=createProcessingFeedback({par
    end(task){gate.finish(task);document.body.classList.remove('mesh-optimization-active');if(appDisposed)return;const saved=optimizationView;optimizationView=null;if(model){showModel(model);if(saved)Object.assign(renderer,{mode:saved.mode,yaw:saved.yaw,pitch:saved.pitch,radius:saved.radius,pan:saved.pan,showUvGuides:saved.showUvGuides});}else{renderer.clearModel();$('emptyState').classList.remove('hidden');}if(saved){$('flowPreviewMode').value=saved.flowView;$('showFlowLines').checked=saved.lines;workspaceView.set({stage:saved.stage});}setBusy(false);if(project)scheduleAutosave();},
    async currentBytes(){const hash=project.resources.highPoly||project.resources.source,b=await request('blobs/'+hash,{binary:true});return{bytes:b.buffer,name:project.meshOptimization?.sourceName||project.sourceName||project.name};},
    adopt:async(bytes,name,optimization)=>{const loaded=await loadModel(bytes,name,{optimization});if(loaded)workspaceView.set({stage:'model'});return loaded;}});meshOptimizer.sync();
-  preparationUI=createModelPreparationUI({context:()=>({busy,closing:closingRequested,project,model}),run:operations.wrap(runModelPreparation),rollback:operations.wrap(rollbackModelPreparation),cancel:()=>gate.cancel(),error:message=>toast(message,true),openFlow:()=>{workspaceView.set({stage:'material'});surfaceStudio?.showBaseMaterials();const fold=$('directionMode').closest('details');fold.open=true;fold.scrollIntoView({block:'nearest'});}});preparationUI.sync();
+  preparationUI=createModelPreparationUI({
+   context:()=>({busy,closing:closingRequested,project,model,uvReady:canExportPreparedUV()}),
+   exportMesh:operations.wrap(exportPreparedMesh),autoUV:operations.wrap(prepareAutomaticUV),run:operations.wrap(runModelPreparation),
+   rollback:operations.wrap(rollbackModelPreparation),cancel:()=>gate.cancel(),error:message=>toast(message,true),
+   openOptimizeFile:operations.wrap(async file=>loadModel(await file.arrayBuffer(),file.name)),
+   openFlow:()=>{workspaceView.set({stage:'material'});surfaceStudio?.showBaseMaterials();const fold=$('directionMode').closest('details');fold.open=true;fold.scrollIntoView({block:'nearest'});}
+  });
+  preparationUI.sync();
   $('importModel').onclick=()=>$('modelFile').click();$('modelFile').onchange=async e=>{const f=e.target.files[0];if(f){if(f.size>150000000)toast('模型请控制在150MB以内。',true);else await loadModel(await f.arrayBuffer(),f.name);}e.target.value='';};
   $('importBark').onclick=()=>$('barkFile').click();$('barkFile').onchange=async e=>{const f=e.target.files[0],originProject=project?.id,originAsset=selectedAsset,originEpoch=gate.epoch;try{if(!f)return;if(f.size>50000000)throw Error('素材需要小于50MB。');const bitmap=await createImageBitmap(f);if(Math.max(bitmap.width,bitmap.height)>8192){bitmap.close();throw Error('素材长边请控制在8192以内。');}const c=new OffscreenCanvas(bitmap.width,bitmap.height);c.getContext('2d').drawImage(bitmap,0,0);bitmap.close();const png=await c.convertToBlob({type:'image/png'}),asset=await request('material',{body:png});if(appDisposed)return;const button=addAsset(asset);if(originProject===project?.id&&originAsset===selectedAsset&&originEpoch===gate.epoch&&!busy)await selectAsset(asset,button);else toast('素材已加入素材架，可在当前工程中点选使用。');}catch(e){toast(e.message,true);}finally{$('barkFile').value='';}};
   $('saveProject').onclick=saveProject;$('loadProject').onclick=openProjectDialog;$('projectDialogClose').onclick=()=>$('projectDialog').close();$('projectDialogBack').onclick=openProjectDialog;$('importProjectBundle').onclick=()=>{$('projectDialog').close();$('projectFile').click();};$('projectFile').onchange=async e=>{try{await importProjectFile(e.target.files[0]);}finally{e.target.value='';}};
@@ -605,10 +1187,10 @@ async function initialize(){try{processingFeedback=createProcessingFeedback({par
   document.querySelectorAll('[data-mode]').forEach(e=>e.onclick=()=>mode(Number(e.dataset.mode)));document.querySelectorAll('[data-map]').forEach(e=>e.onclick=()=>{if(workspaceView.state.stage==='export')exportWorkspace?.openMap(Number(e.dataset.map));else mode(Number(e.dataset.map));});$('showClearance').onchange=refreshUV;$('cancelClearance').onclick=()=>{clearanceJobs.get(model)?.dispose();if(candidate)clearanceJobs.get(candidate.mesh)?.dispose();};$('remeasureClearance').onclick=()=>{if(!model||busy)return;const next=candidate?.mesh||model;clearanceJobs.get(next)?.dispose();clearanceJobs.delete(next);next.clearanceReport=null;next.clearanceError=null;next.clearanceCancelled=false;queueClearance(next);refreshUV();};$('previewLight').onchange=()=>{renderer.lightMode=$('previewLight').value;renderer.dirty=true;};$('nearView').onclick=()=>{if(!model)return;if(!renderer.focus)renderer.focus=[(model.max[0]-model.min[0])/model.height/2,.06,(model.max[2]-model.min[2])/model.height/2];renderer.radius=Math.max(.025,Math.min(1.6,1.2/(project?.actualHeightMeters||10)));renderer.pan=[0,0];renderer.dirty=true;};$('resetView').onclick=()=>renderer.frameAll();$('barkReliefPreset').onclick=()=>{if(busy||!project)return;settings={...settings,normalStrength:2,barkReliefMm:5,barkCavity:.55};commit();apply();toast('已增强全树默认树皮起伏；可撤销，独立部位材质仍按各自参数。');};$('resetSettings').onclick=()=>{settings=applyLayerLocks(settings,{...defaults},project?.layers);commit();apply();};
   document.querySelectorAll('[data-paint-age]').forEach(e=>e.onclick=()=>{if(busy||!project)return;const values={fresh:{paintPeelDetail:.7,paintPeelChips:.35,paintPeel:0,paintPeelSizeCm:30,paintPeelEdge:.15,paintWear:.05,paintCoverage:1,paintDepthAmount:.2},aged:{paintPeelDetail:.75,paintPeelChips:.35,paintPeel:.38,paintPeelSizeCm:30,paintPeelEdge:.15,paintWear:.25,paintCoverage:.95,paintDepthAmount:.65},old:{paintPeelDetail:.85,paintPeelChips:.5,paintPeel:.68,paintPeelSizeCm:40,paintPeelEdge:.12,paintWear:.35,paintCoverage:.95,paintDepthAmount:.65}}[e.dataset.paintAge];settings=applyLayerLocks(settings,{...settings,...values,paintEnabled:true},project.layers);commit();apply();toast('已应用白漆新旧程度，可用 Ctrl+Z 撤销；苔藓与白漆高度保持当前设置。');});
   document.querySelectorAll('[data-preset]').forEach(e=>e.onclick=()=>{const previous=settings;settings={...defaults};if(e.dataset.preset==='old')Object.assign(settings,{paintEnabled:false,moss:.4,tint:'#e4e7dd',rough:.9});if(e.dataset.preset==='dry')Object.assign(settings,{paintEnabled:false,mossEnabled:false,rough:.92,tint:'#ead8bc',variation:.3});settings=applyLayerLocks(previous,settings,project?.layers);commit();apply();});
-  $('bakeAO').onclick=runAO;$('aoSamples').onchange=()=>{aoRecord=null;if(project){project.resources.ao=null;project.bake={aoSamples:Number($('aoSamples').value)};commit();}$('aoBadge').textContent='AO 采样已变更';};$('exportTop').onclick=$('exportBottom').onclick=exportFinalGLB;
+  $('bakeAO').onclick=runAO;$('aoSamples').onchange=()=>{aoRecord=null;if(project){project.resources.ao=null;project.bake={aoSamples:Number($('aoSamples').value)};commit();}$('aoBadge').textContent='AO 采样已变更';};$('exportTop').onclick=$('exportBottom').onclick=exportFromWorkspace;
   $('savePreset').onclick=saveRecipe;$('loadPreset').onclick=()=>$('presetFile').click();$('presetFile').onchange=async e=>{try{await loadRecipeFile(e.target.files[0]);}finally{$('presetFile').value='';}};
   const zone=$('dropZone');zone.ondragover=e=>{e.preventDefault();if(!busy)zone.classList.add('drag-over');};zone.ondragleave=()=>zone.classList.remove('drag-over');zone.ondrop=async e=>{e.preventDefault();zone.classList.remove('drag-over');if(busy)return;const f=e.dataTransfer.files[0];if(f?.name.toLowerCase().endsWith('.glb'))await preparationUI.importFile(f);else toast('请拖入 GLB 树模型。',true);};
-  blenderInput=setupBlenderInput({renderer,isBusy:()=>busy,isClosing:()=>closingRequested,save:options=>saveProject(options),open:openProjectDialog,cancelTask:()=>gate.cancel(),notify:toast,authoring:{paint:()=>surfaceStudio.beginPaint(),brush:op=>surfaceStudio.activateBrush(op),materialPaint:()=>surfaceStudio.beginMaterialPaint(),parts:()=>surfaceStudio.openParts({startBrush:true})},brushTarget:strength=>materialPaintController?.active?materialPaintController.input(strength):renderer.tool==='mask'?$(strength?'brushStrength':'brushRadius'):!strength&&renderer.tool==='part'?$(partSuggestions?.editing?'partSuggestionRadius':'partBrushRadius'):null});
+  blenderInput=setupBlenderInput({renderer,isBusy:()=>busy,isClosing:()=>closingRequested,save:options=>saveProject(options),open:openProjectDialog,cancelTask:()=>gate.cancel(),notify:toast,authoring:{paint:()=>surfaceStudio.beginPaint(),brush:op=>surfaceStudio.activateBrush(op),materialPaint:()=>surfaceStudio.beginMaterialPaint(),parts:()=>surfaceStudio.openParts({startBrush:true}),decalPointerAction:e=>surfaceStudio.decalPoints.pointerAction(e),decalPointerMotion:e=>surfaceStudio.decalPoints.pointerMotion(e),decalPointerLeave:()=>surfaceStudio.decalPoints.pointerLeave(),decalCancel:()=>surfaceStudio.decalPoints.cancel(),decalKey:(e,inViewport)=>surfaceStudio.decalPoints.key(e,inViewport)},brushTarget:strength=>materialPaintController?.active?materialPaintController.input(strength):renderer.tool==='mask'?$(strength?'brushStrength':'brushRadius'):!strength&&renderer.tool==='part'?$(partSuggestions?.editing?'partSuggestionRadius':'partBrushRadius'):null});
   renderer.onSelectionBounds=()=>{const faces=partSuggestions?.previewFaces||selectedPart()?.faces;if(!model||!faces?.length)return null;const min=[Infinity,Infinity,Infinity],max=[-Infinity,-Infinity,-Infinity];for(const f of faces)for(let c=0;c<3;c++)for(let a=0;a<3;a++){const v=(model.pos[model.indices[f*3+c]*3+a]-model.min[a])/model.height;min[a]=Math.min(min[a],v);max[a]=Math.max(max[a],v);}return{min,max};};
 
   brushFeedback=createBrushFeedback({renderer,source:()=>sourceModel,height:()=>project?.actualHeightMeters||10,busy:()=>busy||closingRequested||appDisposed,modal:()=>blenderInput?.modal,syncControls:()=>surfaceStudio?.syncBrushValues(),context:()=>materialPaintController?.active?materialPaintController.context:renderer.tool==='mask'?{radius:Number($('brushRadius').value),strength:Number($('brushStrength').value),hardness:Number($('brushHardness').value),operation:$('brushOperation').value,...(surfaceStudio?.painting?.role==='material'?{label:project?.surface.effects.find(e=>e.id===surfaceStudio.painting.effectId)?.name}:{})}:renderer.tool==='part'?{radius:Number($(partSuggestions?.editing?'partSuggestionRadius':'partBrushRadius').value),strength:1,hardness:1,operation:'paint'}:null});

@@ -22,6 +22,7 @@ export function refreshStructuralBarkMaterials(asset,next,{beforeCommit=()=>{},f
   const structural=new Set(skeletonBranches(asset.masterBranches).filter(b=>!b.sourceAssetId&&!b.sourceInstanceId).map(b=>b.stableId));
   const surfaceById=new Map(),targets=[];
   asset.group.traverse(o=>{if(o.isMesh&&structural.has(o.userData.stable_id)&&['branch','junction'].includes(o.userData.category)){
+    if(o.userData.base_branch_mesh&&(o.userData.originalMaterial||o.material).sampleLeafMaterial)return;
     targets.push(o);if(o.userData.category==='branch')surfaceById.set(o.userData.stable_id,o.geometry.userData.barkSurface);
   }});
   if(!targets.length)return false;

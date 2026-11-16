@@ -2,7 +2,7 @@ import {createTrunkAnalysisInput} from './trunk-auto-skeleton.js';
 import {trunkCalibrationMatrix,validateTrunkGuides} from './imported-trunk-data.js';
 
 // The worker hands its result to the repair workspace.
-export function createTrunkAutoController({dialog,icon,getModel,canStart,enterGuides,setBusy,refresh,preview,stage,status}){
+export function createTrunkAutoController({dialog,icon,getModel,canStart,prepare,enterGuides,setBusy,refresh,preview,stage,status}){
  const entry=document.createElement('button');entry.className='trunk-auto-entry';entry.dataset.autoOpen='';entry.innerHTML=icon('scan')+'<span><strong>自动识别骨架</strong><small>提取主干与分叉，再手动微调</small></span>'+icon('arrow-up-right');dialog.querySelector('[data-overview]').after(entry);
  const card=document.createElement('div');card.className='trunk-auto-card';card.hidden=true;card.innerHTML='<header>'+icon('scan')+'<div><strong>自动识别骨架</strong><small>先预览，确认后替换当前骨架</small></div><button data-auto-hide aria-label="收起识别设置">'+icon('x')+'</button></header><div data-auto-settings><p>使用当前校准方向和尺寸分析整棵树。原始网格、UV 与材质保留。</p><label>识别精度<select data-auto-quality><option value="fast">快速 · 先看整体</option><option value="standard" selected>标准 · 推荐</option><option value="fine">精细 · 保留更小分叉</option></select></label><label>枝干细节<select data-auto-detail><option value="major">主要枝干 · 过滤更多短枝</option><option value="standard" selected>常规分叉 · 推荐</option><option value="fine">细小枝梢 · 较多控制枝</option></select></label><label>控制点密度<select data-auto-density><option value="simple">简洁 · 便于整体调整</option><option value="standard" selected>均衡 · 推荐</option><option value="fine">精细 · 更多转折点</option></select></label><small>以连通木干为识别对象。贴近的分叉、悬空网格和极细枝梢仍需检查；根须默认过滤。</small><button data-auto-start class="trunk-auto-primary">'+icon('scan')+'生成候选骨架</button></div><div data-auto-progress hidden role="status"><strong data-auto-phase>准备分析…</strong><progress max="1" value="0"></progress><small>后台分析中，可继续旋转与缩放视角。</small><button data-auto-cancel>取消识别</button></div><p data-auto-error role="alert" hidden></p>';
  const section=dialog.querySelector('[data-section="2"]');section.prepend(card);const manual=document.createElement('div');manual.className='trunk-manual-guides';while(card.nextSibling)manual.append(card.nextSibling);section.append(manual);
@@ -28,10 +28,22 @@ export function createTrunkAutoController({dialog,icon,getModel,canStart,enterGu
   banner.querySelector('span').textContent='后台计算中 · 当前骨架保留';
   q('[data-auto-start]').disabled=!canStart();
  }
- function open(){if(!getModel()||(!worker&&!canStart()))return;enterGuides();opened=true;render();card.scrollIntoView({block:'nearest'});}
+ function showError(error){lastError=error.message;opened=true;render();status(error.message,true);}
+ async function open(){if(!getModel()||(!worker&&!canStart()))return false;
+  try{if(!worker&&prepare&&!await prepare())return false;}catch(error){showError(error);return false;}
+  if(!getModel()||(!worker&&!canStart()))return false;
+  enterGuides();opened=true;render();card.scrollIntoView({block:'nearest'});return true;
+ }
  function release(){sequence++;worker?.terminate();worker=null;setBusy(false);}
  function discard(){release();lastError='';preview(null);refresh();render();status('已取消识别，原骨架与模型保留。');}
- function start(){if(!canStart()||!getModel())return;lastError='';phase='准备分析';opened=true;const input=createTrunkAnalysisInput(getModel(),trunkCalibrationMatrix(getModel().calibration)),options={quality:q('[data-auto-quality]').value,detail:q('[data-auto-detail]').value,density:q('[data-auto-density]').value,baseMode:q('[data-auto-base]').value};enterGuides();preview(null,true);setBusy(true);const ticket=++sequence;
+ async function start(){if(!canStart()||!getModel())return;
+  let input;
+  try{
+   if(prepare&&!await prepare())return;
+   if(!canStart()||!getModel())return;
+   input=createTrunkAnalysisInput(getModel(),trunkCalibrationMatrix(getModel().calibration));
+  }catch(error){showError(error);return;}
+  lastError='';phase='准备分析';opened=true;const options={quality:q('[data-auto-quality]').value,detail:q('[data-auto-detail]').value,density:q('[data-auto-density]').value,baseMode:q('[data-auto-base]').value};enterGuides();preview(null,true);setBusy(true);const ticket=++sequence;
   const fail=message=>{if(ticket!==sequence)return;release();lastError=message;opened=true;preview(null);refresh();render();status(message,true);};
   try{
    worker=new Worker(new URL('./trunk-auto-worker.js',import.meta.url),{type:'module'});

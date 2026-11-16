@@ -1,5 +1,5 @@
 const fs=require('fs'),path=require('path'),assert=require('node:assert/strict');
-const {chromium}=require(process.env.BRANCHFORGE_PLAYWRIGHT||'playwright');
+const {chromium}=require(process.env.BRANCHFORGE_PLAYWRIGHT||'C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 (async()=>{
  const out=path.resolve('.runtime/branch-click');fs.mkdirSync(out,{recursive:true});const report={checks:[],errors:[]};
  const shape=(id,parent,points,attach)=>({id,parent,points,attach,length:2,start_radius:.08,end_radius:.035});

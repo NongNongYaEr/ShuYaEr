@@ -13,7 +13,8 @@ import {readImportedTrunkGlb} from '../web/imported-trunk-glb.js';
 import {prepareImportedTrunk,importedTrunkShape} from '../web/imported-trunk-runtime.js';
 import {trunkSourceBinding} from '../web/imported-trunk-binding.js';
 import {FIXED_TRUNK_ROOT,withTrunkWeightEdits} from '../web/trunk-weight-data.js';
-import {createImportedTrunkSkinExporter} from '../scripts/imported-trunk-skin.mjs';
+import {createPVESkeleton} from '../web/pve-skeleton-export.js';
+import {createImportedTrunkSkinExporter,ensureImportedTrunkSkinPoints} from '../scripts/imported-trunk-skin.mjs';
 const assets=[];test.afterEach(()=>assets.splice(0).forEach(disposeBranchAsset));
 const settings=normalizeSettings({leaf_density:0,max_leaves:0,child_count:0,buds_enabled:false,fruit_enabled:false,junction_collar:false,max_triangles:8e6});
 const wood={id:'WOOD',parent:'',points:[[0,0,0],[.3,0,.1],[.7,0,0]],length:.7,start_radius:.03,end_radius:.01};
@@ -27,7 +28,11 @@ test('moving a carrier joint deforms its mesh and mounted unit bones, while rest
  const asset=fixture(),r=createSkinnedGlbScene(asset),positions=r.mesh.geometry.attributes.position,base=Array.from({length:positions.count},(_,n)=>r.mesh.applyBoneTransform(n,new T.Vector3().fromBufferAttribute(positions,n)));try{const bone=r.rig.chains.get('ROOT')[1].bone;bone.rotation.z=.3;r.scene.updateMatrixWorld(true);r.skeleton.update();let moved=0;for(let n=0;n<base.length;n++)if(r.mesh.applyBoneTransform(n,new T.Vector3().fromBufferAttribute(positions,n)).distanceTo(base[n])>.001)moved++;assert(moved>20);bone.rotation.set(0,0,0);r.scene.updateMatrixWorld(true);r.skeleton.update();for(let n=0;n<base.length;n++)assert(r.mesh.applyBoneTransform(n,new T.Vector3().fromBufferAttribute(positions,n)).distanceTo(base[n])<2e-6);}finally{r.dispose();}
 });
 test('complete unit wood and leaf/fruit vertices share one rigid unit bone and nested units follow their parent',()=>{
- const dir=new URL('../次枝资产/全植物次枝成品V1/香樟/',import.meta.url),name=fs.readdirSync(dir).find(n=>n.includes('紧凑侧枝')&&n.includes('深绿')&&n.endsWith('.branchasset.json')),source=JSON.parse(fs.readFileSync(new URL(name,dir))).asset;
+ const dir=new URL('../assets/branch-asset-library/',import.meta.url);
+ const meta=fs.readdirSync(dir).filter(name=>name.endsWith('.meta.json')).find(name=>
+  JSON.parse(fs.readFileSync(new URL(name,dir),'utf8')).id==='FINISHED_CAMPHOR_SIDE_MATURE_V1');
+ assert.ok(meta,'The public sample library must include the mature Camphor side branch');
+ const source=JSON.parse(fs.readFileSync(new URL(meta.replace('.meta.json','.branchasset.json'),dir),'utf8'));
  const asset=fixture({branch_library:[source],branch_instances:[{id:'I',asset_id:source.id,linked:true,pinned_revision:source.revision,parent:'A',attach:.5,scale:.6},{id:'J',asset_id:source.id,linked:true,pinned_revision:source.revision,parent:'I.'+source.shape.branches[0].id,attach:.7,scale:.3}],tree_organs:source.sample.authoring.tree_organs}),r=createSkinnedGlbScene(asset);try{assert.equal(r.report.complete_units,2);assert(poseError(r,asset)<3e-6);assert.equal(r.rig.units.get('J').bone.parent,r.rig.units.get('I').bone);const joint=r.rig.units.get('I').index,ids=r.mesh.geometry.attributes.skinIndex,w=r.mesh.geometry.attributes.skinWeight;let count=0;for(let n=0;n<ids.count;n++)if(ids.getX(n)===joint){assert.equal(w.getX(n),1);assert.equal(w.getY(n),0);count++;}assert(count>100);const positions=r.mesh.geometry.attributes.position,points=[];for(let n=0;n<ids.count;n++)if(ids.getX(n)===joint&&points.length<8)points.push(n);const a=r.mesh.applyBoneTransform(points[0],new T.Vector3().fromBufferAttribute(positions,points[0])),b=r.mesh.applyBoneTransform(points.at(-1),new T.Vector3().fromBufferAttribute(positions,points.at(-1))),distance=a.distanceTo(b);r.rig.units.get('I').bone.rotation.x=.5;r.scene.updateMatrixWorld(true);r.skeleton.update();const aa=r.mesh.applyBoneTransform(points[0],new T.Vector3().fromBufferAttribute(positions,points[0])),bb=r.mesh.applyBoneTransform(points.at(-1),new T.Vector3().fromBufferAttribute(positions,points.at(-1)));assert(Math.abs(distance-aa.distanceTo(bb))<2e-6);}finally{r.dispose();}
 });
 test('sculpted trunk source vertices bind through their original guide mapping and retain their current deformed pose',async()=>{
@@ -46,7 +51,9 @@ test('repaired trunk vertices export the same station influences in GLB and the 
  const source=trunkSourceBinding(model),primitive=source.primitives.find(p=>p.id===id),indices=vertices.map(v=>mesh.userData.trunk_source_vertices.indexOf(v));
  const folder=fs.mkdtempSync(path.join(os.tmpdir(),'trunk-repaired-skin-')),file=path.join(folder,'whole.trunk-skin.bin');
  t.after(()=>{if(fs.existsSync(file))fs.unlinkSync(file);fs.rmdirSync(folder);});
- const exporter=createImportedTrunkSkinExporter(folder,asset);exporter.add(mesh,indices,0);
+ const skeleton=createPVESkeleton(asset,[]);
+ ensureImportedTrunkSkinPoints(asset,skeleton);
+ const exporter=createImportedTrunkSkinExporter(folder,asset,skeleton);exporter.add(mesh,indices,0);
  const pve=exporter.finish(),bytes=fs.readFileSync(file);assert.equal(bytes.subarray(0,8).toString(),'BFTS0001');
  for(const [row,v] of vertices.entries()){
   const guide=source.guides[primitive.guideIndices[v]],node=primitive.nodes[v],u=primitive.factors[v];

@@ -1,5 +1,5 @@
 const fs=require('fs'),path=require('path'),assert=require('node:assert/strict'),crypto=require('crypto');
-const {chromium}=require(process.env.BRANCHFORGE_PLAYWRIGHT||'playwright');
+const {chromium}=require(process.env.BRANCHFORGE_PLAYWRIGHT||'C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 (async()=>{
  const out=path.resolve('.runtime/my-projects');fs.mkdirSync(out,{recursive:true});const result={checks:[],errors:[]};
  const name='验收_我的工程_'+crypto.randomUUID().slice(0,8),file=path.resolve('导出',name+'.branch.json');

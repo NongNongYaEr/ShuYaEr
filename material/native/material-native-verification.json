@@ -1,11 +1,11 @@
 {
   "passed": true,
   "pending": null,
-  "sha256": "af69c4ebefa23ce4c166521a174fd9bbace54e7029ce0b4164e73eb26b4949a2",
+  "sha256": "e727bf66b67de2ac48487b8bd362476d65cea10b898a4eab12011f20a7358471",
   "verification": ".runtime/sculpt-local-response-v2-test/verification.json",
   "abi": 1,
   "slots": 13,
-  "shaderLayoutSHA256": "9a22ffd165207e0fb1675c1640867b93e569f69fe4a5b8eddcac0c3683dd26d2",
+  "shaderLayoutSHA256": "8d7c38dca889aa6c63a6b5328e37f529b547729f7acfb998083690c57243d681",
   "emissionVerification": ".runtime/material-emission-test/embedded-map-audit.json",
   "sources": [
     "native/material/TreeMaterialDX12.cpp",
@@ -13,5 +13,7 @@
     "material/web/material-blend-shader.js"
   ],
   "packaged": true,
-  "shaderVerification": "Native source material overlay validation"
+  "shaderVerification": "Native source material overlay validation",
+  "minimumFeatureLevel": "11_0",
+  "deviceVerification": "../验收记录/材质兼容基线.json"
 }

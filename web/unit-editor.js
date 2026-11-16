@@ -37,7 +37,7 @@ export function createUnitEditor(api,section) {
   let pendingCopies=null;
   function rebuild(){
     const a=api.getAsset();if(a===current)return;held=false;current=a;lookup=new Map();meshRefs=new Map();if(!a)return;
-    for(const p of [...a.placements,...a.treeOrgans])lookup.set(p.stableId,p);
+    for(const p of [...a.placements,...a.treeOrgans])if(!p.baseBranchRole)lookup.set(p.stableId,p);
     a.group.traverse(mesh=>{const uv=mesh.geometry?.getAttribute('uv1');if(!mesh.isMesh||!uv||!['leaf','tree_organ'].includes(mesh.userData.category))return;
       const {width,height}=a.lookupTexture,map=new Map();for(let i=0;i<uv.count;i++){const index=Math.floor(uv.getX(i)*width)+Math.floor(uv.getY(i)*height)*width,id=a.elements[index]?.id;if(!lookup.has(id))continue;if(!map.has(id))map.set(id,[]);map.get(id).push(i);}
       for(const [id,indices]of map){if(!meshRefs.has(id))meshRefs.set(id,[]);meshRefs.get(id).push({mesh,indices});const p=lookup.get(id);if(p.source<0)p.source=mesh.userData.source_index;}

@@ -1,18 +1,44 @@
 // Large immutable PNG strings recur in every source-material variant. Cache
 // validation by the original payload, with a bounded retention budget.
+const pngCacheBudget=64*1024*1024;
 const validPngs=new Map();let validPngBytes=0;
 function png(value){
   if(typeof value!=='string'||value.length>96000000)return '';
   if(validPngs.has(value))return value;
   if(!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(value))return '';
-  if(value.length<=32000000){while(validPngBytes+value.length>32000000&&validPngs.size){const first=validPngs.keys().next().value;validPngBytes-=first.length;validPngs.delete(first);}validPngs.set(value,true);validPngBytes+=value.length;}
+  if(value.length<=pngCacheBudget){while(validPngBytes+value.length>pngCacheBudget&&validPngs.size){const first=validPngs.keys().next().value;validPngBytes-=first.length;validPngs.delete(first);}validPngs.set(value,true);validPngBytes+=value.length;}
   return value;
+}
+// An opaque canvas export is true-color PNG without alpha or a color key.
+// Read the headers only, so restoring a large atlas does not decode all pixels.
+function isOpaqueAtlasPng(data) {
+  if (!data) return false;
+  const start=data.indexOf(',')+1;
+  const header=(offset,length)=>{
+    const group=Math.floor(offset/3), skip=offset%3;
+    return atob(data.slice(start+group*4,start+Math.ceil((offset+length)/3)*4)).slice(skip,skip+length);
+  };
+  try {
+    const info=header(0,26);
+    if(info.slice(0,8)!=='\x89PNG\r\n\x1a\n'||info.slice(12,16)!=='IHDR'||info.charCodeAt(25)!==2)return false;
+    for(let offset=33;start+offset*4/3<data.length;){
+      const chunk=header(offset,8);
+      if(chunk.length!==8)return false;
+      const type=chunk.slice(4),length=((chunk.charCodeAt(0)*256+chunk.charCodeAt(1))*256+chunk.charCodeAt(2))*256+chunk.charCodeAt(3);
+      if(type==='tRNS'||type==='IEND')return false;
+      if(type==='IDAT')return true;
+      offset+=length+12;
+    }
+  } catch {}
+  return false;
 }
 export function normalizeLeafMaterial(raw = {}) {
   // A detailed embedded 4K PNG can exceed the former 24 MB base64 limit.
   const map = png;
   const clamp = (value, fallback) => Math.max(0, Math.min(1, Number.isFinite(Number(value)) ? Number(value) : fallback));
-  return { color: map(raw?.color), normal: map(raw?.normal), color_name: String(raw?.color_name || '').slice(0, 160), normal_name: String(raw?.normal_name || '').slice(0, 160), cutoff: clamp(raw?.cutoff, .4), roughness: clamp(raw?.roughness, .72) };
+  const color = map(raw?.color);
+  const merge = raw?.merge_unit_materials === true && isOpaqueAtlasPng(color);
+  return { color, ...(merge ? { merge_unit_materials: true } : {}), normal: map(raw?.normal), color_name: String(raw?.color_name || '').slice(0, 160), normal_name: String(raw?.normal_name || '').slice(0, 160), cutoff: clamp(raw?.cutoff, .4), roughness: clamp(raw?.roughness, .72) };
 }
 export function leafTextureFiles(material, prefix, kind = 'leaf') {
   const m = normalizeLeafMaterial(material);

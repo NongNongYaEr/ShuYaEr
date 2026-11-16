@@ -3,7 +3,7 @@ import {createViewportContext} from './viewport-context.js';
 import {createNativeTransformRetention} from './native-transform-retention.js';
 import {createNativeMaterialEncoder} from './native-material-cache.js';
 import {createNativeModelCache} from './native-model-cache.js';
-import {nativePreviewGeometryForObject} from './native-preview-geometry.js';
+import {nativePreviewGeometryForObject,nativePreviewPoseForObject} from './native-preview-geometry.js';
 import {nativeMaterialUnsupported,nativePreviewMaterial} from './native-preview-material.js';
 import {retainNativeDraw,createNativeSceneRetention,encodeRetainedNativeScene,nativeBindingDelta,nativeDrawDelta,nativeSceneDelta,createRetainedNativeMaterialTable} from './native-scene-retention.js';
 import * as THREE from './vendor/three.module.min.js';
@@ -76,12 +76,35 @@ export function nativeAttributeVersion(attribute){if(!attribute)return '';const 
 
 // Include a coherent scene with its resources in the same submission. A helper
 // that changes every camera frame must never keep the camera behind the queue.
+const nativeResourceCost=(item,encoder)=>item.parts.reduce((n,p)=>n+Math.ceil(p.bytes.byteLength/4)*4+256,0)+encoder.encode(JSON.stringify(item.resource)).byteLength;
 export function planNativeResourceBatch(pending,capacity,scene,sceneBytes=null){
   const encoder=new TextEncoder(),sceneReserve=(sceneBytes?.byteLength??encoder.encode(JSON.stringify(scene)).byteLength)+2048;
   let remaining=capacity-sceneReserve,sceneFits=true;const selected=[],parts=[];
-  for(const item of pending){const cost=item.parts.reduce((n,p)=>n+Math.ceil(p.bytes.byteLength/4)*4+256,0)+encoder.encode(JSON.stringify(item.resource)).byteLength+64;if(cost>remaining)break;remaining-=cost;selected.push(item);parts.push(...item.parts);}
-  if(!selected.length&&pending.length){sceneFits=false;const item=pending[0],cost=item.parts.reduce((n,p)=>n+Math.ceil(p.bytes.byteLength/4)*4+256,0)+encoder.encode(JSON.stringify(item.resource)).byteLength+2048;if(cost>capacity)throw Error('场景资源超过当前原生传输容量');selected.push(item);parts.push(...item.parts);}
+  for(const item of pending){const cost=nativeResourceCost(item,encoder)+64;if(cost>remaining)break;remaining-=cost;selected.push(item);parts.push(...item.parts);}
+  if(!selected.length&&pending.length){sceneFits=false;const item=pending[0];if(nativeResourceCost(item,encoder)+2048>capacity)throw Error('场景资源超过当前原生传输容量');selected.push(item);parts.push(...item.parts);}
   return {selected,parts,complete:sceneFits&&selected.length===pending.length&&remaining>=0};
+}
+export function createNativeResourceTransfer(item){
+  const resource={...item.resource},fields=resource.type==='geometry'?['vertices','indices']:['data'];
+  let total=0;
+  const parts=fields.map((field,index)=>{
+    const source=item.parts[index].bytes;
+    const bytes=new Uint8Array(source.buffer,source.byteOffset,source.byteLength);
+    resource[field]={offset:total,bytes:bytes.byteLength};
+    total+=bytes.byteLength;
+    return item.mutable?bytes.slice():bytes;
+  });
+  return {item,resource,parts,total,offset:0};
+}
+export function nextNativeResourceChunk(transfer,capacity){
+  const {offset,resource,parts,total}=transfer;
+  const limit=Math.floor(Math.min(32*1024*1024,capacity-4096)/4)*4;
+  if(limit<=0||offset>=total)throw Error('大型场景资源传输状态无效');
+  let local=offset,part;
+  for(const bytes of parts){if(local<bytes.length){part=bytes;break;}local-=bytes.length;}
+  const bytes=part.subarray(local,local+limit),data={};
+  const resourceChunk={id:resource.id,offset,data,...(offset===0?{resource,total}:{})};
+  return {metadata:{resourceChunk},parts:[{spec:data,bytes}],end:offset+bytes.length};
 }
 const rgba=(color,scale=1,alpha=1)=>[color.r*scale,color.g*scale,color.b*scale,alpha];
 // Private viewport protocol; the saved project and UE/PVE material schema are
@@ -132,7 +155,7 @@ export function createNativeViewport({scene,camera,renderer,canvas,isAllowed=()=
   let compatibility=graphicsMode==='compatibility',fallbackReason='',watchdogStarted=null,webglStartFrame=0;
   const compatibilityRenderers=new WeakSet();
   const sceneSession=crypto.randomUUID(),transport=createNativeTransportSession(sceneSession),presentationFence=new NativePresentationFence();let activationRevision=0,compatibilityReason=null,runtimeVerified=false;
-  let buffer=null,inFlight=false,outbound=null,resourceQueueDirty=false,ready=false,active=false,wanted=true,dlss=false,sequence=0,lastSceneRevision=0,lastAcceptedRevision=0,uploaded=new Set(),pendingIds=new Set(),outboundIds=new Set(),pendingResources=[],currentObjects=[],lastRect='',lastStatus={},lastError='',disposed=false;
+  let buffer=null,inFlight=false,outbound=null,resourceTransfer=null,resourceQueueDirty=false,ready=false,presented=false,wanted=true,dlss=false,sequence=0,lastSceneRevision=0,lastAcceptedRevision=0,uploaded=new Set(),pendingIds=new Set(),outboundIds=new Set(),pendingResources=[],currentObjects=[],lastRect='',lastStatus={},lastError='',disposed=false;
   const objectRecords=new WeakMap(),geometryProbes=new WeakMap(),transforms=createNativeTransformRetention(()=>motionRoot());let collectFrame=0;
   const modelCache=createNativeModelCache();let forceModelAudit=false,lastModelAudit={checked:false};
   const geometryUses=new Map();
@@ -185,11 +208,13 @@ export function createNativeViewport({scene,camera,renderer,canvas,isAllowed=()=
   function restart(){
     if(disposed||compatibility)return;
     presentationFence.reset();runtimeVerified=false;transport.restart();lastError='';compatibilityReason=null;wanted=true;ready=false;watchdogStarted=null;
-    releaseBuffer();uploaded.clear();pendingIds.clear();outboundIds.clear();pendingResources=[];inFlight=false;outbound=null;resourceQueueDirty=false;latestScene=null;latestSceneBytes=null;latestSignature='';lastSentSignature='';lastSentGraph=0;lastSubmittedBindings.clear();lastSubmittedBindingVersion=-1;lastSentFields=null;lastAcceptedRevision=0;resourceTokens.clear();bindingVersion++;lastStatus={};epoch++;deactivate();notice.hidden=true;message.textContent='正在重启 DX12 视口';post({action:'initialize',restart:true});
+    releaseBuffer();uploaded.clear();pendingIds.clear();outboundIds.clear();pendingResources=[];resourceTransfer=null;inFlight=false;outbound=null;resourceQueueDirty=false;latestScene=null;latestSceneBytes=null;latestSignature='';lastSentSignature='';lastSentGraph=0;lastSubmittedBindings.clear();lastSubmittedBindingVersion=-1;lastSentFields=null;lastAcceptedRevision=0;resourceTokens.clear();bindingVersion++;lastStatus={};epoch++;deactivate();notice.hidden=true;message.textContent='正在重启 DX12 视口';post({action:'initialize',restart:true});
   }
   quality.onchange=()=>{dlss=quality.value==='dlss';lastSentSignature='';};
   const post=data=>host.postMessage(JSON.stringify({topic:'branchforge-native',transportSession:transport.id,...data}));
-  function deactivate(){active=false;activationRevision=0;modelCache.clear();document.body.classList.remove('native-viewport-active');document.documentElement.classList.remove('native-viewport-active');renderer.setClearAlpha(1);}
+  const currentPresentation=()=>presented&&activationRevision>0&&lastStatus.scene_session===sceneSession&&lastStatus.asset_identity===assetIdentity()&&lastStatus.revision>=activationRevision;
+  function awaitNextPresentation(){activationRevision=0;lastSentSignature='';}
+  function deactivate(){presented=false;activationRevision=0;modelCache.clear();document.body.classList.remove('native-viewport-active');document.documentElement.classList.remove('native-viewport-active');renderer.setClearAlpha(1);}
   function showNotice(reason){notice.hidden=false;notice.querySelector('p').textContent=reason;message.textContent='DX12 视口待恢复';message.title=reason;}
   function labelCompatibility(){
     badge.textContent='兼容模式';
@@ -210,7 +235,7 @@ export function createNativeViewport({scene,camera,renderer,canvas,isAllowed=()=
     try{post({action:'use-compatibility'});}catch{}
     releaseBuffer();
     transport.restart();
-    pendingResources=[];pendingIds.clear();outboundIds.clear();uploaded.clear();
+    pendingResources=[];resourceTransfer=null;pendingIds.clear();outboundIds.clear();uploaded.clear();
     inFlight=false;outbound=null;latestSceneBytes=null;graphState=null;latestScene=null;
     drawCache.clear();resourceTokens.clear();currentObjects=[];currentBindings.clear();lastSubmittedBindings.clear();
     geometryUses.clear();lastSentFields=null;overlayRoots=[];overlayMembers=[];
@@ -227,7 +252,7 @@ export function createNativeViewport({scene,camera,renderer,canvas,isAllowed=()=
   }
   function noteNativeProgress(){if(watchdogStarted!==null)watchdogStarted=performance.now();}
   function watchNativePresentation(){
-    if(graphicsMode!=='auto'||active||lastError||compatibilityReason){watchdogStarted=null;return;}
+    if(graphicsMode!=='auto'||currentPresentation()||lastError||compatibilityReason){watchdogStarted=null;return;}
     const now=performance.now();
     watchdogStarted??=now;
     const initialized=ready&&runtimeVerified;
@@ -236,14 +261,14 @@ export function createNativeViewport({scene,camera,renderer,canvas,isAllowed=()=
   }
   function keyFor(object,version){const old=resourceState.get(object);if(old?.version===version)return old.key;const key=object.uuid+':'+version;resourceState.set(object,{key,version});return key;}
   const known=id=>uploaded.has(id)||pendingIds.has(id)||outboundIds.has(id);
-  function queueResource(resource,parts){if(known(resource.id))return;pendingResources.push({resource,parts});pendingIds.add(resource.id);}
+  function queueResource(resource,parts,mutable=false){if(known(resource.id))return;pendingResources.push({resource,parts,mutable});pendingIds.add(resource.id);}
   function geometryKey(geometry,strip=false,loop=false){let cached=geometryRevisions.get(geometry);if(!cached)geometryRevisions.set(geometry,cached={versions:[],variants:new Map()});const names=attributeNames;let changed=false;for(let i=0;i<7;i++){const value=nativeAttributeVersion(i<6?geometry.attributes[names[i]]:geometry.index);if(cached.versions[i]!==value){cached.versions[i]=value;changed=true;}}if(changed)cached.variants.clear();const kind=strip?(loop?'loop':'strip')+':'+geometry.drawRange.start+':'+geometry.drawRange.count:'mesh';let key=cached.variants.get(kind);if(!key){key=geometry.uuid+':'+cached.versions.join(',')+':'+kind;cached.variants.set(kind,key);}if(!known(key)){const arrays=nativeGeometry(geometry);if(strip)arrays.indices=nativeLineIndices(geometry,loop);const resource={type:'geometry',id:key,vertices:{},indices:{}};queueResource(resource,[{spec:resource.vertices,bytes:arrays.vertices},{spec:resource.indices,bytes:arrays.indices}]);}return key;}
 
-  function dataKey(texture){if(!texture)return null;const alias=lastStatus.retained_scene_protocol===1,key=keyFor(texture,texture.version+':'+alias);if(!known(key)){const resource={id:key,type:'buffer',data:{},stride:4};queueResource(resource,[{spec:resource.data,bytes:texture.image.data}]);}if(alias){if(resourceTokens.get(texture.uuid)!==key){resourceTokens.set(texture.uuid,key);bindingVersion++;}return texture.uuid;}return key;}
+  function dataKey(texture){if(!texture)return null;const alias=lastStatus.retained_scene_protocol===1,key=keyFor(texture,texture.version+':'+alias);if(!known(key)){const resource={id:key,type:'buffer',data:{},stride:4};queueResource(resource,[{spec:resource.data,bytes:texture.image.data}],true);}if(alias){if(resourceTokens.get(texture.uuid)!==key){resourceTokens.set(texture.uuid,key);bindingVersion++;}return texture.uuid;}return key;}
 
   function textureKey(texture,role='color'){if(!texture)return null;const image=texture.image;if(!image||!image.width||!image.height)return null;const key=keyFor(texture.source||texture,(texture.source?.version??texture.version));if(!known(key)){
     let pixels;if(texture.isDataTexture){if(!(image.data instanceof Uint8Array)||image.data.length!==image.width*image.height*4)throw Error('Unsupported native surface texture');pixels=image.data;}else{const scratch=document.createElement('canvas');scratch.width=image.width;scratch.height=image.height;const context=scratch.getContext('2d',{willReadFrequently:true});context.drawImage(image,0,0);pixels=context.getImageData(0,0,image.width,image.height).data;}
-    const resource={type:'texture',id:key,width:image.width,height:image.height,srgb:texture.colorSpace===THREE.SRGBColorSpace,normal:role==='normal',data:{}};queueResource(resource,[{spec:resource.data,bytes:pixels}]);
+    const resource={type:'texture',id:key,width:image.width,height:image.height,srgb:texture.colorSpace===THREE.SRGBColorSpace,normal:role==='normal',data:{}};queueResource(resource,[{spec:resource.data,bytes:pixels}],texture.isDataTexture);
   }return key;}
   const materialEncoder=createNativeMaterialEncoder({textureKey}),material=m=>materialEncoder.encode(m);
   function instanceKey(mesh){if(!mesh.isInstancedMesh&&!mesh.__branchForgeNativeEdit)return '';const edit=mesh.__branchForgeNativeEdit,count=mesh.isInstancedMesh?mesh.count:1,attribute=mesh.geometry.getAttribute('sampleRadius'),matrixVersion=nativeAttributeVersion(mesh.instanceMatrix),radiusVersion=nativeAttributeVersion(attribute),lookup=edit?.lookupTexture.uuid||'',alias=lastStatus.retained_scene_protocol===1;let cached=instanceState.get(mesh);if(cached&&cached.matrixVersion===matrixVersion&&cached.radiusVersion===radiusVersion&&cached.count===count&&cached.lookup===lookup&&cached.alias===alias){queueResource(cached.resource,cached.parts);if(alias)if(resourceTokens.get(cached.logical)!==cached.key){resourceTokens.set(cached.logical,cached.key);bindingVersion++;}return cached.logical;}
@@ -257,7 +282,11 @@ export function createNativeViewport({scene,camera,renderer,canvas,isAllowed=()=
     for(let i=0;i<g.groups.length;i++){const a=g.groups[i],old=state.groups[i];if(!old||old.start!==a.start||old.count!==a.count||old.materialIndex!==a.materialIndex){state.groups[i]={...a};changed=true;}}state.groups.length=g.groups.length;if(changed)state.revision++;return state;
   }
   function collect(){
-    if(latestScene&&latestScene.assetIdentity!==assetIdentity()){deactivate();lastSentGraph=0;lastSentFields=null;lastSentSignature='';drawCache.clear();retainedMaterials.reset();epoch++;}
+    if(latestScene&&latestScene.assetIdentity!==assetIdentity()){
+      // The host keeps drawing its last coherent scene while we stage resources.
+      // Keep that frame visible and require a new presentation before readback.
+      awaitNextPresentation();modelCache.clear();lastSentGraph=0;lastSentFields=null;drawCache.clear();retainedMaterials.reset();epoch++;
+    }
     const matrixProfile=profile?.begin('native.world_matrices');collectFrame++;materialEncoder.beginFrame();scene.updateMatrixWorld(true);camera.updateMatrixWorld(true);matrixProfile?.end();
     const projection=toD3D.clone().multiply(camera.projectionMatrix),view=camera.matrixWorldInverse,vp=projection.clone().multiply(view),draws=[],objects=[],overlays=[],useMaterialTable=lastStatus.material_table_protocol===1,materialTable=lastStatus.retained_scene_protocol===1?retainedMaterials:createNativeMaterialTable();if(materialTable===retainedMaterials)retainedMaterials.beginFrame();
     const result={assetIdentity:assetIdentity(),projection:projection.elements,view:view.elements.slice(),viewProjection:vp.elements,camera:[...camera.position.toArray(),0],near:camera.near,far:camera.far,fov:THREE.MathUtils.degToRad(camera.fov||38),orthographic:Boolean(camera.isOrthographicCamera),dlss:dlss&&lastStatus.dlss_supported!==false,background:rgba(renderer.getClearColor(new THREE.Color())),fog:[scene.fog?.near||1e6,scene.fog?.far||1e7,renderer.toneMappingExposure,scene.fog?.studioShadowRadius??0]};let lightIndex=0;
@@ -274,11 +303,15 @@ export function createNativeViewport({scene,camera,renderer,canvas,isAllowed=()=
     // Publish only explicitly owned preview buffers, including on cache hits.
     const declaredBindings=new Map();for(const texture of managed?.dynamicBuffers||[]){const key=dataKey(texture);if(key)declaredBindings.set(key,resourceTokens.get(key));}
     const modelBindings=items=>{const found=new Map();for(const draw of items)for(const key of [draw.instances,draw.editLookup,draw.editFrames])if(key&&resourceTokens.has(key))found.set(key,resourceTokens.get(key));return found;};
+    const sourceMatrix=new THREE.Matrix4();
     const objectProfile=profile?.begin('native.object_scan');const visit=object=>{
       if(object.__branchForgeNativeEdit?.influences===2&&lastStatus.weighted_edit_protocol!==1)compatibilityReason||='树干柔性预览需要更新 DX12 运行库';
       if(modelMaterials&&(object.isMesh||object.isLine))for(const m of Array.isArray(object.material)?object.material:[object.material])if(m)modelMaterials.add(m);
-      const pose=lastStatus.retained_scene_protocol===1?transforms.get(object,collectFrame):null,objectMatrix=pose?.matrix||object.matrixWorld.elements,root=pose?.root||'';
-      const encodedGeometry=object.geometry?nativePreviewGeometryForObject(object):null;
+      const pose=lastStatus.retained_scene_protocol===1?transforms.get(object,collectFrame):null,root=pose?.root||'';
+      const bakedMatrix=pose?.matrix||object.matrixWorld.elements;
+      const sourcePose=object.geometry&&nativePreviewPoseForObject(object);
+      const objectMatrix=sourcePose?sourceMatrix.fromArray(bakedMatrix).multiply(sourcePose.matrix).elements:bakedMatrix;
+      const encodedGeometry=sourcePose?.geometry||(object.geometry?nativePreviewGeometryForObject(object):null);
       const cached=objectRecords.get(object);if(cached&&cached.frame===collectFrame-1&&cached.epoch===epoch&&cached.materialProtocol===lastStatus.material_table_protocol&&cached.retainedProtocol===lastStatus.retained_scene_protocol&&cached.geometry===object.geometry&&cached.encodedGeometry===encodedGeometry&&cached.material===object.material&&!object.isSkinnedMesh&&!object.geometry.morphAttributes.position?.length){
         const probe=geometryProbe(encodedGeometry),im=object.instanceMatrix,storage=im?.data||im,radius=object.geometry.attributes.sampleRadius,edit=object.__branchForgeNativeEdit,lookup=edit?.lookupTexture,frames=edit?.frameTexture,world=objectMatrix;
         let same=cached.root===root&&cached.geometryRevision===probe.revision&&cached.instanceAttribute===im&&cached.instanceArray===storage?.array&&cached.instanceVersion===storage?.version&&cached.radius===radius&&cached.radiusArray===radius?.array&&cached.radiusVersion===radius?.version&&cached.radiusCount===radius?.count&&cached.radiusSize===radius?.itemSize&&cached.radiusNormalized===radius?.normalized&&cached.count===object.count&&cached.edit===edit&&cached.lookup===lookup&&cached.lookupVersion===lookup?.version&&cached.frames===frames&&cached.framesVersion===frames?.version&&cached.castShadow===object.castShadow&&cached.receiveShadow===object.receiveShadow&&cached.line===object.isLine&&cached.lineLoop===object.isLineLoop&&cached.lineSegments===object.isLineSegments;
@@ -339,10 +372,18 @@ export function createNativeViewport({scene,camera,renderer,canvas,isAllowed=()=
   }
 
   function transmit(packet){if(!buffer||inFlight)return false;if(packet.byteLength>buffer.byteLength)throw Error('场景资源超过传输容量');const copyProfile=profile?.begin('native.shared_copy');new Uint8Array(buffer,0,packet.byteLength).set(packet);copyProfile?.end();inFlight=true;counters.packets++;counters.bytes+=packet.byteLength;post({action:'packet',bytes:packet.byteLength});return true;}
-  function send(metadata,parts=[]){if(!buffer||inFlight)return false;const encodeProfile=profile?.begin('native.packet_encode'),packet=packNativePacket({version:1,...metadata},parts,metadata.scene?latestSceneBytes:null);encodeProfile?.end();if(metadata.scene)counters.fullScenes++;if(metadata.scenePatch)counters.scenePatches++;outbound={metadata,packet,sceneState:metadata.scene||metadata.scenePatch?{graph:graphState.version,fields:graphState.fields,signature:latestSignature,bindings:lastSubmittedBindingVersion===bindingVersion?lastSubmittedBindings:new Map(currentBindings),bindingVersion}:null};outboundIds=new Set((metadata.resources||[]).map(r=>r.id));return transmit(packet);}
+  function send(metadata,parts=[],chunkEnd=0){if(!buffer||inFlight)return false;const encodeProfile=profile?.begin('native.packet_encode'),packet=packNativePacket({version:1,...metadata},parts,metadata.scene?latestSceneBytes:null);encodeProfile?.end();if(metadata.scene)counters.fullScenes++;if(metadata.scenePatch)counters.scenePatches++;outbound={metadata,packet,chunkEnd,sceneState:metadata.scene||metadata.scenePatch?{graph:graphState.version,fields:graphState.fields,signature:latestSignature,bindings:lastSubmittedBindingVersion===bindingVersion?lastSubmittedBindings:new Map(currentBindings),bindingVersion}:null};outboundIds=new Set((metadata.resources||[]).map(r=>r.id));return transmit(packet);}
   function sceneMetadata(){const patch=lastStatus.retained_scene_protocol===1&&lastSentGraph===graphState.version,bindings=patch?(lastSubmittedBindingVersion===bindingVersion?{}:nativeBindingDelta(lastSubmittedBindings,currentBindings)):Object.fromEntries(currentBindings),changes=patch?nativeSceneDelta(lastSentFields,graphState.fields):{},dynamic={...latestScene,...changes,...(Object.keys(bindings).length?{bufferBindings:bindings}:{})};lastSceneRevision=++sequence;if(!activationRevision)activationRevision=lastSceneRevision;const metadata={revision:lastSceneRevision,sceneSession,graphRevision:graphState.version,submittedAtMs:frameStamp};if(patch)metadata.scenePatch=dynamic;else{metadata.scene={...graphState.fields,...dynamic};latestSceneBytes=encodeRetainedNativeScene(graphState.bytes,dynamic);}return metadata;}
   function pump(){if(!ready||!runtimeVerified||!wanted||!isAllowed()||lastError)return;if(inFlight)return;compatibilityReason=null;collect();if(compatibilityReason){deactivate();lastSentSignature='';showNotice('当前 DX12 尚不支持：'+compatibilityReason+'。请恢复支持的材质或视图后继续。');post({action:'hide'});return;}notice.hidden=true;if(inFlight)return;
-    if(pendingResources.length){const reserve={byteLength:(lastStatus.retained_scene_protocol===1&&lastSentGraph===graphState.version?JSON.stringify(nativeSceneDelta(lastSentFields,graphState.fields)).length:graphState.bytes.byteLength)+JSON.stringify(latestScene).length+currentBindings.size*512+4096},batch=planNativeResourceBatch(pendingResources,buffer.byteLength,latestScene,reserve),metadata={resources:batch.selected.map(r=>r.resource)};pendingResources.splice(0,batch.selected.length);for(const item of batch.selected)pendingIds.delete(item.resource.id);if(batch.complete)Object.assign(metadata,sceneMetadata());else{deactivate();lastSentSignature='';}send(metadata,batch.parts);return;}
+    const first=pendingResources[0];
+    if(resourceTransfer?.item!==first)resourceTransfer=null;
+    if(first&&(resourceTransfer||nativeResourceCost(first,new TextEncoder())+2048>buffer.byteLength)){
+      if(lastStatus.resource_chunk_protocol!==1)throw Error('请更新 DX12 运行库以显示大型贴图或网格。');
+      resourceTransfer??=createNativeResourceTransfer(first);
+      const chunk=nextNativeResourceChunk(resourceTransfer,buffer.byteLength);
+      awaitNextPresentation();send(chunk.metadata,chunk.parts,chunk.end);return;
+    }
+    if(pendingResources.length){const reserve={byteLength:(lastStatus.retained_scene_protocol===1&&lastSentGraph===graphState.version?JSON.stringify(nativeSceneDelta(lastSentFields,graphState.fields)).length:graphState.bytes.byteLength)+JSON.stringify(latestScene).length+currentBindings.size*512+4096},batch=planNativeResourceBatch(pendingResources,buffer.byteLength,latestScene,reserve),metadata={resources:batch.selected.map(r=>r.resource)};pendingResources.splice(0,batch.selected.length);for(const item of batch.selected)pendingIds.delete(item.resource.id);if(batch.complete)Object.assign(metadata,sceneMetadata());else awaitNextPresentation();send(metadata,batch.parts);return;}
     if(latestSignature!==lastSentSignature||presentationFence.needsSubmission(lastAcceptedRevision))send(sceneMetadata());
   }
   function receiveBuffer(event){
@@ -355,6 +396,16 @@ export function createNativeViewport({scene,camera,renderer,canvas,isAllowed=()=
     if(disposed||compatibility||value?.topic!=='branchforge-native'||!transport.message(value))return;
     if(value.action==='ack'){
       inFlight=false;
+      if(outbound?.chunkEnd){
+        if(value.accepted!==false){
+          noteNativeProgress();resourceTransfer.offset=outbound.chunkEnd;
+          if(resourceTransfer.offset===resourceTransfer.total){
+            const id=resourceTransfer.resource.id;
+            pendingResources.shift();pendingIds.delete(id);uploaded.add(id);counters.resourceUploads++;resourceTransfer=null;
+          }
+        }
+        outbound=null;return;
+      }
       if(value.accepted===false){
         // Rebuild from the latest scene and last accepted base. Retain still
         // needed resource bytes from the rejected snapshot; collect discards
@@ -382,14 +433,14 @@ export function createNativeViewport({scene,camera,renderer,canvas,isAllowed=()=
       if(lastStatus.requires_full_scene){lastSentGraph=0;lastSentSignature='';}
       if(lastStatus.dlss_supported===false){dlss=false;quality.value='native';quality.querySelector('[value=dlss]').disabled=true;quality.title='当前设备不支持 DLSS';}
       if(!lastError&&wanted&&!compatibilityReason&&isAllowed()&&lastStatus.frames>0&&lastStatus.scene_session===sceneSession&&lastStatus.asset_identity===assetIdentity()&&lastStatus.revision>=activationRevision&&activationRevision>0){
-        active=true;notice.hidden=true;watchdogStarted=null;
+        presented=true;notice.hidden=true;watchdogStarted=null;
         document.body.classList.add('native-viewport-active');document.documentElement.classList.add('native-viewport-active');
         message.textContent=`${lastStatus.dlss_active?'DLSS 质量':'原始分辨率'} · ${Number(lastStatus.gpu_ms||0).toFixed(1)} ms`;
       }
     }
     if(value.action==='error')fail(Error(value.message),value.operation==='initialize'||deviceFailure(value.message||''));
   }
-  function renderOverlay(){const overlayProfile=profile?.begin('native.overlay');const prior=renderer.getClearAlpha(),background=scene.background,sceneAuto=scene.matrixWorldAutoUpdate,cameraAuto=camera.matrixWorldAutoUpdate,hidden=active?overlayRoots.map(o=>[o,o.visible]):[];if(!active)scene.traverseVisible(o=>{if((o.isMesh||o.isLine||o.isPoints||o.isSprite)&&(Array.isArray(o.material)?o.material:[o.material]).every(m=>m?.depthTest!==false))hidden.push([o,o.visible]);});if(active){scene.background=null;renderer.setClearAlpha(0);scene.matrixWorldAutoUpdate=false;camera.matrixWorldAutoUpdate=false;}for(const [o]of hidden)o.visible=false;if(active)scene.traverseVisible(o=>{if(supported(o)){hidden.push([o,o.visible]);o.visible=false;}});try{renderer.render(scene,camera);}finally{for(const [o,visible]of hidden)o.visible=visible;scene.background=background;scene.matrixWorldAutoUpdate=sceneAuto;camera.matrixWorldAutoUpdate=cameraAuto;renderer.setClearAlpha(prior);overlayProfile?.end();}}
+  function renderOverlay(){const overlayProfile=profile?.begin('native.overlay');const prior=renderer.getClearAlpha(),background=scene.background,sceneAuto=scene.matrixWorldAutoUpdate,cameraAuto=camera.matrixWorldAutoUpdate,hidden=presented?overlayRoots.map(o=>[o,o.visible]):[];if(!presented)scene.traverseVisible(o=>{if((o.isMesh||o.isLine||o.isPoints||o.isSprite)&&(Array.isArray(o.material)?o.material:[o.material]).every(m=>m?.depthTest!==false))hidden.push([o,o.visible]);});if(presented){scene.background=null;renderer.setClearAlpha(0);scene.matrixWorldAutoUpdate=false;camera.matrixWorldAutoUpdate=false;}for(const [o]of hidden)o.visible=false;if(presented)scene.traverseVisible(o=>{if(supported(o)){hidden.push([o,o.visible]);o.visible=false;}});try{renderer.render(scene,camera);}finally{for(const [o,visible]of hidden)o.visible=visible;scene.background=background;scene.matrixWorldAutoUpdate=sceneAuto;camera.matrixWorldAutoUpdate=cameraAuto;renderer.setClearAlpha(prior);overlayProfile?.end();}}
   function renderCompatibility(){
     try{
       if(!compatibilityRenderers.has(renderer)){
@@ -418,7 +469,6 @@ export function createNativeViewport({scene,camera,renderer,canvas,isAllowed=()=
       if(isSuspended()){watchdogStarted=null;if(!compatibility)post({action:'hide'});return;}
       if(compatibility){renderCompatibility();return;}
       frameStamp=Date.now();
-      if(active&&lastStatus.asset_identity!==assetIdentity())deactivate();
       try{
         const rect=canvas.getBoundingClientRect(),bounds=JSON.stringify({x:rect.x,y:rect.y,width:rect.width,height:rect.height,dpr:devicePixelRatio});
         if(bounds!==lastRect){lastRect=bounds;post({action:'bounds',bounds:JSON.parse(bounds)});}
@@ -451,6 +501,7 @@ export function createNativeViewport({scene,camera,renderer,canvas,isAllowed=()=
     },
     setDlss(value){if(!compatibility){quality.value=value?'dlss':'native';quality.onchange();}},
     get stats(){
+      const active=currentPresentation();
       const presentation=compatibility?'compatibility-webgl':!wanted?'diagnostic-webgl':!isAllowed()?'auxiliary-webgl':lastError||compatibilityReason?'blocked':active?'dx12':'pending';
       return {available:true,graphicsMode,backend:compatibility||!wanted?'webgl':'dx12',ready:compatibility?webglFrame>webglStartFrame&&webglAsset===assetIdentity()&&!lastError:ready,
         active,wanted:!compatibility&&wanted,dlss:!compatibility&&dlss,lastError,fallbackReason,presentation,webgl:webglStatus(),
@@ -459,7 +510,7 @@ export function createNativeViewport({scene,camera,renderer,canvas,isAllowed=()=
     },
     dispose(){
       if(disposed)return;
-      disposed=true;epoch++;deactivate();
+      disposed=true;resourceTransfer=null;epoch++;deactivate();
       if(!compatibility)post({action:'dispose'});
       releaseBuffer();
       host.removeEventListener('sharedbufferreceived',receiveBuffer);

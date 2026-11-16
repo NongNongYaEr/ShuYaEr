@@ -10,6 +10,7 @@ namespace BranchGeneratorFBXTool {
   internal Task<string> IntegrationEvaluate(string code){return ShuYaErV050.PageCall.Execute(webView,code,15000);}
   internal async Task StopForIntegrationAsync(){
    closing=true;
+   CloseHelpReader();
    nativeTimer.Stop();
    IntPtr handle=nativeView;
    nativeView=IntPtr.Zero;

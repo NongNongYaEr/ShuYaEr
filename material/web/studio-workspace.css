@@ -16,6 +16,22 @@ body.surface-studio[data-workspace-stage=material] .scroll-controls{padding:0}
 .layer-material-thumb{display:block;flex:0 0 38px;width:38px;height:38px;object-fit:cover;border:1px solid var(--line,#414649);border-radius:4px;background:#151a16}.layer-material-thumb[data-preview-state=updating]{opacity:.7}.layer-row.selected .layer-material-thumb{border-color:var(--yellow,#dec25f)}.surface-base{display:flex;align-items:center;gap:9px;padding:5px 8px}
 .layer-row .surface-mask-thumb.active{outline:2px solid var(--yellow,#dec25f);outline-offset:1px}
 .studio-icon{width:18px;height:18px;flex:none;display:inline-block;vertical-align:middle;pointer-events:none}
+.studio-decal-points{padding:10px;margin-bottom:12px;border:1px solid var(--line,#414649);border-radius:6px}
+.studio-decal-points h4{margin:0;font-size:13px}
+.studio-decal-points .studio-quick-actions{margin:8px 0 0;flex-wrap:wrap;gap:5px}
+.studio-decal-points .studio-quick-actions button{flex:1 1 auto}
+.studio-decal-points button[aria-pressed=true]:not(.studio-decal-eye){border-color:var(--yellow,#dec25f);background:var(--brand-soft,#ccba6520)}
+.studio-decal-list{max-height:158px;overflow:auto;list-style:none;padding:0;margin:8px 0 0}
+.studio-decal-row{display:grid;grid-template-columns:minmax(0,1fr) 34px;gap:4px;margin-top:4px}
+.studio-decal-row .studio-decal-select{text-align:left;padding:5px 8px;min-height:31px}
+.studio-decal-row .studio-decal-eye{padding:3px;color:var(--muted,#9ba59e)}
+.studio-decal-eye[aria-pressed=false]{opacity:.6}
+.studio-decal-points .surface-note{margin:8px 0 0}
+.studio-decal-dimensions{margin-top:9px;padding-top:2px;border-top:1px solid var(--line,#414649)}
+.studio-decal-dimensions .surface-field{margin:5px 0;min-height:30px}
+.studio-decal-dimensions input[type=number]{max-width:88px;font-variant-numeric:tabular-nums}
+.studio-decal-dimensions>button{width:100%;margin-top:5px;padding:6px;font-size:12px}
+.studio-decal-points [data-decal-fit-size]{font-variant-numeric:tabular-nums}
 .layer-row .surface-icon{width:23px;min-width:23px;height:32px;border:0;background:transparent;padding:2px!important;color:var(--muted,#9ba59e)}
 .layer-row .layer-lock{opacity:.25}.layer-row:hover .layer-lock,.layer-row.selected .layer-lock{opacity:.85}
 .layer-row.muted .layer-eye{color:#b7b2a4}.layer-row .surface-mask-thumb{width:40px;min-width:40px;height:38px;flex-basis:40px;border-radius:4px}

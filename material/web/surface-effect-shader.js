@@ -11,7 +11,14 @@ int surfaceEffectSlot=-1;
 float effectParameter(int field,float fallback){if(surfaceEffectSlot<0)return fallback;return uEffectData[surfaceEffectSlot*10+field/4][field%4];}
 vec3 effectColor(vec3 fallback){return surfaceEffectSlot<0?fallback:uEffectColor[surfaceEffectSlot];}
 bool genericDistribution(){return surfaceEffectSlot>=0&&uEffectMeta[surfaceEffectSlot].w>.5;}
-float effectMask(int slot,vec2 uv){if(slot<4)return texture(uMaskMap0,uv)[slot];if(slot<8)return (uPaintPacked?paintSample(uv,uPaintMaskRect):texture(uMaskMap1,uv))[slot-4];if(slot<12)return texture(uMaskMap2,uv)[slot-8];return texture(uMaskMap3,uv)[slot-12];}
+vec4 finalEffectMasks(vec2 uv){
+ ivec2 atlasSize=textureSize(uMaskMap3,0),maskSize=textureSize(uMaskMap2,0);
+ if(all(equal(atlasSize,maskSize)))return texture(uMaskMap3,uv);
+ // The image atlas keeps this distribution map at its original pixel size and origin.
+ vec2 point=clamp(uv*vec2(maskSize),vec2(.5),vec2(maskSize)-.5);
+ return textureLod(uMaskMap3,point/vec2(atlasSize),0.);
+}
+float effectMask(int slot,vec2 uv){if(slot<4)return texture(uMaskMap0,uv)[slot];if(slot<8)return (uPaintPacked?paintSample(uv,uPaintMaskRect):texture(uMaskMap1,uv))[slot-4];if(slot<12)return texture(uMaskMap2,uv)[slot-8];return finalEffectMasks(uv)[slot-12];}
 #define uMoss effectParameter(0,uMoss)
 #define uMossRough effectParameter(1,uMossRough)
 #define uMossEnabled effectParameter(2,uMossEnabled)

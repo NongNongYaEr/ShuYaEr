@@ -22,5 +22,28 @@ module.exports=async function verifyUnitPreparation(page,out){
  await tool.locator('[data-save]').click();await idle();assert(!await tool.isVisible());assert(await page.locator('#plantUnitDialog').isVisible());assert.equal(await page.locator('#unitPackName').inputValue(),'整包整理真实验收');const output=await page.evaluate(()=>window.__branchForge.workbench.plantUnits.pack);assert.equal(output.units.length,fixture.parts.length);assert(output.material.color.startsWith('data:image/png'));assert(output.units.every((u,i)=>u.size_m===(8+i)/100));assert(output.units.every(u=>!('material' in u)&&!('faces' in u)));assert.deepEqual(await stamp(),before);fs.writeFileSync(path.join(out,'prepared-pack.plantunits.json'),JSON.stringify(output));fs.writeFileSync(path.join(out,'draft-acceptance.json'),JSON.stringify({draftId:savedId,sourceId:disk.sourceId,units:disk.units.map(u=>({id:u.id,faces:u.faces.length,size:u.size_m,base:u.base,tip:u.tip,approved:u.approved})),origin:new URL(page.url()).origin}));check('Save emits a standard self-contained nine-unit pack with one shared atlas and opens it in the normal workbench');
  for(let i=0;i<fixture.parts.length;i++){const sourceUV=await page.evaluate(async({id,i})=>{const {extractPreparationGeometry}=await import('/unit-preparation-data.js'),p=window.__branchForge.workbench.plantUnits.preparation;return extractPreparationGeometry(p.source.geometry,p.draft.units[i].faces).uv;},{id:savedId,i});assert.deepEqual(output.units[i].geometry.uv,sourceUV);}
  await page.screenshot({path:path.join(out,'整包整理-成品套装.png')});await page.locator('#unitWorkbenchClose').click();await page.evaluate(id=>window.__branchForge.workbench.plantUnits.openPack(id),output.id);await page.waitForFunction(()=>!window.__branchForge.workbench.plantUnits.busy);assert.equal(await page.locator('#unitPackGrid .pu-unit-card').count(),fixture.parts.length);await page.locator('#unitWorkbenchClose').click();check('saved unit geometry keeps exact extracted UVs and reopens through the existing pack storage path');
+ await page.evaluate(()=>window.__branchForge.workbench.plantUnits.open());
+ await page.waitForFunction(()=>!window.__branchForge.workbench.plantUnits.busy);
+ await page.locator('#unitPrepareGlbTop').click();await idle();
+ await tool.locator('[data-unit]').first().click();
+ await tool.locator('.pup-direction-settings').locator('summary').click();
+ await tool.locator('[data-base]').click();
+ await tool.locator('[data-file]').setInputFiles(file);
+ const duplicate=page.locator('#unitPreparationConfirm');
+ await duplicate.locator('[data-confirm-save]').click();await idle();
+ assert.equal(await tool.locator('[data-host]').getAttribute('data-mode'),'select');
+ assert.equal(await tool.locator('[data-unit]').count(),0);
+ await box(fixture.parts[0]);
+ assert(await tool.locator('[data-extract]').isEnabled(),'the disposed point picker must release the viewport to the newly imported GLB');
+ await tool.locator('[data-extract]').click();await idle();
+ await tool.locator('[data-overview]').click();
+ assert(await tool.locator('[data-continue-unit]').isVisible());
+ assert(await tool.locator('[data-start-selection]').isVisible());
+ await tool.locator('[data-file]').setInputFiles(file);
+ await duplicate.locator('[data-confirm-accept]').click();await idle();
+ assert.equal(await tool.getAttribute('data-stage'),'2');
+ assert(await tool.locator('[data-role]').isEnabled());
+ await tool.locator('[data-close]').click();await page.locator('#unitWorkbenchClose').click();
+ check('reimporting from point-picking mode creates a working independent selection or resumes the pending unit without losing calibration');
  return checks;
 };

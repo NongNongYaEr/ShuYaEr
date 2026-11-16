@@ -1,6 +1,7 @@
 import {instantiateLibraryEntry} from './effect-library.js';
 import {layerIndex,layerIsLocked,layerLeafIds,pruneSurfaceResources,validateLayerTree} from './surface-layers.js';
 import {validateSurface} from './surface-effects.js';
+import {isManualDecalPlacement} from './manual-decal-rules.js';
 // Replacement is explicit and scoped to a selected group. Handwork, locked
 // leaves and externally referenced lower layers survive with effective opacity.
 export function replacementSummary(document,targetId){
@@ -10,7 +11,7 @@ export function replacementSummary(document,targetId){
  const ids=new Set(layerLeafIds(s,targetId)),keep=new Set();
  for(const e of s.effects)if(ids.has(e.id)){
   const mask=s.masks.find(m=>m.id===e.maskRef),refs=[e.scopeRef,...(mask?.items||[]).flatMap(r=>[r.areaRef,r.addRef,r.eraseRef])];
-  if(e.manualDecal||e.manualBrush||e.paint?.strokes?.length||e.paint||layerIsLocked(s,e.id)||refs.some(id=>s.areas.find(a=>a.id===id)?.strokes?.length))keep.add(e.id);
+  if(isManualDecalPlacement(e)||e.manualBrush||e.paint?.strokes?.length||e.paint||layerIsLocked(s,e.id)||refs.some(id=>s.areas.find(a=>a.id===id)?.strokes?.length))keep.add(e.id);
  }
  // Transitive references must not become dangling or move above their users.
  let changed=true;while(changed){changed=false;for(const e of s.effects)if(!ids.has(e.id)||keep.has(e.id)){

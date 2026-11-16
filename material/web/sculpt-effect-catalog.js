@@ -57,7 +57,7 @@ const rows=[
  ['O08',4,'细砂积缝',coat('dust','细砂积缝',{surfaceColor:'#9b8560',surfaceRoughness:.98,surfaceNormalStrength:1.4,surfaceHeightMm:.5,surfaceGrainCm:.2,surfaceBarkKeep:.75,surfaceAmount:.8},dist('groove',{density:.9,recognitionCm:9}))],
  ['O08',5,'白色矿痕',decal('白色矿痕','mineral-white')],
  ['O08',6,'盐霜颗粒',decal('盐霜颗粒','salt-crystals')],
- ['O09',1,'新刷白漆',coat('paint','新刷白漆',{paintColor:'#e4e2d6',paintWear:.03,paintBarkNormal:1,paintRough:.86},dist('root',{rootHeightMeters:1.25,density:1,cavityPreference:0}))],
+ ['O09',1,'新刷白漆',coat('paint','新刷白漆',{paintColor:'#e4e2d6',paintWear:.03,paintBarkNormal:1,paintRough:.86},null,{rules:[{type:'height',params:{maxMeters:1.25,featherMeters:.015}}]})],
  ['O09',2,'大块脱漆',coat('paint','大块脱漆',{paintColor:'#d9d8cb',paintWear:.6,paintBarkNormal:1,paintRough:.94},dist('root',{rootHeightMeters:1.35,density:.55,patchCm:32,breakup:.5,edge:.14}))],
  ['O09',3,'石灰流挂',decal('石灰流挂','lime-runoff')],
  ['O09',4,'旧色标记',decal('旧色标记','paint-red',{surfaceAmount:.7})],

@@ -309,7 +309,7 @@ export function createGeneratorWorkspace({ getAuthoring, getAsset, getSelection,
       if (layer.operation?.type === 'POINT_SLIDE') row.querySelector('small').textContent = `${layer.operation.root} · 控制点 ${layer.operation.point+1} 沿枝滑动 · 树形保持`;
       if (layer.operation?.type === 'POINT_SCALE') row.querySelector('small').textContent = `${layer.operation.root} · 控制点 ${layer.operation.point+1} 向梢缩放 · 后段控制点重排`;
       if (layer.operation?.type === 'POINT_ROTATE') row.querySelector('small').textContent = `${layer.operation.root} · 控制点 ${layer.operation.point + 1} 向梢旋转 · 保持枝长`;
-      if(layer.operation?.type==='CONTROL_CURVE')row.querySelector('small').textContent=`${layer.operation.root} · ${layer.operation.knots.length} 个控制点决定走势`;
+      if(layer.operation?.type==='CONTROL_CURVE')row.querySelector('small').textContent=`${layer.operation.root} · ${layer.operation.edit_knot_limit??layer.operation.knots.length} 个编辑点`;
       if (layer.operation && !['DUPLICATE','ROOT_SCALE','POINT_ROTATE','POINT_SCALE','POINT_SLIDE','CONTROL_CURVE','RADIUS'].includes(layer.operation.type)) {
         const edit = document.createElement('button'); edit.textContent = '编辑造型参数';
         edit.onclick = () => layer.operation.type === 'MOUNT' ? document.dispatchEvent(new CustomEvent('branch-mount-edit',{detail:layer.id})) : window.__branchForge.workbench.deformation.activate(layer.operation.type, layer.id);

@@ -8,18 +8,22 @@ export function createMeshOptimizationUI(host){
  }
  function callWorker(s,kind,data={},transfer=[]){return new Promise((resolve,reject)=>{const id=++workerSerial;s.pending.set(id,{resolve,reject});s.worker.postMessage({id,kind,...data},transfer);});}
  function terminate(s){s.worker.terminate();for(const p of s.pending.values())p.reject(aborted());s.pending.clear();}
- function cancel(){const s=session;if(!s)return;session=null;serial++;if(s.job)host.request('mesh/jobs/'+s.job+'/release',{method:'POST',keepalive:true}).catch(()=>{});terminate(s);host.end(s.task);$('meshOptimizationBadge').hidden=true;sync();}
+ function release(job){if(job)return host.request('mesh/jobs/'+job+'/release',{method:'POST',keepalive:true}).catch(()=>{});}
+ function cancel(){const s=session;if(!s)return;session=null;serial++;release(s.job);s.job=null;terminate(s);host.end(s.task);$('meshOptimizationBadge').hidden=true;sync();}
  function current(s){if(session!==s||!host.current(s.task))throw aborted();}
  function preview(kind){const s=session;if(!s)return;const mesh=kind==='before'?s.proxy:s.result?.candidate;if(!mesh)return;host.preview(mesh,$('meshWire').checked);$('meshOptimizationBadge').hidden=false;$('meshOptimizationBadge').textContent=kind==='before'?(s.info.triangles>180000?'高模参考 · 简化预览代理':'减面前 · 原始几何'):'减面后 · '+s.result.report.outputTriangles.toLocaleString()+' 三角面';$('meshBefore').classList.toggle('active',kind==='before');$('meshAfter').classList.toggle('active',kind!=='before');}
  async function generate(){const s=session;if(!s||s.running)return;let settings;try{settings=options();}catch(e){host.error(e.message);return;}s.running=true;sync();try{
-  const started=await host.request('mesh/jobs?options='+encodeURIComponent(JSON.stringify(settings)),{body:s.input});if(session!==s||!host.current(s.task)){host.request('mesh/jobs/'+started.id+'/release',{method:'POST',keepalive:true}).catch(()=>{});throw aborted();}s.job=started.id;
+  const started=await host.request('mesh/jobs?options='+encodeURIComponent(JSON.stringify(settings)),{body:s.input});if(session!==s||!host.current(s.task)){release(started.id);throw aborted();}s.job=started.id;
   for(;;){const state=await host.request('mesh/jobs/'+s.job);current(s);$('meshOptimizationStatus').textContent=(phase[state.phase]||state.phase)+' · '+Math.round(state.progress*100)+'%';if(state.state==='complete')break;if(state.state==='failed')throw Error(state.error);if(state.state==='cancelled')throw aborted();await new Promise(r=>setTimeout(r,120));}
-  const bytes=await host.request('mesh/jobs/'+s.job+'/result',{binary:true});current(s);const result=await callWorker(s,'result',{bytes:bytes.buffer,options:settings},[bytes.buffer]);current(s);host.request('mesh/jobs/'+s.job+'/release',{method:'POST'}).catch(()=>{});s.job=null;s.result=result;s.proxy=result.proxy;s.key=JSON.stringify(settings);
+  const bytes=await host.request('mesh/jobs/'+s.job+'/result',{binary:true});current(s);const result=await callWorker(s,'result',{bytes:bytes.buffer,options:settings},[bytes.buffer]);current(s);s.result=result;s.proxy=result.proxy;s.key=JSON.stringify(settings);
   const r=result.report;$('meshOptimizationStatus').textContent=`${r.inputTriangles.toLocaleString()} → ${r.outputTriangles.toLocaleString()} 三角面 · 减少 ${(100-r.outputTriangles/r.inputTriangles*100).toFixed(1)}%`+(r.targetReached?'':' · 保护与误差约束下未达到目标')+(r.constraintFallback==='source-retained'?' · 为保护拓扑，本次保留原网格':r.constraintFallback==='conservative-seams'?' · 已采用更保守的接缝保护':'');
   $('meshOptimizationMetrics').textContent=`连通分区 ${r.before.components} → ${r.after.components}；边界环 ${r.before.boundaryLoops} → ${r.after.boundaryLoops}。双向采样偏差：P95 ${r.sampledDistance.p95Cm.toFixed(3)}cm，采样最大 ${r.sampledDistance.maxCm.toFixed(3)}cm（非全表面最大值）。`+(r.nonManifoldSource?' 原高模存在非流形边，孔洞检查仅为诊断。':'')+(r.outputTriangles>180000?' 候选超过18万面预览预算，可调参继续减面；25万面内仍可采用。':'')+(!s.proxy?' 未得到预算内高模参考代理。':'');
   if(r.outputTriangles<=180000)preview('after');else if(s.proxy)preview('before');
  }catch(e){if(session===s&&e.name!=='AbortError'){$('meshOptimizationStatus').textContent=e.message;host.error(e.message);}}
- finally{if(session===s){s.running=false;sync();}}
+ finally{
+  const job=s.job;s.job=null;await release(job);
+  if(session===s){s.running=false;sync();}
+ }
  }
  async function open(bytes,name){if(host.busy()||session)return;const s={token:++serial,worker:new Worker('./mesh-optimization-worker.js',{type:'module'}),pending:new Map(),result:null,proxy:null,running:true,job:null,input:null};session=s;s.task=host.begin(cancel);s.worker.onmessage=({data})=>{const p=s.pending.get(data.id);if(p){s.pending.delete(data.id);data.error?p.reject(Error(data.error)):p.resolve(data);}};s.worker.onerror=e=>{for(const p of s.pending.values())p.reject(Error(e.message||'高模读取失败。'));s.pending.clear();};
   $('meshOptimizationStatus').textContent='后台读取高模几何…';$('meshOptimizationMetrics').textContent='';$('meshOptimizationBadge').textContent='';$('meshHeight').value=host.height();sync();

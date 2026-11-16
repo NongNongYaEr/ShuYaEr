@@ -3,6 +3,7 @@ import {createImportedTrunkPreview} from './imported-trunk-preview.js';
 import {markNativeModelChanged} from './native-model-changes.js';
 import {cloneNativePreviewGeometry} from './native-preview-geometry.js';
 import {axisTimes,axisTime,axisSegment,nearestAxis,cloneAxis} from './branch-axis.js';
+import {treeLightCarrierId,treeLightRingCenter} from './tree-light-carriers.js';
 import * as THREE from './vendor/three.module.min.js';
 
 // Interactive render state only. The authored curves remain on the CPU and the
@@ -95,11 +96,20 @@ vec4 worldPosition=modelMatrix*duckEditPosition;
 
 export function createGpuMeshPreview(asset,snapshot,{sampleLine,lineTangent,targets=null,rigid=false,rigidFollowers=false,rigidUnits=false,anchorFollowers=true}){
   asset.activeEditPreview?.restore();
-  const meshes=[];asset.group.traverse(o=>{if(o.isMesh&&!o.userData.imported_trunk)meshes.push(o);});
+  const byStable=new Map([...snapshot.values()].map(b=>[b.stableId,b]));
+  const meshes=[],lightCarriers=new Map();
+  asset.group.traverse(mesh=>{
+    if(!mesh.isMesh||mesh.userData.imported_trunk)return;
+    if(mesh.userData.category==='tree_light'){
+      const carrier=treeLightCarrierId(asset.authoring,mesh.userData.treeLightStrip?.guide);
+      if(!byStable.has(carrier))return;
+      lightCarriers.set(mesh,carrier);
+    }
+    meshes.push(mesh);
+  });
   if(meshes.some(m=>m.isSkinnedMesh||m.isBatchedMesh||m.geometry.morphAttributes.position?.length||
     (Array.isArray(m.material)?m.material:[m.material]).some(v=>v.isShaderMaterial||v.isRawShaderMaterial)))return null;
   const limit=asset.editPreviewTextureLimit||4096;
-  const byStable=new Map([...snapshot.values()].map(b=>[b.stableId,b]));
   // The brush/transform can change only this family. Installed followers move
   // rigidly with their attachment; they need one frame, not one per wood vertex.
   const affected=targets?new Set(targets):null;
@@ -111,7 +121,7 @@ export function createGpuMeshPreview(asset,snapshot,{sampleLine,lineTangent,targ
   const rootInverse=asset.group.matrixWorld.clone().invert(),poseProbe=new THREE.Matrix4();
   const cached=bindingCache.get(asset);
   const reusable=cached&&cached.scopeKey===scopeKey&&cached.elements===asset.elements&&cached.lookupTexture===asset.lookupTexture&&cached.bindings===asset.editPreviewBindings&&cached.records.length===meshes.length&&cached.snapshot.size===snapshot.size&&
-    cached.records.every((r,i)=>r.mesh===meshes[i]&&r.mesh.geometry===r.geometry&&r.count===(r.mesh.isInstancedMesh?r.mesh.count:1)&&r.stableId===r.mesh.userData.stable_id&&r.branchId===r.mesh.userData.branch_id&&r.local.equals(poseProbe.copy(rootInverse).multiply(r.mesh.matrixWorld))&&bindingAttributes(r.mesh).every((a,n)=>sameBindingAttribute(a,r.bindingAttributes[n]))&&(!r.instanceElements?!r.mesh.userData.instance_elements:r.mesh.userData.instance_elements?.length===r.instanceElements.length&&r.instanceElements.every((v,n)=>v===r.mesh.userData.instance_elements[n])))&&
+    cached.records.every((r,i)=>r.mesh===meshes[i]&&r.lightCarrier===lightCarriers.get(r.mesh)&&r.mesh.geometry===r.geometry&&r.count===(r.mesh.isInstancedMesh?r.mesh.count:1)&&r.stableId===r.mesh.userData.stable_id&&r.branchId===r.mesh.userData.branch_id&&r.local.equals(poseProbe.copy(rootInverse).multiply(r.mesh.matrixWorld))&&bindingAttributes(r.mesh).every((a,n)=>sameBindingAttribute(a,r.bindingAttributes[n]))&&(!r.instanceElements?!r.mesh.userData.instance_elements:r.mesh.userData.instance_elements?.length===r.instanceElements.length&&r.instanceElements.every((v,n)=>v===r.mesh.userData.instance_elements[n])))&&
     [...snapshot].every(([id,b])=>cached.snapshot.get(id)?.stableId===b.stableId&&cached.rigid.get(id)===Boolean(isRigid(b))&&sameCurve(cached.snapshot.get(id),b));
   const vertices=meshes.reduce((n,m)=>n+m.geometry.getAttribute('position').count*(m.isInstancedMesh?m.count:1),0);
   const frames=reusable?cached.frames:[null],byBranch=reusable?cached.byBranch:new Map(),records=reusable?cached.records:[],materials=[],lookupChunks=[];
@@ -142,16 +152,18 @@ export function createGpuMeshPreview(asset,snapshot,{sampleLine,lineTangent,targ
   // Bind each render vertex once. GPU instances stay instances: no per-copy
   // Mesh/BufferGeometry, no Vector3 per vertex and no repeated foliage rebuild.
   if(!reusable)for(const mesh of meshes){
-    const geometry=mesh.geometry,position=geometry.getAttribute('position'),uv=geometry.getAttribute('uv1');
+    const lightCarrier=lightCarriers.get(mesh),ringSize=lightCarrier?mesh.userData.treeLightStrip.ringSize:0;
+    // Light UV1 animates the flow. Each ring follows its carrier at the ring centre.
+    const geometry=mesh.geometry,position=geometry.getAttribute('position'),uv=lightCarrier?null:geometry.getAttribute('uv1');
     const local=rootInverse.clone().multiply(mesh.matrixWorld),inverse=local.clone().invert();
     const record={mesh,geometry,material:mesh.material,depth:mesh.customDepthMaterial,distance:mesh.customDistanceMaterial,
-      raycast:mesh.raycast,frustumCulled:mesh.frustumCulled,local,inverse,frames:new Map(),offset:lookupCursor,instances:[],vertexCount:position.count,
+      raycast:mesh.raycast,frustumCulled:mesh.frustumCulled,local,inverse,frames:new Map(),offset:lookupCursor,instances:[],vertexCount:position.count,lightCarrier,
       bindingAttributes:bindingAttributes(mesh).map(bindingAttribute),count:mesh.isInstancedMesh?mesh.count:1,stableId:mesh.userData.stable_id,branchId:mesh.userData.branch_id,instanceElements:mesh.userData.instance_elements?.slice()};
     const compiled=asset.editPreviewBindings?.(mesh),count=mesh.isInstancedMesh?mesh.count:1;
     for(let n=0;n<count;n++){
       const descriptor=compiled?.instances?.[n],elements=descriptor?.elements||asset.elements,grid=descriptor?.lookup||compiled?.lookup||asset.lookupTexture;
       const family=descriptor?compiledFamily(descriptor):null;
-      const hint=byStable.get(descriptor?.stableId||mesh.userData.stable_id||mesh.userData.branch_id);
+      const hint=byStable.get(lightCarrier||descriptor?.stableId||mesh.userData.stable_id||mesh.userData.branch_id);
       const elementIndex=mesh.userData.instance_elements?.[n];
       let instanceBinding=null;
       if(elementIndex!==undefined){const e=asset.elements[elementIndex],parent=asset.elements[e?.parentIndex],branch=byStable.get(parent?.id);if(branch)instanceBinding={branch,t:nearParameter(branch.points,new THREE.Vector3(...e.pivot))};}
@@ -176,6 +188,7 @@ export function createGpuMeshPreview(asset,snapshot,{sampleLine,lineTangent,targ
       const center=geometry.getAttribute('sampleCenter'),radius=descriptor?.radius??1;
       const bindings=new Map(),values=new Float32Array(position.count);
       for(let i=0;i<position.count;i++){
+        if(ringSize&&i%ringSize){values[i]=values[i-1];continue;}
         let binding=instanceBinding||marker;
         if(hint)binding={branch:hint,t:null};
         else if(uv&&!instanceBinding){
@@ -190,7 +203,8 @@ export function createGpuMeshPreview(asset,snapshot,{sampleLine,lineTangent,targ
         }
         let t=binding?.t??0;
         if(binding?.t==null&&eligible(binding?.branch)&&!isRigid(binding.branch)){
-          point.fromBufferAttribute(position,i);
+          if(ringSize)treeLightRingCenter(position,i,ringSize,point);
+          else point.fromBufferAttribute(position,i);
           if(center)point.set(center.getX(i)+(point.x-center.getX(i))*radius,center.getY(i)+(point.y-center.getY(i))*radius,center.getZ(i)+(point.z-center.getZ(i))*radius);
           point.applyMatrix4(world);t=nearParameter(binding.branch.points,point);
         }

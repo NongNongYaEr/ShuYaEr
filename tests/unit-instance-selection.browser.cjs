@@ -1,5 +1,5 @@
 const fs = require('fs'), path = require('path'), assert = require('node:assert/strict');
-const { chromium } = require('playwright');
+const { chromium } = require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 
 // Headless, isolated project sessions. The only written projects are generated
 // fixtures under .runtime; source libraries and the user's active app are untouched.

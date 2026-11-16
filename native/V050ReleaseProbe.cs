@@ -1,4 +1,4 @@
-// Explicit release-only hidden verification, using its own cache/session files.
+﻿// Explicit release-only hidden verification, using its own cache/session files.
 using System;using System.IO;using System.Drawing;using System.Threading.Tasks;using System.Collections.Generic;using System.Web.Script.Serialization;
 namespace ShuYaErV050 {
  internal static partial class V050Probe {
@@ -6,6 +6,10 @@ namespace ShuYaErV050 {
    string folder=Path.Combine(host.Root,".runtime","release-acceptance"),phase="startup";Directory.CreateDirectory(folder);var json=new JavaScriptSerializer{MaxJsonLength=16000000};bool passed=false;
    try{
     await Wait(()=>{if(host.Plant.IntegrationFailed)throw new Exception("Plant startup failed");return Task.FromResult(host.Plant.IntegrationReady);},90000);
+    bool navigation=Environment.GetEnvironmentVariable("SHUYAER_RELEASE_NAVIGATION")=="1";
+    if(navigation){
+     await host.Plant.IntegrationAwait("(async()=>{const end=Date.now()+10000;while(document.getElementById('viewportNavigationSettings')?.dataset.ready!=='true'){if(Date.now()>end)throw Error('Navigation settings did not load');await new Promise(r=>setTimeout(r,50));}const module=await import('/viewport-navigation.js');module.setViewportNavigationMode('maya');return module.getViewportNavigationMode();})()",15000);
+    }
     File.WriteAllText(Path.Combine(folder,"phase.txt"),phase="plant-render");
     string plant=await host.Plant.IntegrationAwait("(async()=>{const n=window.__branchForge.nativeViewport,end=Date.now()+60000;while(!n.stats.ready||!n.stats.active){if(n.stats.lastError||Date.now()>end)throw Error('Release native plant view unavailable '+JSON.stringify(n.stats));await new Promise(r=>setTimeout(r,100));}const audit=await n.auditModel({timeout:20000});if(!audit.checked||audit.mismatch)throw Error('Native plant scene audit failed');return {backend:'D3D12',audit,stats:n.stats};})()",85000);
     File.WriteAllText(Path.Combine(folder,"plant.json"),plant);if(File.Exists(Path.Combine(folder,"plant-native.png")))File.Delete(Path.Combine(folder,"plant-native.png"));host.Plant.CaptureNativeRelease(Path.Combine(folder,"plant-native.png"));await Wait(()=>Task.FromResult(File.Exists(Path.Combine(folder,"plant-native.png"))),15000);await Task.Delay(200);
@@ -20,9 +24,15 @@ namespace ShuYaErV050 {
     await host.Plant.IntegrationAwait("(async()=>{const p=window.__branchForge.trunkPreparation;await p.open();const r=await fetch('/api/material-handoff?id=11111111-1111-4111-8111-111111111111');if(!r.ok)throw Error('Missing release fixture');await p.importFile(new File([await r.arrayBuffer()],'发布验收.glb',{type:'model/gltf-binary'}),{route:'material'});document.querySelector('#trunkPreparationDialog [data-flow=material]').click();return true;})()",65000);
     await Wait(()=>Task.FromResult(host.Material!=null&&host.Material.IntegrationReady),90000);
     await Wait(async()=>!host.Busy&&await host.Material.IntegrationEvaluate("Boolean(window.treeMaterialIntegration?.state.current&&!window.treeMaterialIntegration.state.busy)")=="true",240000);
+    if(navigation){
+     File.WriteAllText(Path.Combine(folder,"phase.txt"),phase="material-navigation");
+     await Wait(async()=>await host.Material.IntegrationEvaluate("window.treeMaterialIntegration?.navigationMode==='maya'")=="true",12000);
+     await host.Plant.IntegrationAwait("(async()=>{const module=await import('/viewport-navigation.js');module.setViewportNavigationMode('max');return module.getViewportNavigationMode();})()",6000);
+     await Wait(async()=>await host.Material.IntegrationEvaluate("window.treeMaterialIntegration?.navigationMode==='max'")=="true",12000);
+    }
     if(!host.SingleWorkflowFrame)throw new Exception("Integrated material component lost its workflow frame");
     File.WriteAllText(Path.Combine(folder,"phase.txt"),phase="material-render");
-    string material=await host.Material.IntegrationAwait(@"(async()=>{const a=window.treeMaterialModule,b=window.treeLab,end=Date.now()+120000;while(b.busy||b.surfaceWorkbench.state.pending){if(Date.now()>end)throw Error('Material updates timed out');await new Promise(r=>setTimeout(r,100));}if(b.surfaceWorkbench.state.error)throw Error(b.surfaceWorkbench.state.error);const {captureNativeMaterial}=await import('./native-material-capture.js'),{EFFECT_LIBRARY_BUILTINS}=await import('./effect-library.js'),{SURFACE_DECAL_STYLES}=await import('./surface-decal-styles.js');if(EFFECT_LIBRARY_BUILTINS.length!==175||SURFACE_DECAL_STYLES.length!==65)throw Error('Material catalog incomplete');const image=await captureNativeMaterial(b.renderer);window.__releaseMaterialImage=image.url;await a.flushDraft();return {backend:b.renderer.gl.nativeBackend,coveredPixels:image.coveredPixels,effects:175,decalStyles:65,project:a.getSnapshot().id,triangles:b.model.indices.length/3};})()",150000);
+    string material=await host.Material.IntegrationAwait(@"(async()=>{const a=window.treeMaterialModule,b=window.treeLab,end=Date.now()+120000;while(b.busy||b.surfaceWorkbench.state.pending){if(Date.now()>end)throw Error('Material updates timed out');await new Promise(r=>setTimeout(r,100));}if(b.surfaceWorkbench.state.error)throw Error(b.surfaceWorkbench.state.error);const {captureNativeMaterial}=await import('./native-material-capture.js'),{EFFECT_LIBRARY_BUILTINS}=await import('./effect-library.js'),{SURFACE_DECAL_STYLES}=await import('./surface-decal-styles.js');if(EFFECT_LIBRARY_BUILTINS.length!==207||SURFACE_DECAL_STYLES.length!==65)throw Error('Material catalog incomplete');const image=await captureNativeMaterial(b.renderer);window.__releaseMaterialImage=image.url;await a.flushDraft();return {backend:b.renderer.gl.nativeBackend,coveredPixels:image.coveredPixels,effects:207,decalStyles:65,project:a.getSnapshot().id,triangles:b.model.indices.length/3};})()",150000);
     string rawImage=await host.Material.IntegrationEvaluate("window.__releaseMaterialImage"),url=json.Deserialize<string>(rawImage);File.WriteAllBytes(Path.Combine(folder,"material-native.png"),Convert.FromBase64String(url.Substring(url.IndexOf(',')+1)));File.WriteAllText(Path.Combine(folder,"material.json"),material);
     bool deep=Environment.GetEnvironmentVariable("SHUYAER_RELEASE_DEEP")=="1";string exported="null";
     if(deep){File.WriteAllText(Path.Combine(folder,"phase.txt"),phase="final-glb");exported=await host.Material.IntegrationAwait("(async()=>{const a=window.treeMaterialModule,out=await a.exportFinalGLB();if(out.resolution!==2048||!out.model)throw Error('Release GLB output missing');await a.flushDraft();return out;})()",180000);File.WriteAllText(Path.Combine(folder,"export.json"),exported);}
@@ -32,7 +42,7 @@ namespace ShuYaErV050 {
      File.WriteAllText(Path.Combine(folder,"phase.txt"),phase="close-race");
      await ExerciseCloseRace(host,folder,json);
     }
-    File.WriteAllText(Path.Combine(folder,"result.json"),json.Serialize(new {passed=true,version=typeof(Workspace).Assembly.GetName().Version.ToString(3),backend="D3D12",materialBackend="v040-dx12",singleWorkflowFrame=true,sourceBranches=branches,retainedPlatanus=retained,actualNativeReadbacks=true,eightSamples=templates!="null",deepGLB=deep,closeRace,windowsVisible=false}));passed=true;
+    File.WriteAllText(Path.Combine(folder,"result.json"),json.Serialize(new {passed=true,version=typeof(Workspace).Assembly.GetName().Version.ToString(3),backend="D3D12",materialBackend="v040-dx12",singleWorkflowFrame=true,sourceBranches=branches,retainedPlatanus=retained,actualNativeReadbacks=true,eightSamples=templates!="null",deepGLB=deep,closeRace,navigation,windowsVisible=false}));passed=true;
    }catch(Exception error){File.WriteAllText(Path.Combine(folder,"result.json"),json.Serialize(new {passed=false,phase,error=error.ToString(),windowsVisible=false}));}
    if(!host.ClosePending){host.SelectPlant();host.Close();}
    await Task.Delay(40000);if(!host.IsDisposed){File.WriteAllText(Path.Combine(folder,"close-failed.json"),json.Serialize(new {passed=false,error="Release host did not close normally",previousPassed=passed}));System.Windows.Forms.Application.ExitThread();}

@@ -1,5 +1,5 @@
 import {readPackAsset,isPackageAsset} from './plant-pack-client.js';
-const ROLES={LEAF:'叶片',FLOWER:'花',FRUIT:'果实',BUD:'花苞'},memory=new Map(),pending=new Map();
+const ROLES={LEAF:'叶片',FLOWER:'花',FRUIT:'果实',BUD:'花苞',BASE_BRANCH:'基础枝'},memory=new Map(),pending=new Map();
 let queue=Promise.resolve(),preview=null,host=null;
 export function plantUnitThumbnailDirection(unit){
   const p=unit.geometry.position,index=unit.geometry.index,m=Array(9).fill(0),count=index?.length||p.length/3;
@@ -7,7 +7,7 @@ export function plantUnitThumbnailDirection(unit){
   let v=[.3,-.55,1];for(let i=0;i<12;i++){const n=[0,1,2].map(r=>m[r*3]*v[0]+m[r*3+1]*v[1]+m[r*3+2]*v[2]),length=Math.hypot(...n);if(length<1e-12)return [.3,-.55,1];v=n.map(x=>x/length);}if(v[0]*.3-v[1]*.55+v[2]<0)v=v.map(x=>-x);return [v[0]+.045,v[1]-.08,v[2]+.15];
 }
 const enqueue=action=>{const result=queue.catch(()=>{}).then(action);queue=result.catch(()=>{});return result;};
-export function representativePlantUnits(pack){return (pack.units||[]).slice(0,64);}
+export function representativePlantUnits(pack){return [...(pack.units||[]),...(pack.base_branches||[]).map(branch=>({...branch,role:'BASE_BRANCH'}))].slice(0,64);}
 export function plantUnitThumbnailCells(count){const columns=Math.ceil(Math.sqrt(count)),rows=Math.ceil(count/columns);return Array.from({length:count},(_,i)=>[(i%columns)*512/columns,Math.floor(i/columns)*384/rows,512/columns,384/rows]);}
 export async function composePlantUnitThumbnail(pack,images){
   const units=representativePlantUnits(pack);if(!units.length)throw Error('套装中还没有可预览的单元');
@@ -27,7 +27,7 @@ export async function savePlantUnitThumbnail(id,thumbnail){const source=await re
 export function ensurePlantUnitThumbnail(record,{isWanted=()=>true}={}){
   if(record.thumbnail)return Promise.resolve(record.thumbnail);const key=record.id+':'+(record.previewSourceKey||record.revision||1);if(memory.has(key))return Promise.resolve(memory.get(key));
   const existing=pending.get(key);if(existing){existing.wanted.add(isWanted);return existing.promise;}
-  const entry={wanted:new Set([isWanted])};entry.promise=(async()=>{const source=await request(record.id);if(record.previewSourceKey&&record.previewSourceKey!==source.sourceKey)throw Error('素材已有更新，请刷新资源');if(source.thumbnail){memory.set(record.id+':'+source.sourceKey,source.thumbnail);return source.thumbnail;}return enqueue(async()=>{if(![...entry.wanted].some(fn=>fn()))return '';const pack=isPackageAsset(record.id)?await readPackAsset(record.id):await fetch('/api/plant-unit?id='+encodeURIComponent(record.id),{cache:'no-store'}).then(async r=>{if(!r.ok)throw Error('叶花果模型读取失败');return r.json();});if(!pack.units?.length)return '';const thumbnail=await render(pack);return publish(record.id,source.sourceKey,thumbnail);});})().finally(()=>pending.delete(key));pending.set(key,entry);return entry.promise;
+  const entry={wanted:new Set([isWanted])};entry.promise=(async()=>{const source=await request(record.id);if(record.previewSourceKey&&record.previewSourceKey!==source.sourceKey)throw Error('素材已有更新，请刷新资源');if(source.thumbnail){memory.set(record.id+':'+source.sourceKey,source.thumbnail);return source.thumbnail;}return enqueue(async()=>{if(![...entry.wanted].some(fn=>fn()))return '';const pack=isPackageAsset(record.id)?await readPackAsset(record.id):await fetch('/api/plant-unit?id='+encodeURIComponent(record.id),{cache:'no-store'}).then(async r=>{if(!r.ok)throw Error('叶花果模型读取失败');return r.json();});if(!pack.units?.length&&!pack.base_branches?.length)return '';const thumbnail=await render(pack);return publish(record.id,source.sourceKey,thumbnail);});})().finally(()=>pending.delete(key));pending.set(key,entry);return entry.promise;
 }
 export function watchPlantUnitThumbnails(root,records,{isVisible=()=>true,onReady=()=>{},onError=()=>{}}={}){
   let active=true;const rows=new Map(records.filter(r=>r.type==='units').map(r=>[r.id,r]));

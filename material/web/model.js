@@ -1,3 +1,5 @@
+import {isZeroAreaTriangle} from './triangle-area.js';
+
 export async function digest(bytes) {
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(v=>v.toString(16).padStart(2,'0')).join('');
 }
@@ -14,7 +16,7 @@ function nodeMatrix(n) {
 }
 // Repair only invalid normals, within the original indexed topology. Never weld
 // positions across UV/hard-edge seams, remove faces, or replace authored normals.
-function repairInvalidNormals(pos,normal,indices){
+function repairInvalidNormals(pos,normal,indices,{allowGeometryRepair=false}={}){
   const count=pos.length/3,used=new Uint8Array(count),repair=new Uint8Array(count);for(const i of indices)used[i]=1;
   let correctedVertices=0,sanitizedUnusedVertices=0,dominantFaceFallbacks=0;
   for(let i=0;i<count;i++){const j=i*3,n=Math.hypot(normal[j],normal[j+1],normal[j+2]);if(Number.isFinite(n)&&n>=1e-12)continue;if(used[i]){repair[i]=1;correctedVertices++;}else{normal[j]=0;normal[j+1]=1;normal[j+2]=0;sanitizedUnusedVertices++;}}
@@ -24,11 +26,36 @@ function repairInvalidNormals(pos,normal,indices){
     for(let k=0;k<indices.length;k+=3){const a=indices[k]*3,b=indices[k+1]*3,c=indices[k+2]*3,x=pos[b]-pos[a],y=pos[b+1]-pos[a+1],z=pos[b+2]-pos[a+2],u=pos[c]-pos[a],v=pos[c+1]-pos[a+1],w=pos[c+2]-pos[a+2],nx=y*w-z*v,ny=z*u-x*w,nz=x*v-y*u,area=Math.hypot(nx,ny,nz);if(!area)continue;
       for(let corner=0;corner<3;corner++){const i=indices[k+corner];if(!repair[i])continue;const j=i*3;sums[j]+=nx;sums[j+1]+=ny;sums[j+2]+=nz;if(area>areas[i]){areas[i]=area;best[j]=nx;best[j+1]=ny;best[j+2]=nz;}}
     }
-    for(let i=0;i<count;i++)if(repair[i]){const j=i*3;let nx=sums[j],ny=sums[j+1],nz=sums[j+2],n=Math.hypot(nx,ny,nz);if(n<=areas[i]*1e-8){nx=best[j];ny=best[j+1];nz=best[j+2];n=areas[i];dominantFaceFallbacks++;}if(!n||!Number.isFinite(n))throw Error('顶点 '+i+' 的法线无法重建：相邻三角面全部退化，请先修复网格。');normal[j]=nx/n;normal[j+1]=ny/n;normal[j+2]=nz/n;}
+    let usedByRetainedFace;
+    for(let i=0;i<count;i++)if(repair[i]){
+      const j=i*3;
+      let nx=sums[j],ny=sums[j+1],nz=sums[j+2],n=Math.hypot(nx,ny,nz);
+      const dominant=n<=areas[i]*1e-8;
+      if(dominant){nx=best[j];ny=best[j+1];nz=best[j+2];n=areas[i];}
+      if(!n||!Number.isFinite(n)){
+        if(allowGeometryRepair&&!areas[i]){
+          if(!usedByRetainedFace){
+            usedByRetainedFace=new Uint8Array(count);
+            for(let face=0;face<indices.length;face+=3){
+              const a=indices[face]*3,b=indices[face+1]*3,c=indices[face+2]*3;
+              if(isZeroAreaTriangle(pos[a],pos[a+1],pos[a+2],pos[b],pos[b+1],pos[b+2],pos[c],pos[c+1],pos[c+2]))continue;
+              for(let corner=0;corner<3;corner++)usedByRetainedFace[indices[face+corner]]=1;
+            }
+          }
+          if(!usedByRetainedFace[i]){
+            // Temporary normal for inspection. This vertex cannot be used by the repaired surface.
+            normal.set([0,1,0],j);correctedVertices--;continue;
+          }
+        }
+        throw Error('顶点 '+i+' 的法线无法重建：相邻三角面全部退化，请先修复网格。');
+      }
+      if(dominant)dominantFaceFallbacks++;
+      normal[j]=nx/n;normal[j+1]=ny/n;normal[j+2]=nz/n;
+    }
   }
   return{version:1,method:'indexed-incident-face-area-weighted; dominant-face fallback for cancellation',correctedVertices,sanitizedUnusedVertices,dominantFaceFallbacks,geometryUVUnchanged:true};
 }
-export async function parseGLB(buffer,name) {
+export async function parseGLB(buffer,name,{allowGeometryRepair=false}={}) {
   const dv=new DataView(buffer);
   if(dv.byteLength<20||dv.getUint32(0,true)!==0x46546c67||dv.getUint32(4,true)!==2)throw Error('请导入glTF 2.0格式的GLB模型。');
   if(dv.getUint32(8,true)!==buffer.byteLength)throw Error('GLB声明长度与文件不一致。');
@@ -71,7 +98,7 @@ export async function parseGLB(buffer,name) {
   for(let i=0;i<pos.length;i+=3){const [x,y,z]=pos.subarray(i,i+3);pos[i]=matrix[0]*x+matrix[4]*y+matrix[8]*z+matrix[12];pos[i+1]=matrix[1]*x+matrix[5]*y+matrix[9]*z+matrix[13];pos[i+2]=matrix[2]*x+matrix[6]*y+matrix[10]*z+matrix[14];const [a,b,c]=normal.subarray(i,i+3);normal[i]=cofactor[0]*a+cofactor[1]*b+cofactor[2]*c;normal[i+1]=cofactor[3]*a+cofactor[4]*b+cofactor[5]*c;normal[i+2]=cofactor[6]*a+cofactor[7]*b+cofactor[8]*c;}
   if(p.attributes.NORMAL==null){for(let k=0;k<indices.length;k+=3){const a=indices[k]*3,b=indices[k+1]*3,c=indices[k+2]*3;const x=pos[b]-pos[a],y=pos[b+1]-pos[a+1],z=pos[b+2]-pos[a+2],u=pos[c]-pos[a],v=pos[c+1]-pos[a+1],w=pos[c+2]-pos[a+2];for(const i of [a,b,c]){normal[i]+=y*w-z*v;normal[i+1]+=z*u-x*w;normal[i+2]+=x*v-y*u;}}}
   for(const x of pos)if(!Number.isFinite(x))throw Error('无效坐标。');
-  const normalRepair=repairInvalidNormals(pos,normal,indices);
+  const normalRepair=repairInvalidNormals(pos,normal,indices,{allowGeometryRepair});
   const tang=new Float32Array(pos.length),bt=new Float32Array(pos.length);
   for(let k=0;k<indices.length;k+=3){const a=indices[k],b=indices[k+1],c=indices[k+2],du=uv[b*2]-uv[a*2],dv=uv[b*2+1]-uv[a*2+1],su=uv[c*2]-uv[a*2],sv=uv[c*2+1]-uv[a*2+1],det=du*sv-su*dv;if(Math.abs(det)<1e-14)continue;for(let j=0;j<3;j++){const e=pos[b*3+j]-pos[a*3+j],f=pos[c*3+j]-pos[a*3+j],t=(e*sv-f*dv)/det,h=(f*du-e*su)/det;for(const q of [a,b,c]){tang[q*3+j]+=t;bt[q*3+j]+=h;}}}
   const tangent=new Float32Array(pos.length/3*4),min=[Infinity,Infinity,Infinity],max=[-Infinity,-Infinity,-Infinity],used=new Uint8Array(pos.length/3);for(const i of indices)used[i]=1;

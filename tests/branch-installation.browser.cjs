@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('node:assert/strict');
-const { chromium } = require('playwright');
+const { chromium } = require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 
 // Actual library sample, actual install controls and native browser pointer events.
 // All generated fixtures and screenshots stay separate from the material baseline.

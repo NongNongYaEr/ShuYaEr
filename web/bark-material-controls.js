@@ -2,6 +2,7 @@ import { BARK_PRESETS, BARK_MAP_SLOTS, DEFAULT_BARK_PRESET,isLibraryBark,normali
   barkMaterialForBranch, applyBarkMaterialAssignments } from './bark-materials.js';
 import { skeletonBranches } from './skeleton-thickness.js';
 import {createBarkMaterialPreview} from './bark-material-preview.js';
+import {BASE_BRANCH_GUIDE,hasBaseBranchAtlas} from './base-branch-assembly.js';
 
 // Material editing is deliberately separate from complete-unit internals.
 // The dialog edits a reusable recipe; Apply makes one authoring transaction.
@@ -31,8 +32,11 @@ export function createBarkMaterialControls(api) {
   let carrierCache=null;
   const carriers = () => {
     const branches=api.getAsset()?.masterBranches,authoring=api.getAuthoring();
-    if(!carrierCache||carrierCache.branches!==branches||carrierCache.authoring!==authoring)
-      carrierCache={branches,authoring,bones:skeletonBranches(branches||[])};
+    if(!carrierCache||carrierCache.branches!==branches||carrierCache.authoring!==authoring) {
+      const bones=skeletonBranches(branches||[]);
+      carrierCache={branches,authoring,bones:hasBaseBranchAtlas(authoring?.base_branch_assembly)
+        ? bones.filter(branch=>branch.stableId!==BASE_BRANCH_GUIDE) : bones};
+    }
     return carrierCache.bones;
   };
   let pickedId=null;
@@ -156,7 +160,9 @@ export function createBarkMaterialControls(api) {
   function refresh() {
     button.hidden = !['TREE', 'BRANCH'].includes(mode()); button.disabled = Boolean(api.isBusy?.());
     const count = carriers().length, isSource = mode() === 'BRANCH';
-    $('barkMaterialScopeHint').textContent = isSource ? '统一编辑这支素材的树皮，另存素材版本后用于装配。' : '主干与分枝共用一套树皮。左侧选材质，右侧调属性与配套贴图，应用后统一生效。';
+    $('barkMaterialScopeHint').textContent = isSource && hasBaseBranchAtlas(api.getAuthoring()?.base_branch_assembly)
+      ? '基础枝使用套装原图集。可在叶花果资产工作台更新套装贴图。'
+      : isSource ? '统一编辑这支素材的树皮，另存素材版本后用于装配。' : '主干与分枝共用一套树皮。左侧选材质，右侧调属性与配套贴图，应用后统一生效。';
     for (const id of ['barkMaterialApply', 'barkMaterialReset']) $(id).disabled = busy || !count || Boolean(api.isBusy?.());
     $('barkMaterialSave').disabled = busy || !store; $('barkMaterialRefresh').disabled = busy || !store;
     for (const id of Object.keys(fields)) $(id).disabled = busy;

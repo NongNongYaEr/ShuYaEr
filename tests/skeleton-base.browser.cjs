@@ -1,5 +1,5 @@
 const fs=require('fs'),path=require('path'),assert=require('node:assert/strict'),crypto=require('crypto');
-const {chromium}=require(process.env.BRANCHFORGE_PLAYWRIGHT||'playwright');
+const {chromium}=require(process.env.BRANCHFORGE_PLAYWRIGHT||'C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 (async()=>{
  const templateId=process.env.BRANCHFORGE_TEMPLATE_ID;
  const out=path.resolve('.runtime/skeleton-base-config',templateId||'');fs.mkdirSync(out,{recursive:true});const result={errors:[],checks:[]};

@@ -1,4 +1,4 @@
-const {chromium}=require('playwright');
+const {chromium}=require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 const fs=require('fs'),path=require('path'),assert=require('assert/strict'),crypto=require('crypto');
 (async()=>{
  const out=path.resolve('.runtime/workflow-polish');fs.mkdirSync(out,{recursive:true});

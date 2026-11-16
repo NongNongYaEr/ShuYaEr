@@ -1,11 +1,11 @@
 {
-  "version": "0.7.1",
-  "flavor": "v071-lite",
-  "exeSha256": "b98708350e516c3ddd10a8189dd70f56f50dca1b2b9c2a6744c4dffe2e87e0a9",
-  "exeBytes": 797048670,
-  "payloadHash": "ecf2ff6dcc11df408f0cee11a088e419bb03166b85a90ed6d5fa305f3038c476",
-  "payloadBytes": 796648262,
-  "cacheSubdirectory": "0.7.1-v071-lite-ecf2ff6dcc11df40",
-  "files": 1908,
-  "filename": "树鸭儿V071.exe"
+  "version": "0.9.6",
+  "flavor": "v096-lite",
+  "exeSha256": "98ea087f230fdcf3a27ef365c4c4862209426ecb43f4b6c45496ce031016a64e",
+  "exeBytes": 876212143,
+  "payloadHash": "50a927ffe51cb56c54cfa361b4dc5050731456b3b7c6598608efefa3484bf964",
+  "payloadBytes": 875811735,
+  "cacheSubdirectory": "0.9.6-v096-lite-50a927ffe51cb56c",
+  "files": 2330,
+  "filename": "树鸭儿V096.exe"
 }

@@ -1,6 +1,6 @@
 // Only our own off-desktop host and test profile. No user window or OS input.
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),assert=require('node:assert/strict'),{spawn}=require('node:child_process');
-const {chromium}=require('playwright');
+const {chromium}=require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 const root=path.resolve(__dirname,'..'),arg=(name,fallback)=>{const i=process.argv.indexOf(name);return i<0?fallback:process.argv[i+1];},input=path.resolve(arg('--project','.runtime/edit-response-perf/input/latest.branch.json')),out=path.resolve(arg('--out','.runtime/edit-response-perf/acceptance')),executable=path.resolve(arg('--executable','.runtime/edit-response-perf/native-baseline/BranchForgeEditResponseTest.exe'));
 assert(out.toLowerCase().startsWith((path.join(root,'.runtime')+path.sep).toLowerCase()));assert(!fs.existsSync(out),'Use a fresh output');
 const hash=file=>crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'),delay=ms=>new Promise(r=>setTimeout(r,ms)),report={input,inputHash:hash(input),checks:[],errors:[]};

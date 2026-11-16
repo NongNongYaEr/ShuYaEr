@@ -51,7 +51,7 @@ export function validateAsset(type,value){
   if(type==='plant'&&value.authoring.imported_trunks){for(const model of value.authoring.imported_trunks.assets||[])validateAsset('trunk',model);for(const mount of value.authoring.imported_trunks.mounts||[])if(!value.authoring.imported_trunks.assets.some(a=>a.id===mount.asset_id&&a.revision===mount.revision))throw Error('整株树干素材版本缺失');}
   if(type==='prefab'){const p=validateBranchPrefab(prefabPayload(value));if(p.kind!=='branchforge-branch-prefab'||!Array.isArray(p.library)||!p.operation?.records?.length||!Array.isArray(p.copies))throw Error('预制枝干数据无效');for(const i of p.copies)if(i.asset_id&&!p.library.some(a=>a.id===i.asset_id))throw Error('预制缺少单元枝源模型');}
   if(type==='branch'&&(!value.id||!value.sample||!value.shape))throw Error('完整单元枝缺少源模型');
-  if(type==='units'&&(!Array.isArray(value.units)||!value.units.length))throw Error('叶花果套装没有真实单元');
+  if(type==='units'&&(!Array.isArray(value.units)||!(value.units.length||value.base_branches?.length)))throw Error('植物套装没有真实单元');
   if(type==='units')normalizePlantUnitPack(value);
   if(type==='material'&&(!value.data||!value.kind))throw Error('材质配方无效');
   if(type==='material')normalizeTrunkPreset(value.kind,{id:'trunk-preset-00000000000000000000000000000001',name:value.name||'配方',shape:value.data});

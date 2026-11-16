@@ -118,11 +118,20 @@ export function validatePVESkeleton(skeleton) {
   const hasMeshUnits = skeleton?.foliage_sources?.some?.(source => source?.mesh_unit === true);
   const meshCapability = skeleton?.required_capabilities?.includes?.('native_mesh_units_v1');
   if (hasMeshUnits && (skeleton.version !== 3 || !meshCapability)) errors.push('完整网格装配能力声明缺失');
+  const sharedBark = skeleton?.shared_tree_bark;
+  const sharedBarkCapability = skeleton?.required_capabilities?.includes?.('shared_tree_bark_v1') === true;
+  if (Boolean(sharedBark) !== sharedBarkCapability || (sharedBark && (skeleton.version !== 3 || sharedBark.version !== 1
+    || !/^shared-bark-[a-f0-9]{24}$/.test(sharedBark.material_id || '')))) errors.push('共用树皮能力声明或材质引用无效');
   if(skeleton.version===3){
     const caps = skeleton.required_capabilities;
-    if(!Array.isArray(caps)||caps.some(c=>!['imported_trunk_materials_v1','imported_trunk_skin_v1','native_mesh_units_v1'].includes(c)))errors.push('PVE 入口需要当前桥接尚不支持的能力');
+    if(!Array.isArray(caps)||caps.some(c=>!['imported_trunk_materials_v1','imported_trunk_skin_v1','native_mesh_units_v1','tree_light_flow_v1','shared_tree_bark_v1'].includes(c)))errors.push('PVE 入口需要当前桥接尚不支持的能力');
     const imported=skeleton.imported_trunks,sources=imported?.sources,mounts=imported?.mounts;
-    if (!imported && (!hasMeshUnits || !meshCapability || caps?.length !== 1)) errors.push('V3 入口缺少完整网格装配或外部树干');
+    const expected = [...(imported ? ['imported_trunk_materials_v1','imported_trunk_skin_v1'] : []),
+      ...(hasMeshUnits ? ['native_mesh_units_v1'] : []),
+      ...(caps?.includes?.('tree_light_flow_v1') ? ['tree_light_flow_v1'] : []),
+      ...(sharedBark ? ['shared_tree_bark_v1'] : [])];
+    if (!expected.length || caps?.length !== expected.length || expected.some(cap=>!caps?.includes?.(cap)))
+      errors.push('V3 入口能力声明与树干、灯带、共用树皮或完整网格装配不一致');
     if (imported) {
     if (!caps?.includes?.('imported_trunk_materials_v1') || !caps?.includes?.('imported_trunk_skin_v1') || imported.version !== 1) errors.push('外部树干能力声明缺失');
     if(!Array.isArray(sources)||!sources.length||!Array.isArray(mounts)||!mounts.length)errors.push('外部树干来源或实例清单缺失');

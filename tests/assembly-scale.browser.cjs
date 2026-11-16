@@ -1,6 +1,6 @@
 // Run against an isolated local BranchForge server, never the user's open page.
 const fs=require('fs'), path=require('path'), assert=require('node:assert/strict');
-const {chromium}=require(process.env.BRANCHFORGE_PLAYWRIGHT || 'playwright');
+const {chromium}=require(process.env.BRANCHFORGE_PLAYWRIGHT || 'C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 (async()=>{
  const out=path.resolve('.runtime/whole-sample',process.env.BRANCHFORGE_TEST_SPECIES||'JASMINE'); fs.mkdirSync(out,{recursive:true});
  const result={checks:[],errors:[]};

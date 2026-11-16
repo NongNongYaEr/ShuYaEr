@@ -30,6 +30,7 @@ export function createSculptController({ canvas, camera, controls, getAsset, get
     return hoverSnapshot.snapshot;
   }
   const numeric = (id, fallback, min, max) => THREE.MathUtils.clamp(Number($(id).value) || fallback, min, max);
+  const unitHandlesTool = unit => unit.handlesTool?.(getTool()) ?? (getTool() === 'COMB');
   function settings(snapshot) {
     return {
       radius: numeric('sculptRadius', 160, 20, 700), strength: numeric('sculptStrength', 0.65, 0.05, 1),
@@ -141,7 +142,7 @@ export function createSculptController({ canvas, camera, controls, getAsset, get
   function hoverAt(event) {
     if (stroke || brush.adjusting || !SCULPT_TOOLS.has(getTool()) || !getAsset() || getAsset().group.userData.pending_rebuild || !$('busyOverlay').hidden) return;
     const unit = getUnitBrush();
-    if (unit) { overlay.setAttribute('hidden', ''); feedback.hidden = true; if (getTool() === 'COMB') unit.hoverAt(event); return; }
+    if (unit) { overlay.setAttribute('hidden', ''); feedback.hidden = true; if (unitHandlesTool(unit)) unit.hoverAt(event); return; }
     const snapshot = preparedHover();
     const proj = projection();
     const point = pointerPosition(event, proj.bounds);
@@ -264,7 +265,7 @@ export function createSculptController({ canvas, camera, controls, getAsset, get
     begin(event) {
       if (!SCULPT_TOOLS.has(getTool()) || event.button !== 0) return false;
       const unit = getUnitBrush();
-      if (unit) return getTool() === 'COMB' ? unit.begin(event) : true;
+      if (unit) return unitHandlesTool(unit) ? unit.begin(event) : true;
       if (stroke) return true;
       const asset = getAsset();
       if (!asset || asset.group.userData.pending_rebuild || !$('busyOverlay').hidden) return true;
@@ -293,10 +294,11 @@ export function createSculptController({ canvas, camera, controls, getAsset, get
       return true;
     },
     move(event) {
-      if (getUnitBrush()) {
+      const unit = getUnitBrush();
+      if (unit) {
         hover = { clientX:event.clientX, clientY:event.clientY };
         if (brush.adjusting) return true;
-        if (getTool() === 'COMB') { if (getUnitBrush().active) return getUnitBrush().move(event); if (!hoverFrame) hoverFrame = requestAnimationFrame(() => {hoverFrame=0;hoverAt(hover);}); return true; }
+        if (unitHandlesTool(unit)) { if (unit.active) return unit.move(event); if (!hoverFrame) hoverFrame = requestAnimationFrame(() => {hoverFrame=0;hoverAt(hover);}); return true; }
         return false;
       }
       if (!stroke) {
@@ -309,7 +311,8 @@ export function createSculptController({ canvas, camera, controls, getAsset, get
       return true;
     },
     end(event) {
-      if (getUnitBrush()) return getTool() === 'COMB' ? getUnitBrush().end(event) : false;
+      const unit = getUnitBrush();
+      if (unit) return unitHandlesTool(unit) ? unit.end(event) : false;
       if (!stroke) return SCULPT_TOOLS.has(getTool()) && event.button === 0;
       if (event.pointerId !== stroke.pointerId || event.button !== 0) return true;
       compute(pointerPosition(event, stroke.proj.bounds), event.shiftKey, event.altKey, true);

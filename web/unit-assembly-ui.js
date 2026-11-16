@@ -14,7 +14,7 @@ export function createUnitAssemblyUI(api) {
   const showAll=node('button','','显示全部');showAll.type='button';showAll.dataset.assemblyAction='show-all';showAll.onclick=()=>api.showAll?.();
   const actions=node('div','unit-assembly-selection-actions');actions.append(showAll,clear);heading.append(title, actions);
   const summary = node('p', 'unit-assembly-selection-summary'); summary.id = 'unitAssemblySelectionSummary'; summary.setAttribute('aria-live', 'polite');
-  const hint = node('small', '', '点卡片选本区这款 · Shift 加选 · Ctrl 切换');
+  const hint = node('small', '', '点卡片选本区这款 · Shift 加选 · Ctrl 切换 · 应用到所选整支');
   const reason = node('p','unit-selection-reason'); reason.id='unitAssemblySelectionReason'; reason.setAttribute('role','status');
   const reset = node('button','','清除减选限制'); reset.type='button'; reset.id='unitSelectionResetExclusions';reset.onclick=()=>api.clearUnitExclusions?.();
   panel.append(heading, summary, hint, reason, reset); $('wbAssemblyZones').before(panel);
@@ -41,6 +41,28 @@ export function createUnitAssemblyUI(api) {
     catch (error) { api.toast(error.message, true); }
   }
   clear.onclick = () => choose({}, {}, { clear:true });
+  let applying = false;
+  function refreshApplyButtons() {
+    for (const apply of $('wbAssemblyZones').querySelectorAll('[data-assembly-action="apply"]')) {
+      const { assetId, role, assetName } = apply.dataset;
+      const { count, reason } = api.unitAssetApplyState(assetId, role);
+      apply.disabled = applying || count <= 0;
+      apply.title = applying ? '正在应用单元枝…' : count > 0
+        ? `将「${assetName}」应用到已选 ${count} 支，保留每支的位置、朝向和大小`
+        : reason || '请先选择要更换来源的完整单元枝';
+      apply.setAttribute('aria-label', count > 0 ? `应用${assetName}到已选 ${count} 支` : `应用${assetName}：${apply.title}`);
+    }
+  }
+  async function applyAsset(event, assetId, role) {
+    event.stopPropagation();
+    if (applying || !api.isTree() || api.isBusy()) return;
+    if (api.unitAssetApplyState(assetId, role).count <= 0) { refreshApplyButtons(); return; }
+    applying = true;
+    refreshApplyButtons();
+    try { await api.applySelectedUnitAsset(assetId, role); }
+    catch (error) { api.toast(error.message, true); }
+    finally { applying = false; refreshApplyButtons(); }
+  }
   function mark(card, entry) {
     card.dataset.selection = entry.state;
     card.classList.toggle('is-focused', entry.selected > 0);
@@ -84,6 +106,11 @@ export function createUnitAssemblyUI(api) {
       content.append(button('编辑源单元枝', () => { menu.open = false; api.editSource(entry.asset_id, entry.role, entry.instances[0]?.id); }, 'source'));
       for (const b of [replace, update]) if (b) content.append(b);
       menu.append(content); actions.append(menu);
+    }
+    if (!entry.legacyPlacement && entry.asset_id) {
+      const apply = button('应用', event => applyAsset(event, entry.asset_id, entry.role), 'apply');
+      Object.assign(apply.dataset, { assetId:entry.asset_id, role:entry.role, assetName:entry.name });
+      actions.append(apply);
     }
   }
   function extraCards(extra) {
@@ -163,6 +190,7 @@ export function createUnitAssemblyUI(api) {
     }
     extraCards(current.extra);
     legacyCards(current.legacy);
+    refreshApplyButtons();
   }
   return { refresh, roots, get state() { return state(); }, reset() { cache = null; api.hoverAssembly?.([]); } };
 }

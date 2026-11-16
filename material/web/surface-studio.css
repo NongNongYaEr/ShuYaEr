@@ -30,3 +30,5 @@ body.surface-studio.surface-library-open[data-workspace-stage="material"] .maps-
 
 .studio-source-slots{display:grid;gap:6px;margin:8px 0}
 .studio-source-slots label{display:flex;align-items:center;gap:8px;padding:7px 8px;background:#20282a;border:1px solid #384649;border-radius:5px;overflow-wrap:anywhere}
+.effect-library-controls .library-image-import{grid-column:1/-1}
+.studio-image-decal-preview{display:block;max-width:100%;max-height:104px;object-fit:contain;margin:.35rem auto .5rem}

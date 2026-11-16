@@ -49,6 +49,6 @@ export function runtimeMaterialPathAllowed(relative){
  // The active atlas and paired shelf maps provide every style. Original source
  // sheets, unused standalone derivatives and superseded atlases stay in 04.
  if(/^material\/web\/assets\/(bark-expansion|burls|surface-decals)\//.test(relative))return /\/(metadata\.json|generation-prompt\.txt)$/.test(relative);
- if(relative.startsWith('material/web/assets/coatings/'))return /\/(coating-atlas-v3(?:-[abc]\.png|\.json)|metadata\.json)$/.test(relative);
+ if(relative.startsWith('material/web/assets/coatings/'))return /\/(coating-atlas-v3(?:-[abc]\.png|\.json)|metadata\.json|scene-bark-patches\.png)$/.test(relative);
  return true;
 }

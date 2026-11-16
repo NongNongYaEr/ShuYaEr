@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from './vendor/surface/loaders/GLTFLoader.js';
 import { normalizePlantUnit, geometryExtent } from './plant-unit-data.js';
 import { normalizeLeafMaterial } from './leaf-material-data.js';
+import { encodeRGB8PNG } from './vendor/fbx-exporter/data/textureEncoder.js';
 
 const fingerprints = new Map();
 async function textureFingerprint(data) {
@@ -29,25 +30,47 @@ export async function samePlantTexture(first, second) {
 export async function imageFileData(file) {
   if (file.size > 64 * 1024 * 1024) throw Error('单张贴图请控制在 64 MB 内');
   const image = await createImageBitmap(file);
-  try { return imagePng(image); } finally { image.close(); }
+  try { return await imagePng(image); } finally { image.close(); }
 }
-function imagePng(image, factor = null) {
+async function imagePng(image, factor = null, opaque = false) {
   const canvas = document.createElement('canvas');
   canvas.width = image.width || image.naturalWidth; canvas.height = image.height || image.naturalHeight;
   if (!canvas.width || !canvas.height || canvas.width > 8192 || canvas.height > 8192) throw Error('贴图尺寸应不超过 8192 像素');
-  const ctx = canvas.getContext('2d', { willReadFrequently: !!factor }); ctx.drawImage(image, 0, 0);
-  if (factor && (factor.r !== 1 || factor.g !== 1 || factor.b !== 1)) {
-    const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const tint = factor && (factor.r !== 1 || factor.g !== 1 || factor.b !== 1);
+  const ctx = canvas.getContext('2d', { willReadFrequently: !!tint || opaque });
+  ctx.drawImage(image, 0, 0);
+  const pixels = tint || opaque ? ctx.getImageData(0, 0, canvas.width, canvas.height) : null;
+  if (opaque) {
+    for (let i = 3; i < pixels.data.length; i += 4) {
+      if (pixels.data[i] !== 255) throw Error('颜色图集含透明像素，请取消「合并枝皮和叶花果材质」后导入');
+    }
+  }
+  if (tint) {
     const linear = x => x <= .04045 ? x / 12.92 : ((x + .055) / 1.055) ** 2.4;
     const srgb = x => x <= .0031308 ? 12.92 * x : 1.055 * x ** (1 / 2.4) - .055;
     const channels = [factor.r, factor.g, factor.b];
     for (let i = 0; i < pixels.data.length; i += 4) for (let c = 0; c < 3; c++) pixels.data[i + c] = Math.round(srgb(linear(pixels.data[i + c] / 255) * channels[c]) * 255);
     ctx.putImageData(pixels, 0, 0);
   }
+  if (opaque) {
+    const rgb = new Uint8Array(canvas.width * canvas.height * 3);
+    for (let from = 0, to = 0; to < rgb.length; from += 4, to += 3) {
+      rgb[to] = pixels.data[from];
+      rgb[to + 1] = pixels.data[from + 1];
+      rgb[to + 2] = pixels.data[from + 2];
+    }
+    const bytes = encodeRGB8PNG(rgb, canvas.width, canvas.height);
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error || Error('无法读取合并后的图集'));
+      reader.readAsDataURL(new Blob([bytes], { type: 'image/png' }));
+    });
+  }
   return canvas.toDataURL('image/png');
 }
 
-export async function importPlantGlb(file, { role = 'LEAF', axis = 'Y', reuseMaterial = false, sourceMode = false } = {}) {
+export async function importPlantGlb(file, { role = 'LEAF', axis = 'Y', reuseMaterial = false, sourceMode = false, mergeUnitMaterials = false } = {}) {
   if (!/\.glb$/i.test(file.name) || file.size > 80 * 1024 * 1024) throw Error('请选择 80 MB 内、资源内嵌的静态 GLB');
   const manager = new THREE.LoadingManager();
   manager.setURLModifier(url => { if (/^(blob:|data:)/.test(url)) return url; throw Error('GLB 需要内嵌网格和贴图'); });
@@ -61,11 +84,19 @@ export async function importPlantGlb(file, { role = 'LEAF', axis = 'Y', reuseMat
     const source = [...materials][0];
     if (!reuseMaterial && [...materials].some(m => m.map?.image !== source.map?.image || !m.color.equals(source.color))) throw Error('该 GLB 包含不同材质。请先合并为一张图集，或勾选复用当前植物共享材质');
     if(sourceMode&&[...materials].some(m=>m.normalMap?.image!==source.normalMap?.image||Math.abs(m.roughness-source.roughness)>1e-5||Math.abs((m.alphaTest||.4)-(source.alphaTest||.4))>1e-5))throw Error('整包整理需要一套共享颜色、法线和材质参数，请先统一材质后导入');
+    if (mergeUnitMaterials) {
+      if (!source.map) throw Error('合并材质需要内嵌的共享颜色图集');
+      if ([...materials].some(m => m.transparent || m.opacity < 1 || m.transmission > 0)) {
+        throw Error('源材质使用透明混合或透射，请取消合并后导入');
+      }
+    }
     const material = normalizeLeafMaterial({
-      color: source.map ? imagePng(source.map.image, source.color) : '', color_name: source.map?.name || file.name + ' 颜色图集',
+      color: source.map ? await imagePng(source.map.image, source.color, mergeUnitMaterials) : '',
+      merge_unit_materials: mergeUnitMaterials, color_name: source.map?.name || file.name + ' 颜色图集',
       normal: source.normalMap ? imagePng(source.normalMap.image) : '', normal_name: source.normalMap?.name || '',
       roughness: source.roughness, cutoff: source.alphaTest || .4,
     });
+    if (mergeUnitMaterials && !material.merge_unit_materials) throw Error('当前环境无法保存不透明图集，请取消合并后导入');
     const position = [], normal = [], uv = [], index = [];
     const direction = { X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1], '-X': [-1, 0, 0], '-Y': [0, -1, 0], '-Z': [0, 0, -1] }[axis];
     if (!direction) throw Error('未知生长方向');

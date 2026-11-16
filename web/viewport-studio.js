@@ -1,4 +1,4 @@
-import {Box3, CanvasTexture, Color, Fog, MathUtils, MeshStandardMaterial, MOUSE, PCFShadowMap, Sphere, SRGBColorSpace, Vector3} from 'three';
+import {Box3, CanvasTexture, Color, Fog, MathUtils, MeshStandardMaterial, PCFShadowMap, Sphere, SRGBColorSpace, Vector3} from 'three';
 import {OrbitControls} from '/vendor/OrbitControls.js';
 import {configureViewportNavigation,finishViewportNavigation} from './viewport-navigation.js';
 import {STUDIO_ENVIRONMENTS} from './viewport-lighting.js';
@@ -106,7 +106,7 @@ export function createViewportStudio({canvas,scene,renderer,camera,controls,mode
   navigationSurface.className = 'photo-studio-navigation';
   navigationSurface.tabIndex = 0;
   navigationSurface.setAttribute('role','region');
-  navigationSurface.setAttribute('aria-label','摄影棚展示。左键或中键旋转，滚轮缩放，H 切换纯画面，Esc 退出。');
+  navigationSurface.setAttribute('aria-label','摄影棚展示。使用当前视口导航，H 切换纯画面，Esc 退出。');
   const wash = document.createElement('div');
   wash.className = 'photo-studio-wash';
   wash.setAttribute('aria-hidden','true');
@@ -174,9 +174,8 @@ export function createViewportStudio({canvas,scene,renderer,camera,controls,mode
     const position = camera.position.clone(), quaternion = camera.quaternion.clone();
     const {near,far} = camera;
     const orbit = new OrbitControls(camera,navigationSurface);
-    const disconnectNavigation = configureViewportNavigation(orbit);
+    const disconnectNavigation = configureViewportNavigation(orbit,{plainOrbit:true});
     orbit.enableDamping = false;
-    orbit.mouseButtons.LEFT = MOUSE.ROTATE;
     orbit.target.copy(controls.target);
     const scrollPositions = [];
     for (let element = viewport; element; element = element.parentElement) {

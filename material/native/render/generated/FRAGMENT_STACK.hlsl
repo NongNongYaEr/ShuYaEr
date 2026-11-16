@@ -420,6 +420,24 @@ float4 paintSample(float2 uv, float4 rect)
     return uMaskMap1.SampleLevel(_uMaskMap1_sampler, _point / size, lod);
 }
 
+float2 imageDecalAtlasSize()
+{
+    uint width, height, levels;
+    uMaskMap3.GetDimensions(0u, width, height, levels);
+    return float2(width,height);
+}
+
+float4 finalEffectMasks(float2 uv)
+{
+    float2 atlasSize = imageDecalAtlasSize();
+    uint width, height, levels;
+    uMaskMap2.GetDimensions(0u, width, height, levels);
+    float2 maskSize=float2(width,height);
+    if (all(atlasSize == maskSize)) return uMaskMap3.Sample(_uMaskMap3_sampler, uv);
+    float2 maskPoint = clamp(uv * maskSize, 0.5f, maskSize - 0.5f);
+    return uMaskMap3.SampleLevel(_uMaskMap3_sampler, maskPoint/atlasSize, 0.0f);
+}
+
 float effectMask(int slot, float2 uv)
 {
     if (slot < 4)
@@ -445,7 +463,7 @@ float effectMask(int slot, float2 uv)
     {
         return uMaskMap2.Sample(_uMaskMap2_sampler, uv)[slot - 8];
     }
-    return uMaskMap3.Sample(_uMaskMap3_sampler, uv)[slot - 12];
+    return finalEffectMasks(uv)[slot - 12];
 }
 
 bool sourceBase()
@@ -1383,7 +1401,30 @@ float3 effectColor(float3 fallback)
     return _4189;
 }
 
-Surface burlSurface(inout Surface s, float3 p, float3 n, float seed)
+// Asset UV centerline of the spiral callus.
+float burlSpiralDistance(float2 uv)
+{
+    static const float2 spine[12] = {
+        float2(.397, .093), float2(.372, .158), float2(.272, .275), float2(.242, .337),
+        float2(.263, .382), float2(.427, .513), float2(.608, .578), float2(.665, .618),
+        float2(.720, .667), float2(.737, .726), float2(.710, .772), float2(.493, .916)
+    };
+    float nearest = 1.0f;
+    [loop] for (int j = 0; j < 11; j++)
+    {
+        float2 e = spine[j + 1] - spine[j], d = uv - spine[j];
+        d -= e * saturate(dot(d, e) / dot(e, e));
+        nearest = min(nearest, dot(d, d));
+    }
+    return sqrt(nearest);
+}
+
+float burlDonorLum(float3 premultiplied, float alpha)
+{
+    return dot(fromSRGB(saturate(premultiplied / max(alpha, .0001f))), float3(.2126, .7152, .0722));
+}
+
+Surface burlSurface(inout Surface s, float3 p, float3 n, float seed, float3 receivingColor, float receivingRoughness)
 {
     s.layerCoverage = 0.0f;
     if (_461_uPatchBits == 0)
@@ -1416,7 +1457,7 @@ Surface burlSurface(inout Surface s, float3 p, float3 n, float seed)
         bool _6461;
         if (!_6448)
         {
-            _6461 = abs(_461_uPatchChannels[i].w - float(surfaceEffectSlot + 1)) > 0.100000001490116119384765625f;
+            _6461 = abs(abs(_461_uPatchChannels[i].w) - float(surfaceEffectSlot + 1)) > 0.100000001490116119384765625f;
         }
         else
         {
@@ -1429,7 +1470,8 @@ Surface burlSurface(inout Surface s, float3 p, float3 n, float seed)
         float3 delta = p - _461_uPatchOrigin[i].xyz;
         float2 q = float2(dot(delta, _461_uPatchU[i].xyz), dot(delta, _461_uPatchV[i].xyz));
         float radius = length(q);
-        if (radius >= 1.0f)
+        const bool planar = _461_uPatchChannels[i].w < 0.0f;
+        if (planar ? any(abs(q) > 1.0f.xx) : radius >= 1.0f)
         {
             continue;
         }
@@ -1484,7 +1526,36 @@ Surface burlSurface(inout Surface s, float3 p, float3 n, float seed)
             int param_7 = 3;
             stampAO = burlPanel(param_6, param_7).x;
         }
-        float alpha = ((1.0f - smoothstep(1.0f - _461_uPatchShape[i].y, 1.0f, r)) * (1.0f - smoothstep(0.75f, 1.0f, abs(dot(delta, _461_uPatchN[i].xyz)) / max(_461_uPatchOrigin[i].w, 1.0000000116860974230803549289703e-07f)))) * stampData.x;
+        float projectedAlpha = ((planar ? 1.0f : (1.0f - smoothstep(1.0f - _461_uPatchShape[i].y, 1.0f, r))) * (1.0f - smoothstep(0.75f, 1.0f, abs(dot(delta, _461_uPatchN[i].xyz)) / max(_461_uPatchOrigin[i].w, 1.0000000116860974230803549289703e-07f))));
+        if (projectedAlpha <= 0.0f) continue;
+        float alpha = projectedAlpha * stampData.x;
+        int fusionStyle = int(effectParameter(11, 0.0f) + 0.5f);
+        bool authoredKnot = hasStamp && fusionStyle == 6;
+        if (authoredKnot) alpha *= 1.0f - smoothstep(.228f, .292f, length(stampUV - float2(.495f, .497f)));
+        float fusion = hasStamp && !authoredKnot ? saturate(effectParameter(13, 0.0f)) : 0.0f;
+        bool domeStyle = fusionStyle == 0 || fusionStyle == 7;
+        int midLevel = domeStyle ? 5 : 3;
+        float3 midStamp = 0.0f.xxx, broadStamp = 0.0f.xxx;
+        float heightResidual = 0.0f, structure = 1.0f, ribbonDistance = 0.0f;
+        if (fusion > 0.0f)
+        {
+            midStamp = burlPanelBilinear(stampUV, 1, midLevel);
+            broadStamp = burlPanelBilinear(stampUV, 1, 7);
+            heightResidual = (midStamp.y - broadStamp.y) * smoothstep(.05f, .5f, min(midStamp.x, broadStamp.x));
+            if (fusionStyle == 12)
+            {
+                ribbonDistance = burlSpiralDistance(stampUV);
+                structure = 1.0f - smoothstep(.035f, .085f, ribbonDistance);
+            }
+            else structure = lerp(.12f, .92f, smoothstep(.015f, .12f, abs(heightResidual)));
+            if (domeStyle)
+            {
+                // A smooth envelope keeps donor plate edges out of the height gradient.
+                float domeAlpha = (1.0f - smoothstep(.48f, .98f, radius)) * smoothstep(.06f, .85f, midStamp.x);
+                alpha = lerp(alpha, projectedAlpha * domeAlpha, fusion);
+            }
+            else alpha *= lerp(1.0f, structure, fusion);
+        }
         int param_8 = 0;
         float param_9 = 1.0f;
         float amount = effectParameter(param_8, param_9) * alpha;
@@ -1514,6 +1585,8 @@ Surface burlSurface(inout Surface s, float3 p, float3 n, float seed)
         int param_20 = 7;
         float param_21 = 0.449999988079071044921875f;
         float keep = lerp(1.0f, effectParameter(param_20, param_21), amount);
+        if (authoredKnot) keep = lerp(1.0f, pow(effectParameter(7, .45f), 3.0f), amount);
+        if (fusion > 0.0f) keep = lerp(keep, 1.0f, .96f * fusion);
         int param_22 = 5;
         float param_23 = 0.449999988079071044921875f;
         float variation = effectParameter(param_22, param_23);
@@ -1533,9 +1606,26 @@ Surface burlSurface(inout Surface s, float3 p, float3 n, float seed)
         {
             pigment = lerp(bark, stampColor * clamp(tint / float3(0.4550000131130218505859375f, 0.352999985218048095703125f, 0.250999987125396728515625f), 0.0f.xxx, 3.0f.xxx), 0.920000016689300537109375f.xxx);
         }
+        if (authoredKnot) pigment = stampColor * clamp(tint / (float3(116.0f, 90.0f, 64.0f) / 255.0f), 0.0f.xxx, 3.0f.xxx);
         float3 param_27 = warpedP;
         float3 param_28 = n;
         float barkRelief = ((barkHeight(param_27, param_28) - 0.5f) * _461_uBarkRelief) * 0.449999988079071044921875f;
+        if (fusion > 0.0f)
+        {
+            float midLum = burlDonorLum(burlPanelBilinear(stampUV, 0, midLevel), midStamp.x);
+            float broadLum = burlDonorLum(burlPanelBilinear(stampUV, 0, 7), broadStamp.x);
+            float gain = pow(clamp(midLum / max(broadLum, .01f), .42f, 1.8f), .7f);
+            gain = lerp(1.0f, gain, smoothstep(.05f, .5f, min(midStamp.x, broadStamp.x)) * (fusionStyle == 12 ? 1.0f : domeStyle ? .26f : .65f));
+            if (fusionStyle == 12)
+            {
+                float ridge = ribbonDistance / .037f;
+                float shoulder = smoothstep(.03f, .055f, ribbonDistance) * (1.0f - smoothstep(.049f, .08f, ribbonDistance));
+                gain *= 1.0f + .27f * exp(-ridge * ridge) - .08f * shoulder;
+            }
+            float3 matched = toSRGB(saturate(fromSRGB(saturate(receivingColor)) * gain));
+            matched *= clamp(tint / float3(.455, .353, .251), 0.0f.xxx, 3.0f.xxx);
+            pigment = toSRGB(lerp(fromSRGB(saturate(pigment)), fromSRGB(saturate(matched)), fusion.xxx));
+        }
         s.color = lerp(s.color, pigment, amount.xxx);
         int param_29 = 1;
         float param_30 = 0.89999997615814208984375f;
@@ -1547,7 +1637,14 @@ Surface burlSurface(inout Surface s, float3 p, float3 n, float seed)
         {
             _6908 = (fine - 0.5f) * 0.07999999821186065673828125f;
         }
-        s.rough = lerp(s.rough, clamp(effectParameter(param_29, param_30) + _6908, 0.100000001490116119384765625f, 1.0f), amount);
+        float targetRoughness = clamp(effectParameter(param_29, param_30) + _6908, .1f, 1.0f);
+        if (authoredKnot) targetRoughness = clamp(stampData.z + (effectParameter(1, .92f) - .92f), .1f, 1.0f);
+        if (fusion > 0.0f)
+        {
+            float roughDelta = clamp((effectParameter(1, .9f) - .9f + midStamp.z - broadStamp.z) * .4f, -.12f, .12f);
+            targetRoughness = lerp(targetRoughness, clamp(receivingRoughness + roughDelta, .1f, 1.0f), fusion);
+        }
+        s.rough = lerp(s.rough, targetRoughness, amount);
         s.h *= keep;
         s.normalWeight *= keep;
         s.detailGradient *= keep;
@@ -1619,6 +1716,17 @@ Surface burlSurface(inout Surface s, float3 p, float3 n, float seed)
         {
             barkRelief = 0.0f;
         }
+        if (authoredKnot) relief = stampData.y - .5f;
+        if (fusion > 0.0f)
+        {
+            float ribbon = ribbonDistance / .047f;
+            float cleanRelief = fusionStyle == 12
+                ? .32f * exp(-ribbon * ribbon) + clamp(heightResidual, -.10f, .10f) * .14f
+                : clamp(heightResidual * 1.2f, -.24f, .24f);
+            if (domeStyle) cleanRelief = pow(max(0.0f, 1.0f - radius * radius), 1.7f) * (fusionStyle == 0 ? .95f : .7f);
+            relief = lerp(relief, cleanRelief, fusion);
+            barkRelief *= 1.0f - fusion;
+        }
         s.coatH = (s.coatH * keep) + ((amount * strength) * ((height * relief) + barkRelief));
         bool _7100 = _461_uPass == (-1);
         bool _7107;
@@ -1684,6 +1792,8 @@ Surface burlSurface(inout Surface s, float3 p, float3 n, float seed)
                 }
                 _7131 = _7151 + _7160;
             }
+            if (authoredKnot) _7131 = 1.0f - stampAO;
+            if (fusion > 0.0f) _7131 = lerp(_7131, domeStyle ? .10f * max(0.0f, 1.0f - radius * radius) : _7131 * .28f, fusion);
             s.localAO *= (1.0f - ((amount * effectParameter(param_35, param_36)) * _7131));
         }
         s.layerCoverage = 1.0f - ((1.0f - s.layerCoverage) * (1.0f - amount));
@@ -1821,7 +1931,83 @@ Surface formSurface(int type, inout Surface s, float3 p, float3 n, float seed)
     return s;
 }
 
-Surface extraSurface(int type, inout Surface s, float3 p, float3 n, float seed)
+float3 repairBarkBilinear(float2 uv,int cell,int level){
+ int side=max(1,512>>level);
+ int2 origin=int2((cell%16)*side,max(1,1024>>level)+(cell/16)*side);
+ float2 q=frac(uv)*float(side)-.5,f=frac(q);
+ int2 a=(int2(floor(q))+side)%side,b=(a+1)%side;
+ float3 p00=uBakedORM.Load(int3(origin+a,level)).rgb,p10=uBakedORM.Load(int3(origin+int2(b.x,a.y),level)).rgb;
+ float3 p01=uBakedORM.Load(int3(origin+int2(a.x,b.y),level)).rgb,p11=uBakedORM.Load(int3(origin+b,level)).rgb;
+ return lerp(lerp(p00,p10,f.x),lerp(p01,p11,f.x),f.y);
+}
+float3 repairBarkTile(float2 uv,float2 dx,float2 dy,int cell){
+ float footprint=max(length(dx),length(dy))*512.;
+ float lod=clamp(log2(max(footprint,1.)),0.,9.);
+ int lo=int(floor(lod)),hi=min(lo+1,9);
+ return lerp(repairBarkBilinear(uv,cell,lo),repairBarkBilinear(uv,cell,hi),frac(lod));
+}
+float3 repairBarkMap(float3 q,float3 dx,float3 dy,float3 w,int cell){
+ float3 value=(float3)0;
+ if(w.x>.0001)value+=w.x*repairBarkTile(q.zy,dx.zy,dy.zy,cell);
+ if(w.y>.0001)value+=w.y*repairBarkTile(q.xz,dx.xz,dy.xz,cell);
+ if(w.z>.0001)value+=w.z*repairBarkTile(q.xy,dx.xy,dy.xy,cell);
+ return value;
+}
+Surface repairBarkSurface(Surface s,float3 p,float3 n,float seed,int asset,float amount,float rough,float normal,float height,float ao,float keep,float3 tint){
+ int cell=195+(asset-1)*3;
+ float width=(asset==3?.70:.55)*max(.1,effectParameter(15,1.));
+ float sourceHeight=asset==1?.0025:asset==2?.0012:.005;
+ float frequency=_461_uTreeHeight/width;
+ float3 phase=float3(seed*.731,seed*.31,seed*.517);
+ float3 q=barkCoordinates(p)*frequency+phase;
+ float3 screenOrigin=_461_uDirectional<.5?vP:(_461_uDirectionMode>2.5&&_461_uHasBarkFlow?vFlowPosition:mul(vP, transpose(barkFrame())));
+ float3 dx=ddx(screenOrigin)*frequency,dy=ddy(screenOrigin)*frequency,w=barkProjectionWeights(barkProjectionNormal(n));
+ float3 data=repairBarkMap(q,dx,dy,w,cell+1);
+ float3 color=repairBarkMap(q,dx,dy,w,cell);
+ float3 tone=lerp((float3)1,tint*2.,.55);
+ s.color=lerp(s.color,clamp(color*tone,0.,1.),amount);
+ s.rough=lerp(s.rough,clamp(data.g+(rough-.9),.05,1.),amount);
+ float retained=lerp(1.,keep,amount);
+ s.h*=retained;s.normalWeight*=retained;s.detailGradient*=retained;
+ s.coatH=s.coatH*retained+amount*normal*(height/.00145)*sourceHeight*(data.r-.5)/_461_uTreeHeight;
+ if(_461_uPass==-1||_461_uPass==2||_461_uPass==5||_461_uPass==10)s.localAO*=1.-amount*ao*(1.-data.b);
+ return s;
+}
+
+// Draw the original premultiplied image in its physical box. A small screen-space
+// footprint filters minification without sampling other atlas panels or their mips.
+float4 imageDecalTap(float2 pixel,float4 rect,float2 atlasSize){
+ return uMaskMap3.SampleLevel(_uMaskMap3_sampler,(rect.xy+clamp(pixel,(float2).5,rect.zw-.5))/atlasSize,0.);
+}
+Surface imageDecalSurface(Surface s,float3 p,float amount,float rough){
+ s.layerCoverage=0.;
+ if(effectParameter(17,0.)<.5)return s;
+ int base=surfaceEffectSlot*10;
+ float4 origin=_461_uEffectData[base+5],axisU=_461_uEffectData[base+6],axisV=_461_uEffectData[base+7],rect=_461_uEffectData[base+8];
+ float3 delta=p-origin.xyz;
+ float2 q=float2(dot(delta,axisU.xyz),dot(delta,axisV.xyz));
+ float side=max(abs(q.x),abs(q.y));
+ float depth=abs(dot(delta,normalize(cross(axisU.xyz,axisV.xyz))))/origin.w;
+ float3 px=ddx(vP),py=ddy(vP);
+ float2 dx=float2(dot(px,axisU.xyz),-dot(px,axisV.xyz))*rect.zw*.125;
+ float2 dy=float2(dot(py,axisU.xyz),-dot(py,axisV.xyz))*rect.zw*.125;
+ if(side>=1.||depth>=1.)return s;
+ float2 pixel=float2(q.x*.5+.5,.5-q.y*.5)*rect.zw,atlasSize=imageDecalAtlasSize();
+ float4 image;
+ if(max(dot(dx,dx),dot(dy,dy))>.0625){
+  image=(imageDecalTap(pixel+dx+dy,rect,atlasSize)+imageDecalTap(pixel+dx-dy,rect,atlasSize)
+   +imageDecalTap(pixel-dx+dy,rect,atlasSize)+imageDecalTap(pixel-dx-dy,rect,atlasSize))*.25;
+ }else image=imageDecalTap(pixel,rect,atlasSize);
+ float edge=clamp(axisU.w,0.,1.);
+ float coverage=amount*image.a*(1.-smoothstep(.75,1.,depth));
+ if(edge>0.)coverage*=1.-smoothstep(1.-edge,1.,side);
+ s.layerCoverage=coverage;
+ s.color=lerp(s.color,clamp(image.rgb/max(image.a,.000001),0.,1.),coverage);
+ s.rough=lerp(s.rough,rough,coverage);
+ return s;
+}
+
+Surface extraSurface(int type, inout Surface s, float3 p, float3 n, float seed, float3 receivingColor, float receivingRoughness)
 {
     if (type == 15)
     {
@@ -1829,7 +2015,7 @@ Surface extraSurface(int type, inout Surface s, float3 p, float3 n, float seed)
         float3 param_1 = p;
         float3 param_2 = n;
         float param_3 = seed;
-        Surface _7202 = burlSurface(param, param_1, param_2, param_3);
+        Surface _7202 = burlSurface(param, param_1, param_2, param_3, receivingColor, receivingRoughness);
         return _7202;
     }
     if (type >= 11)
@@ -1866,8 +2052,19 @@ Surface extraSurface(int type, inout Surface s, float3 p, float3 n, float seed)
     int param_23 = 7;
     float param_24 = 1.0f;
     float keep = effectParameter(param_23, param_24);
+    if (type == 10 && effectParameter(16, 0.0f) > 0.5f)
+        return imageDecalSurface(s, p, amount, rough);
     float3 param_25 = 0.5f.xxx;
     float3 tint = effectColor(param_25);
+    s.layerCoverage = amount;
+    if (type == 10 && _461_uCoatEnabled != 0u)
+    {
+        int asset = int(effectParameter(14, 0.0f) + 0.5f);
+        uint atlasWidth, atlasHeight, atlasLevels;
+        uBakedORM.GetDimensions(0u, atlasWidth, atlasHeight, atlasLevels);
+        if (asset >= 1 && asset <= 3 && atlasWidth >= 8192u)
+            return repairBarkSurface(s,p,n,seed,asset,amount,rough,normal,height,ao,keep,tint);
+    }
     float3 phase = float3((seed * 0.37000000476837158203125f) + 9.0f, (seed * 0.17000000178813934326171875f) + 21.0f, (seed * 0.5299999713897705078125f) + 4.0f);
     float3 param_26 = p;
     float param_27 = grain;
@@ -3050,7 +3247,7 @@ Surface layer(int id, Surface s, float3 p, float3 n, float fine, float barkLum, 
             float3 param_18 = p;
             float3 param_19 = n;
             float param_20 = seed;
-            Surface _8925 = extraSurface(param_16, param_17, param_18, param_19, param_20);
+            Surface _8925 = extraSurface(param_16, param_17, param_18, param_19, param_20, s.color, s.rough);
             next = _8925;
         }
         if (id == 5)
@@ -3243,7 +3440,8 @@ bool physicalMaterial(int id)
 void rememberMaterial(int slot, int type, Surface s)
 {
     int param = type;
-    float a = physicalMaterial(param) ? lastMaterialCoverage : 0.0f;
+    float coverage = physicalMaterial(param) ? lastMaterialCoverage : 0.0f;
+    float a = type == 10 && effectParameter(16, 0.0f) > 0.5f ? 0.0f : coverage;
     for (int j = 0; j < 16; j++)
     {
         if (j >= slot)
@@ -3255,7 +3453,7 @@ void rememberMaterial(int slot, int type, Surface s)
     materialBarkWeight *= (1.0f - a);
     materialPaintWeight = (materialPaintWeight * (1.0f - a)) + ((type == 1) ? a : 0.0f);
     materialMossWeight = (materialMossWeight * (1.0f - a)) + ((type == 0) ? a : 0.0f);
-    materialWeights[slot] = a;
+    materialWeights[slot] = coverage;
     materialHeights[slot] = ((s.h * _461_uNormalStrength) * _461_uRelief) + s.coatH;
 }
 

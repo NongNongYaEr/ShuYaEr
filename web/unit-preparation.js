@@ -1,27 +1,39 @@
 import {VIEWPORT_NAVIGATION_HINT} from './viewport-navigation.js';
 import {importPlantGlb} from './plant-unit-import.js';
-import {UNIT_ROLES,geometryExtent} from './plant-unit-data.js';
-import {PREPARATION_VERSION,validatePreparationDraft,preparationSelection,extractPreparationGeometry,calibratePreparationUnit,centerPreparationBase,preparationPack,preparationDimensions,preparationSizeFromLength,preparationSizeFromReference,preparationReferenceLength,preparationSizeCheckpoint,preparationSizeFeedback,changePreparationFrame,rotatePreparationCalibration} from './unit-preparation-data.js';
+import {geometryExtent} from './plant-unit-data.js';
+import {PREPARATION_VERSION,PREPARATION_ROLES,preparationMaxSize,validatePreparationDraft,preparationSelection,extractPreparationGeometry,calibratePreparationUnit,centerPreparationBase,preparationPack,preparationDimensions,preparationSizeFromLength,preparationSizeFromReference,preparationReferenceLength,preparationSizeCheckpoint,preparationSizeFeedback,changePreparationFrame,rotatePreparationCalibration} from './unit-preparation-data.js';
 import {createUnitPreparationStore} from './unit-preparation-store.js';
 import {createUnitPreparationView} from './unit-preparation-view.js';
 import {resourceEscape as esc,resourceIcon as icon,syncResourceOverlay,trapResourceDialogFocus} from './resource-ui.js';
 import {createAppConfirm} from './app-confirm.js';
+import {DISTRIBUTION} from './distribution-config.js';
 
 export function createUnitPreparation({onSave}){
   const store=createUnitPreparationStore(),confirm=createAppConfirm('unitPreparationConfirm'),dialog=document.createElement('dialog');dialog.id='unitPreparationDialog';dialog.hidden=true;dialog.setAttribute('aria-labelledby','unitPreparationTitle');
-  dialog.innerHTML=`<header class="pup-heading"><img src="/brand/category-units-v1.png" alt=""><div><small>整包 GLB → 标准叶花果</small><h2 id="unitPreparationTitle">叶花果拆分与校准</h2><p>共用原图集，连续提取与校准单元</p></div><button type="button" data-import>${icon('resource-import')}导入整包 GLB</button><button type="button" data-close aria-label="返回叶花果工作台">${icon('arrow-left')}返回工作台</button></header>
+  dialog.innerHTML=`<header class="pup-heading"><img src="/brand/category-units-v1.png" alt=""><div><small>整包 GLB</small><h2 id="unitPreparationTitle">叶花果拆分与校准</h2><p>提取叶花果和基础枝，共用原图集</p></div><button type="button" data-import>${icon('resource-import')}导入整包 GLB</button><button type="button" data-close aria-label="返回叶花果工作台">${icon('arrow-left')}返回工作台</button></header>
     <div class="pup-pack-bar"><label>套装名称<input data-pack-name maxlength="80" required placeholder="导入后填写植物套装名称"></label><span data-source-name></span><div class="pup-save-status"><span data-autosave role="status">整理草稿自动保存</span><small data-asset-status role="status">尚未保存为素材套装</small></div></div>
     <div class="pup-layout"><aside class="pup-library"><nav class="pup-overview-nav" aria-label="素材导航"><button type="button" data-overview aria-label="整包总览" aria-pressed="false" aria-controls="preparationViewport" aria-describedby="preparationOverviewDescription"><span class="pup-overview-icon">${icon('layout-grid')}</span><span class="pup-overview-copy"><span><strong>整包总览</strong><em data-overview-state aria-hidden="true">返回</em></span><small id="preparationOverviewDescription">查看全部原始模型</small></span><span data-overview-arrow aria-hidden="true">${icon('arrow-left')}</span></button></nav><div class="pup-library-heading"><h3>整理单元 <span data-count>0</span></h3><button type="button" data-new title="返回整包，开始新选区">${icon('plus')}新选区</button></div><div class="pup-library-summary"><div class="pup-progress" data-progress>导入一个包含多款叶花果的 GLB</div><div class="pup-progress-track" data-progress-track role="progressbar" aria-label="单元确认进度" aria-valuemin="0" aria-valuemax="1" aria-valuenow="0"><i data-progress-fill></i></div></div><div data-units class="pup-units"></div><details class="pup-drafts"><summary>${icon('history')}整理草稿 <span data-draft-count></span></summary><select data-drafts aria-label="选择整理草稿"></select><div><button type="button" data-resume>继续草稿</button><button type="button" data-delete-draft>删除草稿</button></div></details></aside>
-    <main class="pup-main"><div class="pup-display-bar"><span class="pup-current-unit" data-scope-unit hidden></span><div class="pup-display-switch" role="group" aria-label="模型显示"><button type="button" data-preview-mode="source" aria-pressed="true" aria-controls="preparationViewport">${icon('box')}原始模型</button><button type="button" data-preview-mode="calibrated" aria-pressed="false" aria-controls="preparationViewport">${icon('axis-3d')}校准结果</button></div><span data-preview-note></span><button type="button" data-calibrated-view>${icon('axis-3d')}竖立正视</button></div><div class="pup-toolbar"><div role="group" aria-label="网格操作"><button type="button" data-tool="select" aria-pressed="true">${icon('scan')}框选</button><button type="button" data-tool="orbit" aria-pressed="false">${icon('rotate-3d')}观察</button></div><select data-operation aria-label="选区操作"><option value="replace">新选区</option><option value="add">补选 · Shift</option><option value="subtract">减选 · Alt</option></select><label><input type="checkbox" data-through checked>穿透框选</label><label><input type="checkbox" data-hide>隐藏已提取</label><select data-view aria-label="整理视角"><option value="auto">适应模型</option><option value="top">俯视</option><option value="front">正视</option><option value="side">侧视</option></select><button type="button" data-fit>${icon('maximize-2')}复位</button><button type="button" data-scale-mode aria-pressed="false" title="围绕底点等比缩放 · S">${icon('scaling')}缩放 <kbd>S</kbd></button><button type="button" data-rotate-mode aria-pressed="false" title="显示三轴旋转环；R 键直接旋转，X/Y/Z 约束轴">${icon('rotate-3d')}旋转 <kbd>R</kbd></button><div class="pup-point-tools" data-point-tools><button type="button" data-reset-point="base">${icon('map-pin')}重定底点</button><button type="button" data-reset-point="tip">${icon('move-up')}重定朝向</button></div></div><div id="preparationViewport" data-host class="pup-host"><div data-empty class="pup-empty">${icon('resource-units')}<h3>从一个整包模型开始</h3><p>导入共用一套贴图的 GLB，框选每片叶子或整簇花果。</p><button type="button" data-empty-import>选择 GLB 文件</button></div></div><div class="pup-view-footer"><span data-view-hint>左键框选 · ${VIEWPORT_NAVIGATION_HINT}</span><span data-selection>未选择网格</span><button type="button" data-undo title="撤销 · Ctrl Z">${icon('undo-2')}</button><button type="button" data-redo title="重做 · Ctrl Shift Z">${icon('redo-2')}</button></div></main>
-    <aside class="pup-properties"><div class="pup-step"><span data-step-number>01</span><div><small data-step-note>选择需要的网格</small><h3 data-step-title>框选提取</h3></div></div><div class="pup-stage-rail" aria-label="当前整理步骤"><span data-preparation-stage="1"><i>1</i>框选</span><span data-preparation-stage="2"><i>2</i>方向</span><span data-preparation-stage="3"><i>3</i>尺寸</span></div><div class="pup-properties-scroll"><p data-guide>框住一个完整叶片或一簇花果，背面的面片也会一起选中。可用补选、减选修整范围。</p><button type="button" data-extract class="pup-extract">${icon('scissors')}提取为单元</button><section class="pup-selection-help" data-selection-help><h4>连续整理，一套完成</h4><ol><li><span>01</span><div><strong>框住完整单元</strong><p>一片叶子，或一簇花果。</p></div></li><li><span>02</span><div><strong>设置挂接方向</strong><p>点底点、朝向，检查正面。</p></div></li><li><span>03</span><div><strong>校准真实大小</strong><p>确认后继续，最后保存套装。</p></div></li></ol><p class="pup-selection-keys"><kbd>Shift</kbd> 补选 <kbd>Alt</kbd> 减选</p></section><div data-unit-fields hidden><label>单元名称<input data-unit-name maxlength="80" required></label><label>类型<select data-role>${Object.entries(UNIT_ROLES).map(([id,name])=>'<option value="'+id+'">'+name+'</option>').join('')}</select></label><div class="pup-points"><button type="button" data-base>${icon('map-pin')}点底点</button><span data-base-note>待设置</span><button type="button" data-tip>${icon('move-up')}点朝向点</button><span data-tip-note>待设置</span></div><details class="pup-coordinates"><summary>微调点坐标</summary>${['base','tip'].map(key=>'<div><strong>'+(key==='base'?'底点':'朝向点')+'</strong>'+['X','Y','Z'].map((axis,i)=>'<label>'+axis+'<input type="number" step="any" data-point="'+key+'" data-axis="'+i+'" aria-label="'+(key==='base'?'底点':'朝向点')+axis+'"></label>').join('')+'</div>').join('')}</details><label>正面绕轴旋转 <span data-roll-label>0°</span><input type="range" data-roll min="-180" max="180" step="1" value="0"></label><div class="pup-flips"><button type="button" data-front>以当前视角为正面</button><button type="button" data-flip>正面翻转 180°</button></div><section class="pup-size-calibration"><header>${icon('ruler')}<strong>真实大小</strong><small data-size-state data-state="idle">待设置方向</small></header><p class="pup-size-rule">拖上点或按 S 等比缩放 · 输入也可调整</p><div class="pup-size-inputs"><label>长度 Y（cm）<input data-length type="number" min=".001" max="100" step="any" required></label><label>最大边（cm）<input data-size type="number" min=".1" max="100" step=".001" required></label></div><div class="pup-size-comparison" data-size-comparison><div><small data-before-label>调整前</small><strong data-before-size>—</strong></div><span>→</span><div><small>当前长度</small><strong data-after-size>—</strong></div><p data-size-change></p></div><p data-size-message role="status"></p><button type="button" data-cancel-size-input hidden>取消未生效的输入</button><div class="pup-size-actions"><button type="button" data-revert-size>恢复参照大小</button><label><input type="checkbox" data-show-comparison checked>调整前范围</label></div><p data-dimensions>先设置底点与朝向，显示长宽厚。</p><button type="button" data-measure>${icon('ruler')}两点定标</button><div data-measure-fields hidden><p data-measure-note>在原始模型点取一段已知长度的两端。</p><label>参照段实际长度（cm）<input data-known-length type="number" min=".001" max="1000" step="any" placeholder="输入实物测量值"></label><button type="button" data-apply-size>应用尺寸并预览</button></div><small>含叶柄／花梗；更改任一长度均等比缩放，不改变轮廓。</small></section><div class="pup-unit-actions"><button type="button" data-edit-selection>调整选区</button><button type="button" data-remove>移除此单元</button></div></div><div class="pup-material-note"><img data-atlas alt="整包共用颜色图集" hidden><div><strong>整套共用材质</strong><p data-material-note>自动继承原 GLB 的颜色、透明和法线。</p></div></div></div><div class="pup-confirm-bar"><button type="button" data-confirm>确认校准，继续下一个</button><small data-confirm-hint></small></div></aside></div>
+    <main class="pup-main"><div class="pup-display-bar"><span class="pup-current-unit" data-scope-unit hidden></span><div class="pup-display-switch" role="group" aria-label="模型显示"><button type="button" data-preview-mode="source" aria-pressed="true" aria-controls="preparationViewport">${icon('box')}原始模型</button><button type="button" data-preview-mode="calibrated" aria-pressed="false" aria-controls="preparationViewport">${icon('axis-3d')}校准结果</button></div><span data-preview-note></span><button type="button" data-calibrated-view>${icon('axis-3d')}竖立正视</button></div><div class="pup-toolbar"><div role="group" aria-label="网格操作"><button type="button" data-tool="select" aria-pressed="true">${icon('scan')}框选</button><button type="button" data-tool="orbit" aria-pressed="false">${icon('rotate-3d')}观察</button></div><select data-operation aria-label="选区操作"><option value="replace">新选区</option><option value="add">补选 · Shift</option><option value="subtract">减选 · Alt（Maya 用 Ctrl＋Alt）</option></select><label><input type="checkbox" data-through checked>穿透框选</label><label><input type="checkbox" data-hide>隐藏已提取</label><select data-view aria-label="整理视角"><option value="auto">适应模型</option><option value="top">俯视</option><option value="front">正视</option><option value="side">侧视</option></select><button type="button" data-fit>${icon('maximize-2')}复位</button><button type="button" data-scale-mode aria-pressed="false" title="围绕底点等比缩放 · S">${icon('scaling')}缩放 <kbd>S</kbd></button><button type="button" data-rotate-mode aria-pressed="false" title="显示三轴旋转环；R 键直接旋转，X/Y/Z 约束轴">${icon('rotate-3d')}旋转 <kbd>R</kbd></button><div class="pup-point-tools" data-point-tools><button type="button" data-reset-point="base">${icon('map-pin')}重定底点</button><button type="button" data-reset-point="tip">${icon('move-up')}重定朝向</button></div></div><div id="preparationViewport" data-host class="pup-host"><div data-empty class="pup-empty">${icon('resource-units')}<h3>从一个整包模型开始</h3><p>导入共用一套贴图的 GLB，框选每片叶子或整簇花果。</p><button type="button" data-empty-import>选择 GLB 文件</button></div></div><div class="pup-view-footer"><span data-view-hint><span data-tool-hint>左键框选</span> · <span data-viewport-navigation-hint>${VIEWPORT_NAVIGATION_HINT}</span><span data-calibration-hint></span></span><span data-selection>未选择网格</span><button type="button" data-undo title="撤销 · Ctrl Z">${icon('undo-2')}</button><button type="button" data-redo title="重做 · Ctrl Shift Z">${icon('redo-2')}</button></div></main>
+    <aside class="pup-properties"><div class="pup-step"><span data-step-number>01</span><div><small data-step-note>选择需要的网格</small><h3 data-step-title>框选提取</h3></div></div><div class="pup-stage-rail" aria-label="当前整理步骤"><span data-preparation-stage="1"><i>1</i>框选</span><span data-preparation-stage="2"><i>2</i>方向</span><span data-preparation-stage="3"><i>3</i>尺寸</span></div><div class="pup-properties-scroll"><p data-guide>框住一个完整叶片或一簇花果，背面的面片也会一起选中。可用补选、减选修整范围。</p><button type="button" data-extract class="pup-extract">${icon('scissors')}提取为单元</button><section class="pup-selection-help" data-selection-help><h4>连续整理，一套完成</h4><ol><li><span>01</span><div><strong>框住完整单元</strong><p>一片叶子，或一簇花果。</p></div></li><li><span>02</span><div><strong>设置挂接方向</strong><p>点底点、朝向，检查正面。</p></div></li><li><span>03</span><div><strong>校准真实大小</strong><p>确认后继续，最后保存套装。</p></div></li></ol><p class="pup-selection-keys"><kbd>Shift</kbd> 补选 <kbd>Alt</kbd> 减选（Maya 用 <kbd>Ctrl＋Alt</kbd>）</p></section><div data-unit-fields hidden><label>单元名称<input data-unit-name maxlength="80" required></label><label>类型<select data-role>${Object.entries(PREPARATION_ROLES).map(([id,name])=>'<option value="'+id+'">'+name+'</option>').join('')}</select></label><div class="pup-points"><button type="button" data-base>${icon('map-pin')}点底点</button><span data-base-note>待设置</span><button type="button" data-tip>${icon('move-up')}点朝向点</button><span data-tip-note>待设置</span></div><details class="pup-coordinates"><summary>微调点坐标</summary>${['base','tip'].map(key=>'<div><strong>'+(key==='base'?'底点':'朝向点')+'</strong>'+['X','Y','Z'].map((axis,i)=>'<label>'+axis+'<input type="number" step="any" data-point="'+key+'" data-axis="'+i+'" aria-label="'+(key==='base'?'底点':'朝向点')+axis+'"></label>').join('')+'</div>').join('')}</details><label>正面绕轴旋转 <span data-roll-label>0°</span><input type="range" data-roll min="-180" max="180" step="1" value="0"></label><div class="pup-flips"><button type="button" data-front>以当前视角为正面</button><button type="button" data-flip>正面翻转 180°</button></div><section class="pup-size-calibration"><header>${icon('ruler')}<strong>真实大小</strong><small data-size-state data-state="idle">待设置方向</small></header><p class="pup-size-rule">拖上点或按 S 等比缩放 · 输入也可调整</p><div class="pup-size-inputs"><label>长度 Y（cm）<input data-length type="number" min=".001" max="100" step="any" required></label><label>最大边（cm）<input data-size type="number" min=".1" max="100" step=".001" required></label></div><div class="pup-size-comparison" data-size-comparison><div><small data-before-label>调整前</small><strong data-before-size>—</strong></div><span>→</span><div><small>当前长度</small><strong data-after-size>—</strong></div><p data-size-change></p></div><p data-size-message role="status"></p><button type="button" data-cancel-size-input hidden>取消未生效的输入</button><div class="pup-size-actions"><button type="button" data-revert-size>恢复参照大小</button><label><input type="checkbox" data-show-comparison checked>调整前范围</label></div><p data-dimensions>先设置底点与朝向，显示长宽厚。</p><button type="button" data-measure>${icon('ruler')}两点定标</button><div data-measure-fields hidden><p data-measure-note>在原始模型点取一段已知长度的两端。</p><label>参照段实际长度（cm）<input data-known-length type="number" min=".001" max="1000" step="any" placeholder="输入实物测量值"></label><button type="button" data-apply-size>应用尺寸并预览</button></div><small>含叶柄／花梗；更改任一长度均等比缩放，不改变轮廓。</small></section><div class="pup-unit-actions"><button type="button" data-edit-selection>调整选区</button><button type="button" data-remove>移除此单元</button></div></div><div class="pup-material-note"><img data-atlas alt="整包共用颜色图集" hidden><div><strong>整套共用材质</strong><p data-material-note>自动继承原 GLB 的颜色、透明和法线。</p></div></div></div><div class="pup-confirm-bar"><button type="button" data-confirm>确认校准，继续下一个</button><small data-confirm-hint></small></div></aside></div>
     <footer class="pup-footer"><div><span data-status role="status" aria-live="polite">支持静态、内嵌贴图的共享图集 GLB</span><small>保存为标准套装后，可在单元枝工作台装配；原始整包保留在整理草稿中。</small></div><div class="pup-delivery"><span data-save-guidance role="status"></span><button type="button" data-save>${icon('save')}保存套装并打开</button></div></footer><input type="file" data-file accept=".glb" hidden>`;
   document.body.append(dialog);document.getElementById('unitPreparationConfirm').querySelector('.app-confirm-kicker').textContent='树鸭儿 · 整理操作';document.getElementById('unitPreparationConfirm').querySelector('header img').src='/brand/category-units-v1.png';trapResourceDialogFocus(dialog);const q=s=>dialog.querySelector(s),all=s=>dialog.querySelectorAll(s);
+  q('[data-import]').insertAdjacentHTML('beforebegin',
+    '<button type="button" data-example>打开内置测试</button>'+
+    '<label title="用于下一次导入。枝皮与叶花果须共用完全不透明的颜色图集。"><input type="checkbox" data-merge-unit-materials>合并枝皮和叶花果材质</label>');
+  q('[data-empty] p').textContent='用内置弯枝和叶花果练习拆分，或导入自己的共享图集 GLB。';
+  q('[data-empty-import]').insertAdjacentHTML('beforebegin','<button type="button" data-empty-example>打开内置测试</button>');
   // Presentation groups reuse the original controls and event bindings.
   const toolbar=q('.pup-toolbar'),toolPair=toolbar.querySelector('[role=group]');toolPair.className='pup-navigation-modes';
   function toolGroup(name,items,key){const group=document.createElement('div');group.className='pup-tool-group';if(key)group.dataset[key]='';const label=document.createElement('small');label.textContent=name;group.append(label,...items);toolbar.append(group);return group;}
   toolGroup('操作',[toolPair]);toolGroup('选区',[q('[data-operation]'),q('[data-through]').closest('label'),q('[data-hide]').closest('label')],'selectionOptions');
   toolGroup('视角',[q('[data-view]'),q('[data-fit]')]);toolGroup('变换',[q('[data-scale-mode]'),q('[data-rotate-mode]')],'transformTools');toolbar.append(q('[data-point-tools]'));
   const identity=document.createElement('div');identity.className='pup-unit-identity';q('[data-unit-name]').closest('label').before(identity);identity.append(q('[data-unit-name]').closest('label'),q('[data-role]').closest('label'));
+  const propertiesScroll=q('.pup-properties-scroll');
+  q('[data-guide]').insertAdjacentHTML('afterend','<div class="pup-overview-actions" hidden><button type="button" data-continue-unit hidden></button><button type="button" data-start-selection hidden>开始框选</button></div>');
+  q('[data-extract]').insertAdjacentHTML('beforebegin','<label class="pup-extract-category" hidden>提取类型<select data-extract-role></select></label>');
+  q('[data-extract-role]').replaceChildren(...Object.entries(PREPARATION_ROLES).map(([id,label])=>new Option(label,id)));
+  q('.pup-selection-help ol li p').textContent='一片叶子、一簇花果，或一段基础枝。';
+  q('.pup-size-calibration > small').setAttribute('data-size-rule-note','');
   q('[data-new]').title='开始新的框选，提取下一个单元';q('[data-source-name]').classList.add('pup-source-chip');
 
   let openContext={},source=null,draft=null,view=null,selection=new Set(),editing=false,previewing=false,busy=false,opener=null,generation=0,tool='select',timer=0,saveChain=Promise.resolve(),lastSave=Promise.resolve(),draftDirty=false,inputBefore=null,displayKey='',sizeInputError=null,directionUnitId=null,sizeGesture=null,calibrationGesture=null,overviewFilter=null;
@@ -39,14 +51,17 @@ export function createUnitPreparation({onSave}){
   function restore(state){if(state.activeId)restoreOverviewFilter();draft.editStamp=state.editStamp||null;if(Object.hasOwn(draft,'savedEditStamp')){draft.assetDirty=draft.editStamp!==draft.savedEditStamp;draft.save_state_version=1;}else{draft.assetDirty=state.assetDirty;draft.save_state_version=state.saveStateVersion||0;}sizeInputError=null;Object.assign(draft,{name:state.name,units:state.units,activeId:state.activeId});selection=new Set(state.selection);editing=state.editing;previewing=state.previewing;setTool(state.tool||'orbit');schedule();render();view?.setRotationEnabled(!!state.rotationEnabled&&previewing);syncPreviewUI();}
   function undo(redo=false){if(busy||sizeGesture||calibrationGesture||!draft)return;const from=redo?future:history,to=redo?history:future;if(!from.length)return;to.push(snapshot());restore(from.pop());}
   function unavailable(){const used=new Set();for(const unit of draft?.units||[])if(!editing||unit.id!==draft.activeId)for(const face of unit.faces)used.add(face);return used;}
-  function setTool(value){tool=value;view?.setMode(value);for(const button of all('[data-tool]'))button.setAttribute('aria-pressed',String(button.dataset.tool===value));q('[data-view-hint]').textContent=(value==='base'?'左键点底点':value==='tip'?'左键点朝向点':value==='measure-a'?'左键点参照 A':value==='measure-b'?'左键点参照 B':value==='orbit'?'观察模型':'左键框选')+' · '+VIEWPORT_NAVIGATION_HINT+(active()?.base&&active()?.tip&&!editing?' · S 等比缩放 · R 旋转校准':'');syncPreviewUI();}
+  function setTool(value){tool=value;view?.setMode(value);for(const button of all('[data-tool]'))button.setAttribute('aria-pressed',String(button.dataset.tool===value));q('[data-tool-hint]').textContent=value==='base'?'左键点底点':value==='tip'?'左键点朝向点':value==='measure-a'?'左键点参照 A':value==='measure-b'?'左键点参照 B':value==='orbit'?'观察模型':'左键框选';syncPreviewUI();}
   function syncPreviewUI(){
     const unit=active(),shown=!!view?.calibratedMesh&&previewing&&!editing,locked=busy||!!sizeGesture||!!calibrationGesture,ready=!!unit?.base&&!!unit?.tip&&!editing;
+    for(const button of all('[data-example],[data-empty-example],[data-empty-import]'))button.disabled=locked;
     for(const button of all('[data-preview-mode]')){const result=button.dataset.previewMode==='calibrated';button.setAttribute('aria-pressed',String(result===shown));button.disabled=locked||!source||result&&!ready;button.title=result?ready?'查看底点、方向和真实尺寸校准后的模型':editing?'请先完成当前选区调整':'先选中单元并设置底点与朝向':'查看原 GLB 的导入姿态';}
     q('[data-preview-note]').textContent=!source?'导入 GLB 后可切换查看':!unit?'整包总览 · 选择单元继续编辑，或框选提取单元':editing?'原始模型 · 正在调整面片选区':shown?'底点归零 · 竖立显示 · 真实厘米尺寸':!ready?'原始姿态 · 请先设置底点与朝向':'原始导入姿态 · 拖动两点 · Alt 自由微调';
     q('[data-calibrated-view]').disabled=locked||!shown;q('[data-calibrated-view]').title=shown?'将校准结果恢复为竖立正视':'切换到校准结果后，可恢复竖立正视';q('[data-host]').dataset.display=shown?'calibrated':'source';
-    if(!shown&&view?.rotationEnabled)view.setRotationEnabled(false);
-    q('[data-rotate-mode]').disabled=busy||!!sizeGesture||!!calibrationGesture&&calibrationGesture.kind!=='rotation'||!ready;q('[data-rotate-mode]').setAttribute('aria-pressed',String(!!view?.rotationEnabled));
+    const isBaseBranch=unit?.role==='BASE_BRANCH';
+    if((!shown||isBaseBranch)&&view?.rotationEnabled)view.setRotationEnabled(false);
+    q('[data-rotate-mode]').disabled=busy||!!sizeGesture||!!calibrationGesture&&calibrationGesture.kind!=='rotation'||!ready||isBaseBranch;q('[data-rotate-mode]').setAttribute('aria-pressed',String(!!view?.rotationEnabled));
+    q('[data-calibration-hint]').textContent=ready?(isBaseBranch?' · S 等比缩放':' · S 等比缩放 · R 旋转校准'):'';
     q('[data-point-tools]').hidden=shown||!unit||editing;for(const b of all('[data-reset-point]'))b.disabled=locked||!unit;syncPresentation();
   }
   function restoreOverviewFilter(){if(overviewFilter!==null){q('[data-hide]').checked=overviewFilter;overviewFilter=null;}}
@@ -55,11 +70,41 @@ export function createUnitPreparation({onSave}){
     view?.cancelCalibration();view?.cancelScale();if(overviewFilter===null)overviewFilter=q('[data-hide]').checked;q('[data-hide]').checked=false;
     draft.activeId='';previewing=false;setTool('orbit');schedule();render(true);q('[data-host] canvas')?.focus({preventScroll:true});status('整包总览：显示全部原始网格，已做的校准与当前选区已保留。');
   }
+  function selectUnit(id){
+    if(busy||!draft?.units.some(unit=>unit.id===id))return;
+    restoreOverviewFilter();record();draft.activeId=id;selection.clear();editing=false;previewing=!!active().approved;setTool('orbit');schedule();render(true);q('[data-host] canvas')?.focus({preventScroll:true});
+  }
   function syncProgress(){const total=draft?.units.length||0,confirmed=draft?.units.filter(u=>u.approved).length||0;const progress=q('[data-progress-track]');progress.setAttribute('aria-valuemax',String(total||1));progress.setAttribute('aria-valuenow',String(confirmed));progress.setAttribute('aria-valuetext',confirmed+' / '+total+' 个单元已确认');q('[data-progress-fill]').style.width=(total?confirmed/total*100:0)+'%';}
   function syncPresentation(){
     const unit=active(),total=draft?.units.length||0,confirmed=draft?.units.filter(u=>u.approved).length||0,pending=total-confirmed,pointPicking=['base','tip'].includes(tool)||!!calibrationGesture,stage=!unit||editing?1:!unit.base||!unit.tip||pointPicking?2:3,locked=!!sizeGesture||!!calibrationGesture;
     const overview=!!source&&!unit&&!editing;q('[data-overview]').disabled=busy||!source||editing;q('[data-overview]').setAttribute('aria-pressed',String(overview));q('[data-overview]').title=editing?'先完成当前选区调整，再返回整包总览':'查看全部原始网格，保留已做的校准和当前选区';q('[data-scope-unit]').hidden=!unit;q('[data-scope-unit]').textContent=unit?'当前单元 · '+unit.name:'';q('[data-overview-state]').textContent=!source?'未导入':overview?'当前':'返回';q('[data-scope-unit]').title=unit?.name||'';
-    dialog.dataset.hasSource=String(!!source);dialog.dataset.stage=stage;q('[data-step-number]').textContent=String(stage).padStart(2,'0');q('[data-step-title]').textContent=['框选与提取','底点与方向','尺寸与确认'][stage-1];q('[data-step-note]').textContent=unit?unit.name:'开始整理素材';q('[data-step-note]').title=unit?.name||'';if(overview&&tool==='orbit'){q('[data-step-title]').textContent='整包总览';q('[data-step-note]').textContent='查看全部原始网格';q('[data-guide]').textContent='校准单元保留在左侧。选中单元继续编辑，或点击「新选区」开始提取。';}
+    const pendingUnit=overview&&!selection.size&&draft.units.find(item=>!item.approved);
+    const canStart=overview&&tool==='orbit'&&!selection.size;
+    q('.pup-overview-actions').hidden=!pendingUnit&&!canStart;
+    const resume=q('[data-continue-unit]');resume.hidden=!pendingUnit;resume.disabled=busy||locked;
+    if(pendingUnit){const label='继续校准 · '+pendingUnit.name;if(resume.textContent!==label)resume.textContent=label;resume.title=label;}
+    q('[data-start-selection]').hidden=!canStart;q('[data-start-selection]').disabled=busy||locked;
+    q('[data-extract]').hidden=!!unit&&!editing||canStart;
+    q('.pup-extract-category').hidden=!source||!!unit||canStart;
+    q('[data-extract-role]').disabled=busy||locked;
+    const isBaseBranch=unit?.role==='BASE_BRANCH';
+    q('[data-base]').lastChild.textContent=isBaseBranch?'点枝根':'点底点';
+    q('[data-tip]').lastChild.textContent=isBaseBranch?'点枝尖':'点朝向点';
+    dialog.dataset.hasSource=String(!!source);dialog.dataset.stage=stage;q('[data-step-number]').textContent=String(stage).padStart(2,'0');q('[data-step-title]').textContent=['框选与提取','底点与方向','尺寸与确认'][stage-1];q('[data-step-note]').textContent=unit?unit.name:'开始整理素材';q('[data-step-note]').title=unit?.name||'';
+    let guide='框选完整的叶花果或基础枝，再选择提取类型。穿透选择会包含背面网格。';
+    if(overview&&tool==='orbit'){
+      q('[data-step-title]').textContent='整包总览';q('[data-step-note]').textContent='查看全部原始网格';
+      guide=selection.size?'当前选区已保留，可以提取为单元。':pendingUnit?'继续校准待处理的单元，或开始框选其他部分。':'开始框选后，拖动鼠标圈出要提取的部分。';
+    }else if(stage===2){
+      if(unit.role==='BASE_BRANCH'){
+        guide=tool==='base'?'请在模型上点击基础枝的枝根。':tool==='tip'?'请在模型上点击枝尖，确定基础枝的生长方向。':'先设置枝根和枝尖，再检查正面与真实尺寸。';
+      }else{
+        guide=tool==='base'?'请在模型上左键点击单元的挂接底点。':tool==='tip'?'请在模型上左键点击朝向点，确定单元的生长方向。':'先设置单元的挂接底点和朝向，再检查正面与大小。';
+      }
+    }else if(stage===3){
+      guide='检查方向和真实尺寸，完成后确认当前单元。';
+    }
+    const guideNode=q('[data-guide]');if(guideNode.textContent!==guide)guideNode.textContent=guide;
     for(const node of all('[data-preparation-stage]')){const number=+node.dataset.preparationStage,complete=number===1?!!unit&&!editing:number===2?!!unit?.base&&!!unit?.tip:!!unit?.approved;node.dataset.state=number===stage?'current':complete?'complete':'upcoming';node.setAttribute('aria-current',number===stage?'step':'false');}
     syncProgress();
     q('[data-selection-help]').hidden=!!unit&&!editing;q('[data-selection-options]').hidden=!!unit&&!editing&&tool!=='select';q('[data-transform-tools]').hidden=!unit||editing;
@@ -68,8 +113,18 @@ export function createUnitPreparation({onSave}){
     for(const button of all('[data-unit]')){const value=draft?.units.find(u=>u.id===button.dataset.unit);if(value)button.dataset.confirmation=value.approved?'confirmed':'pending';}
   }
   function sizeInfo(){
-    const unit=active();q('[data-direction-state]').textContent=unit?.base&&unit?.tip?'已设置 · 展开调整':'待设置';if((unit?.id||null)!==directionUnitId){directionUnitId=unit?.id||null;q('.pup-direction-settings').open=!!unit&&(!unit.base||!unit.tip);}if(sizeInputError?.unitId!==unit?.id)sizeInputError=null;let info=null;try{if(unit?.base&&unit?.tip)info=sizeFeedback(unit);}catch{}
+    const unit=active(),shownUnitId=editing?null:unit?.id??null;
+    q('[data-direction-state]').textContent=unit?.base&&unit?.tip?'已设置 · 展开调整':'待设置';
+    if(shownUnitId!==directionUnitId){
+      directionUnitId=shownUnitId;
+      q('.pup-direction-settings').open=!!shownUnitId&&(!unit.base||!unit.tip);
+      propertiesScroll.scrollTop=0;
+    }
+    if(sizeInputError?.unitId!==unit?.id)sizeInputError=null;let info=null;try{if(unit?.base&&unit?.tip)info=sizeFeedback(unit);}catch{}
     const d=info?.current,length=q('[data-length]'),maximum=q('[data-size]');
+    length.max=maximum.max=String(preparationMaxSize(unit?.role)*100);
+    q('[data-known-length]').max=String(Math.max(1000,+maximum.max));
+    q('[data-size-rule-note]').textContent=(unit?.role==='BASE_BRANCH'?'含枝根与枝尖':'含叶柄／花梗')+'；更改任一长度均等比缩放。';
     if(sizeInputError?.field!=='length'&&document.activeElement!==length){length.value=d?+d.y.toFixed(3):'';length.setCustomValidity('');}
     if(unit&&sizeInputError?.field!=='size'&&document.activeElement!==maximum){maximum.value=+(unit.size_m*100).toFixed(3);maximum.setCustomValidity('');}
     q('[data-dimensions]').textContent=d?'宽 X '+formatCm(d.x)+' · 厚 Z '+formatCm(d.z):'先设置底点与朝向，显示长宽厚。';
@@ -102,10 +157,10 @@ export function createUnitPreparation({onSave}){
       renderView();if(!commit)view.restoreCamera(camera);else if(changed)view.fitIfClipped();if(!commit||!changed)view.setRotationEnabled(!!before.rotationEnabled&&previewing);sizeInfo();buttons();badges();setTool(tool);
       status(commit&&changed?'缩放已完成：长度 '+formatCm(sizeFeedback(unit).current.y)+'。可一步撤销；确认单元后保存套装。':commit?'大小未改变。':'已取消缩放，恢复操作前的大小与视角。');
     }
-    return {initialSize,valid,update(value){unit.size_m=value;unit.approved=Math.abs(value-initialSize)>1e-10?false:oldUnit.approved;view.previewUniformSize(value);sizeInfo();badges();},commit:()=>end(true),cancel:()=>end(false)};
+    return {initialSize,maxSize:preparationMaxSize(unit.role),valid,update(value){unit.size_m=value;unit.approved=Math.abs(value-initialSize)>1e-10?false:oldUnit.approved;view.previewUniformSize(value);sizeInfo();badges();},commit:()=>end(true),cancel:()=>end(false)};
   }
   function activateRotation(){
-    if(busy||sizeGesture||calibrationGesture||editing||!active()?.base||!active()?.tip)return false;
+    if(busy||sizeGesture||calibrationGesture||editing||!active()?.base||!active()?.tip||active().role==='BASE_BRANCH')return false;
     try{calibratePreparationUnit(source.geometry,active());if(!previewing){previewing=true;setTool('orbit');renderView();}view.setRotationEnabled(true);setTool('orbit');buttons();status('拖动三轴旋转环修改保存后的朝向；R 可直接旋转，X/Y/Z 约束轴。');return true;}catch(error){status(error.message,true);return false;}
   }
   function beginCalibrationGesture(kind,key=null){
@@ -129,7 +184,7 @@ export function createUnitPreparation({onSave}){
   function changeSize(field,valueOverride=null){
     const unit=active(),input=q(field==='length'?'[data-length]':'[data-size]');if(busy||sizeGesture||calibrationGesture||!unit)return;input.setCustomValidity('');
     try{
-      if(valueOverride==null&&(!input.value||!input.checkValidity()))throw Error(field==='length'?'请输入有效的生长长度':'最大边请输入 0.1～100 cm');
+      if(valueOverride==null&&(!input.value||!input.checkValidity()))throw Error(field==='length'?'请输入有效的生长长度':'最大边请输入 0.1～'+preparationMaxSize(unit.role)*100+' cm');
       const value=valueOverride??(field==='length'?preparationSizeFromLength(source.geometry,unit,+input.value):+input.value/100);
       ensureSizeCheckpoint(unit);const changed=Math.abs(value-unit.size_m)>1e-10;sizeInputError=null;for(const item of all('[data-length],[data-size]'))item.setCustomValidity('');
       if(changed){unit.size_m=value;markUnitChanged(unit);if(unit.base&&unit.tip){previewing=true;setTool('orbit');}renderView();schedule();}
@@ -137,21 +192,25 @@ export function createUnitPreparation({onSave}){
       sizeInfo();buttons();badges();status(changed?'大小已实时更新。确认当前单元后，再保存为套装。':'当前输入与有效大小一致，无需调整。');
     }catch(error){sizeInputError={unitId:unit.id,field,message:error.message};input.setCustomValidity(error.message);sizeInfo();buttons();status(error.message+'，尚未应用这个输入。',true);}
   }
-  function badges(){if(!draft)return;syncProgress();q('[data-progress]').textContent=draft.units.filter(u=>u.approved).length+' / '+draft.units.length+' 个已确认 · '+(source.geometry.index.length/3).toLocaleString()+' 三角面';for(const button of all('[data-unit]')){const u=draft.units.find(unit=>unit.id===button.dataset.unit);if(!u)continue;button.querySelector('strong').textContent=u.name;button.querySelector('small').textContent=UNIT_ROLES[u.role]+' · 最大边 '+(u.size_m*100).toFixed(1)+' cm';button.querySelector('em').textContent=u.approved?'已确认':!u.base?'待定底点':!u.tip?'待定朝向':'待确认校准';button.dataset.confirmation=u.approved?'confirmed':'pending';}}
+  function badges(){if(!draft)return;syncProgress();q('[data-progress]').textContent=draft.units.filter(u=>u.approved).length+' / '+draft.units.length+' 个已确认 · '+(source.geometry.index.length/3).toLocaleString()+' 三角面';for(const button of all('[data-unit]')){const u=draft.units.find(unit=>unit.id===button.dataset.unit);if(!u)continue;button.querySelector('strong').textContent=u.name;button.querySelector('small').textContent=PREPARATION_ROLES[u.role]+' · 最大边 '+(u.size_m*100).toFixed(1)+' cm';button.querySelector('em').textContent=u.approved?'已确认':!u.base?'待定底点':!u.tip?'待定朝向':'待确认校准';button.dataset.confirmation=u.approved?'confirmed':'pending';}}
   function renderView(fit=false,interactive=false){
     if(!view||!source||sizeGesture||calibrationGesture)return;const unit=active(),isolate=unit&&!editing?new Set(unit.faces):null,used=unavailable(),key=draft.sourceId+':'+(previewing?'calibrated:'+unit?.id:isolate?'unit:'+unit.id:'whole'),previousSize=view.calibration?.dimensions?.longest/100;fit=fit||key!==displayKey;displayKey=key;
     view.showSource();if(isolate)for(const face of unit.faces)used.delete(face);view.update({used,selected:unit&&!editing?new Set():selection,isolate,hideUsed:q('[data-hide]').checked,unit:unit&&!editing?unit:null});
     if(previewing&&unit?.base&&unit.tip){try{const info=preparationSizeFeedback(source.geometry,unit);view.showCalibrated(calibratePreparationUnit(source.geometry,unit),fit,{...info,approved:unit.approved,showComparison:q('[data-show-comparison]').checked,interactive});if(!fit&&Number.isFinite(previousSize)&&Math.abs(previousSize-unit.size_m)>1e-10)view.fitIfClipped();}catch(error){previewing=false;status(error.message,true);}}else if(fit)view.fit();setTool(tool);
   }
-  function buttons(){const locked=busy||!!sizeGesture||!!calibrationGesture,unit=active(),ready=draft?.units.length&&draft.units.every(u=>u.approved);q('[data-save]').disabled=locked||!ready||editing;q('[data-extract]').disabled=locked||!selection.size||!!unit&&!editing;q('[data-confirm]').disabled=locked||!unit||!unit.base||!unit.tip||editing;if(q('[data-center-base]'))q('[data-center-base]').disabled=locked||!unit?.base||!unit?.tip;q('[data-new]').disabled=locked||!source;q('[data-undo]').disabled=locked||!history.length;q('[data-redo]').disabled=locked||!future.length;for(const b of all('[data-base],[data-tip],[data-edit-selection],[data-remove],[data-front],[data-flip]'))b.disabled=locked||!unit;q('[data-import]').disabled=locked;q('[data-pack-name]').disabled=locked||!draft;for(const field of all('[data-unit-fields] input,[data-unit-fields] select'))field.disabled=locked||!unit;for(const field of all('[data-operation],[data-through],[data-hide],[data-view]'))field.disabled=locked||!source;const calibrated=!!unit?.base&&!!unit?.tip;q('[data-length]').disabled=locked||!calibrated;q('[data-measure]').disabled=locked||!calibrated;q('[data-apply-size]').disabled=locked||!unit?.size_reference?.a||!unit?.size_reference?.b||!q('[data-known-length]').value||!q('[data-known-length]').checkValidity();if(unit&&calibrated&&!q('[data-length]').checkValidity())q('[data-confirm]').disabled=true;let info=null;try{if(calibrated)info=sizeFeedback(unit);}catch{}q('[data-revert-size]').disabled=locked||editing||!info?.scaleChanged;q('[data-cancel-size-input]').disabled=locked;if(sizeInputError&&sizeInputError.unitId===unit?.id){q('[data-confirm]').disabled=true;q('[data-save]').disabled=true;}q('[data-confirm]').textContent=calibrationGesture?'校准调整中 · 等待结束操作':sizeGesture?'缩放中 · 等待结束操作':unit?.approved?'已确认 · 继续下一个':unit?'确认当前修改并继续':'确认校准，继续下一个';q('[data-save]').title=editing?'先完成当前选区调整':sizeInputError?'先修正尚未生效的输入':!ready?'请先确认全部单元，再保存到内容库':'保存当前已确认单元到内容库';q('[data-confirm-hint]').textContent=calibrationGesture?'先完成或取消本次调整，再确认单元。':sizeGesture?'先完成或取消缩放，再确认单元。':unit?(unit.approved?'本单元已确认，继续后回到整包。':'确认后保留当前校准并回到整包；收入内容库还需保存套装。'):'';q('[data-scale-mode]').disabled=busy||!calibrated||editing;q('[data-scale-mode]').setAttribute('aria-pressed',String(!!sizeGesture));q('[data-scale-mode]').classList.toggle('pup-scale-active',!!sizeGesture);for(const field of all('[data-tool],[data-fit],[data-unit],[data-resume],[data-delete-draft],[data-drafts]'))field.disabled=locked||!source;syncPreviewUI();}
+  function buttons(){const locked=busy||!!sizeGesture||!!calibrationGesture,unit=active(),ready=draft?.units.length&&draft.units.every(u=>u.approved);q('[data-save]').disabled=locked||!ready||editing;q('[data-extract]').disabled=locked||!selection.size||!!unit&&!editing;q('[data-confirm]').disabled=locked||!unit||!unit.base||!unit.tip||editing;if(q('[data-center-base]'))q('[data-center-base]').disabled=locked||!unit?.base||!unit?.tip;q('[data-new]').disabled=locked||!source;q('[data-undo]').disabled=locked||!history.length;q('[data-redo]').disabled=locked||!future.length;for(const b of all('[data-base],[data-tip],[data-edit-selection],[data-remove],[data-front],[data-flip]'))b.disabled=locked||!unit;q('[data-import]').disabled=locked;q('[data-merge-unit-materials]').disabled=locked;q('[data-pack-name]').disabled=locked||!draft;for(const field of all('[data-unit-fields] input,[data-unit-fields] select'))field.disabled=locked||!unit;for(const field of all('[data-operation],[data-through],[data-hide],[data-view]'))field.disabled=locked||!source;const calibrated=!!unit?.base&&!!unit?.tip;q('[data-length]').disabled=locked||!calibrated;q('[data-measure]').disabled=locked||!calibrated;q('[data-apply-size]').disabled=locked||!unit?.size_reference?.a||!unit?.size_reference?.b||!q('[data-known-length]').value||!q('[data-known-length]').checkValidity();if(unit&&calibrated&&!q('[data-length]').checkValidity())q('[data-confirm]').disabled=true;let info=null;try{if(calibrated)info=sizeFeedback(unit);}catch{}q('[data-revert-size]').disabled=locked||editing||!info?.scaleChanged;q('[data-cancel-size-input]').disabled=locked;if(sizeInputError&&sizeInputError.unitId===unit?.id){q('[data-confirm]').disabled=true;q('[data-save]').disabled=true;}q('[data-confirm]').textContent=calibrationGesture?'校准调整中 · 等待结束操作':sizeGesture?'缩放中 · 等待结束操作':unit?.approved?'已确认 · 继续下一个':unit?'确认当前修改并继续':'确认校准，继续下一个';q('[data-save]').title=editing?'先完成当前选区调整':sizeInputError?'先修正尚未生效的输入':!ready?'请先确认全部单元，再保存到内容库':'保存当前已确认单元到内容库';q('[data-confirm-hint]').textContent=calibrationGesture?'先完成或取消本次调整，再确认单元。':sizeGesture?'先完成或取消缩放，再确认单元。':unit?(unit.approved?'本单元已确认，继续后回到整包。':'确认后保留当前校准并回到整包；收入内容库还需保存套装。'):'';q('[data-scale-mode]').disabled=busy||!calibrated||editing;q('[data-scale-mode]').setAttribute('aria-pressed',String(!!sizeGesture));q('[data-scale-mode]').classList.toggle('pup-scale-active',!!sizeGesture);for(const field of all('[data-tool],[data-fit],[data-unit],[data-resume],[data-delete-draft],[data-drafts]'))field.disabled=locked||!source;syncPreviewUI();}
   function render(fit=false){
     const unit=active();ensureSizeCheckpoint(unit);q('[data-pack-name]').value=draft?.name||'';q('[data-pack-name]').disabled=!draft;q('[data-source-name]').textContent=draft?.sourceName||'';q('[data-empty]').hidden=!!source;q('[data-count]').textContent=draft?.units.length||0;q('[data-progress]').textContent=draft?(draft.units.filter(u=>u.approved).length+' / '+draft.units.length+' 个已确认 · '+(source.geometry.index.length/3).toLocaleString()+' 三角面'):'导入一个包含多款叶花果的 GLB';
-    q('[data-units]').innerHTML=(draft?.units||[]).map(u=>'<button type="button" data-unit="'+esc(u.id)+'" aria-pressed="'+(u.id===draft.activeId)+'">'+(u.thumbnail?'<img src="'+esc(u.thumbnail)+'" alt="">':'<span class="pup-unit-placeholder">'+icon('resource-units')+'</span>')+'<span><strong>'+esc(u.name)+'</strong><small>'+esc(UNIT_ROLES[u.role])+' · 最大边 '+(u.size_m*100).toFixed(1)+' cm</small><em>'+(u.approved?'已确认':!u.base?'待定底点':!u.tip?'待定朝向':'待确认校准')+'</em></span></button>').join('');
-    for(const button of all('[data-unit]'))button.onclick=()=>{if(busy)return;restoreOverviewFilter();record();draft.activeId=button.dataset.unit;selection.clear();editing=false;previewing=!!active().approved;setTool('orbit');schedule();render(true);q('[data-host] canvas')?.focus({preventScroll:true});};
-    q('[data-unit-fields]').hidden=!unit||editing;q('[data-extract]').hidden=!!unit&&!editing;q('[data-extract]').textContent=editing?'更新此单元选区':'提取为单元';q('[data-step-number]').textContent=unit&&!editing?'02':'01';q('[data-step-title]').textContent=unit&&!editing?'校准与真实大小':'框选提取';q('[data-step-note]').textContent=unit?unit.name:'选择需要的网格';q('[data-guide]').textContent=unit&&!editing?unit.base&&unit.tip?'检查方向与真实尺寸，完成后确认当前单元。':'先设置叶柄／花梗底点和朝向，再检查正面与大小。':'框选一个完整单元，穿透选择会包含背面网格。';
+    q('[data-units]').innerHTML=(draft?.units||[]).map(u=>'<button type="button" data-unit="'+esc(u.id)+'" aria-pressed="'+(u.id===draft.activeId)+'">'+(u.thumbnail?'<img src="'+esc(u.thumbnail)+'" alt="">':'<span class="pup-unit-placeholder">'+icon('resource-units')+'</span>')+'<span><strong>'+esc(u.name)+'</strong><small>'+esc(PREPARATION_ROLES[u.role])+' · 最大边 '+(u.size_m*100).toFixed(1)+' cm</small><em>'+(u.approved?'已确认':!u.base?'待定底点':!u.tip?'待定朝向':'待确认校准')+'</em></span></button>').join('');
+    for(const button of all('[data-unit]'))button.onclick=()=>selectUnit(button.dataset.unit);
+    q('[data-unit-fields]').hidden=!unit||editing;q('[data-extract]').textContent=editing?'更新此单元选区':'提取为单元';
     q('[data-selection]').textContent=unit&&!editing?unit.faces.length.toLocaleString()+' 面 · 当前单元':selection.size.toLocaleString()+' 面已选';
     if(unit){q('[data-unit-name]').value=unit.name;q('[data-role]').value=unit.role;if(sizeInputError?.unitId!==unit.id||sizeInputError?.field!=='size')q('[data-size]').value=+(unit.size_m*100).toFixed(3);q('[data-roll]').value=unit.roll;q('[data-roll-label]').textContent=unit.roll+'°';for(const key of ['base','tip']){q('[data-'+key+'-note]').textContent=unit[key]?'已设置':'待设置';for(const input of all('[data-point='+key+']'))input.value=unit[key]?.[+input.dataset.axis]??'';}}
-    if(source?.material.color){q('[data-atlas]').src=source.material.color;q('[data-atlas]').hidden=false;q('[data-material-note]').textContent='共享颜色图集'+(source.material.normal?' + 法线':'')+' · UV 保持原对应';}else q('[data-atlas]').hidden=true;
+    q('[data-atlas]').hidden=!source?.material.color;
+    if(source?.material.color)q('[data-atlas]').src=source.material.color;
+    q('[data-material-note]').textContent=source?.material.color
+      ?'共享颜色图集'+(source.material.normal?' + 法线':'')+(draft.merge_unit_materials?' · 枝皮与叶花果共用一个导出材质槽':' · UV 保持原对应')
+      :'自动继承原 GLB 的颜色、透明和法线。';
     sizeInfo();buttons();renderView(fit);window.lucide?.createIcons({root:dialog});
   }
   function safe(fn){return async(...args)=>{if(busy)return;busy=true;dialog.setAttribute('aria-busy','true');buttons();try{return await fn(...args);}catch(error){status(error.message,true);}finally{busy=false;dialog.removeAttribute('aria-busy');buttons();}};}
@@ -159,15 +218,110 @@ export function createUnitPreparation({onSave}){
   function createView(){view?.dispose();displayKey='';view=createUnitPreparationView(q('[data-host]'),{
     onSelect:safe(async(rect,operation)=>{if(!source||active()&&!editing)return;const token=generation,currentView=view,found=await currentView.selectRect(rect,q('[data-through]').checked);if(token!==generation||!dialog.open)return;record();selection=preparationSelection(selection,found,operation||q('[data-operation]').value,unavailable());schedule();render();status(selection.size+' 面已选择，确认完整后提取。');}),
     onPoint:(key,hit)=>{if(busy||!active())return;const unit=active();if(key==='measure-a'||key==='measure-b'){record();unit.size_reference||={a:null,b:null,cm:null};unit.size_reference[key==='measure-a'?'a':'b']=hit.point;setTool(key==='measure-a'?'measure-b':'orbit');schedule();render();if(key==='measure-b')q('[data-known-length]').focus();status(key==='measure-a'?'参照点 A 已设置，请点另一端 B。':'参照点已设置，请输入这段的真实厘米长度并应用。');return;}
-      try{const patch={[key]:hit.point,...(key==='tip'?{front:hit.front}:{})},next=unit.base&&unit.tip?changePreparationFrame(source.geometry,unit,patch):{...unit,...patch};if(next.base&&next.tip)calibratePreparationUnit(source.geometry,next);record();Object.assign(unit,next);markUnitChanged(unit);if(key==='tip'){previewing=true;setTool('orbit');}else setTool('tip');schedule();render();status(key==='base'?'底点已设置，请点击朝向点':'生长方向已设置，真实比例保持；请检查正面与厘米尺寸。');}catch(error){status(error.message,true);}
+      try{const patch={[key]:hit.point,...(key==='tip'?{front:hit.front}:{})},next=unit.base&&unit.tip?changePreparationFrame(source.geometry,unit,patch):{...unit,...patch};if(next.base&&next.tip)calibratePreparationUnit(source.geometry,next);
+        const complete=!!next.base&&!!next.tip&&(key==='tip'||!unit.base);
+        record();Object.assign(unit,next);markUnitChanged(unit);
+        if(complete)previewing=true;
+        setTool(complete?'orbit':key==='base'?'tip':'base');
+        schedule();render();
+        status(complete?'生长方向已设置，请检查正面与厘米尺寸。':key==='base'?'底点已设置，请在模型上点击朝向点。':'朝向点已设置，请在模型上点击底点。');
+        if(complete)q('.pup-size-inputs').scrollIntoView({block:'nearest',inline:'nearest'});
+      }catch(error){status(error.message,true);}
     },onError:message=>status(message,true),onScaleBegin:beginSizeGesture,onPointBegin:key=>beginCalibrationGesture('point',key),onRotationBegin:()=>beginCalibrationGesture('rotation'),onRotationActivate:activateRotation,
   });}
-  async function loadDraft(id){restoreOverviewFilter();await flush();const next=await store.get(id);if(!next)throw Error('整理草稿已不存在');const token=generation,file=await store.source(next.sourceId,next.sourceName),parsed=await importPlantGlb(file,{sourceMode:true});if(token!==generation||!dialog.open)return;validatePreparationDraft(next,parsed.geometry.index.length/3);source=parsed;draft=next;sizeInputError=null;revisions.set(draft.id,draft.revision||0);selection=new Set(next.selection||[]);editing=false;previewing=!!active()?.approved;history.length=future.length=0;createView();await view.load(source);if(token!==generation||!dialog.open)return;setTool(active()?'orbit':'select');render(true);q('[data-autosave]').textContent='草稿已恢复';status('已恢复 '+draft.name+'，可继续提取或校准。');}
+  const stillOpen=token=>token===generation&&dialog.open;
+  async function displayDraft(next,parsed,token,{fresh=false}={}){
+    restoreOverviewFilter();
+    source=parsed;draft=next;draftDirty=false;sizeInputError=null;revisions.set(next.id,next.revision||0);
+    selection=new Set(next.selection||[]);editing=false;previewing=!!active()?.approved;history.length=future.length=0;
+    q('[data-operation]').value='replace';q('[data-view]').value='auto';
+    if(fresh){q('[data-hide]').checked=false;q('[data-extract-role]').value='LEAF';}
+    createView();await view.load(source);
+    if(!stillOpen(token))return false;
+    setTool(active()?'orbit':'select');render(true);return true;
+  }
+  async function loadDraft(id,{resumePending=false}={}){
+    const token=generation;
+    await flush();
+    const next=await store.get(id);if(!next)throw Error('整理草稿已不存在');
+    const file=await store.source(next.sourceId,next.sourceName);
+    const parsed=await importPlantGlb(file,{sourceMode:true,mergeUnitMaterials:next.merge_unit_materials===true});
+    if(!stillOpen(token))return;
+    validatePreparationDraft(next,parsed.geometry.index.length/3);
+    const pending=resumePending&&!next.activeId&&!next.selection?.length&&next.units.find(unit=>!unit.approved);
+    if(pending)next.activeId=pending.id;
+    if(!await displayDraft(next,parsed,token))return;
+    q('[data-drafts]').value=next.id;q('[data-autosave]').textContent='草稿已恢复';
+    if(pending)schedule();
+    status('已恢复 '+next.name+'，可继续提取或校准。');
+  }
+  async function importPack(file,token,{example=false,mergeUnitMaterials=false}={}){
+    if(!/\.glb$/i.test(file.name)||file.size>80*1024*1024)throw Error('请选择 80 MB 内、资源内嵌的静态 GLB');
+    status('正在检查 GLB 和已有整理草稿…');
+    await flush();
+    const digest=await crypto.subtle.digest('SHA-256',await file.arrayBuffer());
+    const id=[...new Uint8Array(digest)].map(value=>value.toString(16).padStart(2,'0')).join('');
+    const items=await store.list();
+    if(!stillOpen(token))return;
+    const matching=items.filter(item=>item.sourceId===id);
+    const existing=matching.find(item=>item.id===draft?.id&&(item.count||selection.size))||matching.find(item=>item.count)||matching[0];
+    if(existing){
+      const choice=await confirm({title:'这份 GLB 已有整理草稿',name:existing.name,detail:existing.count+' 个已提取单元',message:'继续草稿会保留原材质设置。新建独立草稿会从整包重新开始，并使用本次的导入选项。',accept:'继续草稿',save:'新建独立草稿'});
+      if(!stillOpen(token))return;
+      if(!choice){status('已取消导入，继续当前整理。');return;}
+      if(choice===true){await loadDraft(existing.id,{resumePending:true});return;}
+    }
+    status('正在读取整包网格与共享图集…');
+    const parsed=await importPlantGlb(file,{sourceMode:true,mergeUnitMaterials});
+    if(!stillOpen(token))return;
+    await store.putSource(id,file);
+    if(!stillOpen(token))return;
+    const next={version:PREPARATION_VERSION,id:crypto.randomUUID(),sourceId:id,sourceName:file.name,name:file.name.replace(/\.glb$/i,'').slice(0,80),units:[],selection:[],activeId:'',revision:0};
+    if(mergeUnitMaterials)next.merge_unit_materials=true;
+    next.revision=(await store.put(next)).revision;
+    if(!stillOpen(token)||!await displayDraft(next,parsed,token,{fresh:true}))return;
+    q('[data-autosave]').textContent='草稿已保存';
+    if(example){
+      q('[data-view]').value='front';
+      view.view('front');
+      q('[data-extract-role]').value='BASE_BRANCH';
+      status('内置测试已打开。先框选弯枝，以「基础枝」提取，再分别提取叶片、花和果实。');
+    }else status(mergeUnitMaterials?'整包已导入，导出时枝皮与叶花果共用一个材质槽。可继续框选提取。':'整包已导入。框选一个完整部分，再提取为单元。');
+    await drafts();
+  }
   q('[data-import]').onclick=()=>q('[data-file]').click();q('[data-empty-import]').onclick=()=>q('[data-file]').click();
-  q('[data-file]').onchange=safe(async()=>{const file=q('[data-file]').files[0];q('[data-file]').value='';if(!file)return;restoreOverviewFilter();await flush();const token=generation;status('正在读取整包网格与共享图集…');const parsed=await importPlantGlb(file,{sourceMode:true}),digest=await crypto.subtle.digest('SHA-256',await file.arrayBuffer()),id=[...new Uint8Array(digest)].map(v=>v.toString(16).padStart(2,'0')).join('');if(token!==generation||!dialog.open)return;await store.putSource(id,file);if(token!==generation||!dialog.open)return;source=parsed;draft={version:PREPARATION_VERSION,id:crypto.randomUUID(),sourceId:id,sourceName:file.name,name:file.name.replace(/\.glb$/i,'').slice(0,80),units:[],selection:[],activeId:'',revision:0};selection.clear();history.length=future.length=0;editing=previewing=false;draftDirty=true;await flush();if(token!==generation||!dialog.open)return;createView();await view.load(source);if(token!==generation||!dialog.open)return;setTool('select');await drafts();render(true);status('整包已导入。框选一片叶子或一簇花果，再提取为单元。');});
+  q('[data-file]').onchange=safe(async()=>{
+    const input=q('[data-file]'),file=input.files[0];input.value='';
+    if(file)await importPack(file,generation,{mergeUnitMaterials:q('[data-merge-unit-materials]').checked});
+  });
+  const openExample=safe(async()=>{
+    const token=generation,{url,name}=DISTRIBUTION.baseBranchExample;
+    status('正在打开内置测试…');
+    const response=await fetch(new URL(url,import.meta.url));
+    if(!response.ok)throw Error('内置测试模型读取失败，请检查软件文件。');
+    const file=new File([await response.blob()],name,{type:'model/gltf-binary'});
+    if(stillOpen(token))await importPack(file,token,{example:true});
+  });
+  q('[data-example]').onclick=q('[data-empty-example]').onclick=openExample;
   q('[data-overview]').onclick=showOverview;
+  q('[data-continue-unit]').onclick=()=>selectUnit(draft?.units.find(unit=>!unit.approved)?.id);
+  q('[data-start-selection]').onclick=()=>q('[data-new]').click();
   q('[data-new]').onclick=()=>{if(busy||!draft)return;restoreOverviewFilter();record();draft.activeId='';selection.clear();editing=previewing=false;setTool('select');q('[data-operation]').value='replace';schedule();render(true);};
-  q('[data-extract]').onclick=safe(async()=>{if(!source)return;const faces=[...selection].sort((a,b)=>a-b),geometry=extractPreparationGeometry(source.geometry,faces);record();if(editing&&active()){active().faces=faces;markUnitChanged(active());}else{if(draft.units.length>=64)throw Error('一套最多 64 个单元');const number=draft.units.length+1;draft.activeId=crypto.randomUUID();draft.units.push({id:draft.activeId,name:'叶片 '+String(number).padStart(2,'0'),role:'LEAF',faces,base:null,tip:null,front:null,roll:0,size_m:Math.min(1,Math.max(.001,geometryExtent(geometry).longest)),approved:false});}markAssetChanged();editing=previewing=false;selection.clear();setTool('base');schedule();render(true);status('已提取，点击叶柄／花梗的底点。');});
+  q('[data-extract]').onclick=safe(async()=>{
+    if(!source)return;
+    const faces=[...selection].sort((a,b)=>a-b),geometry=extractPreparationGeometry(source.geometry,faces),updating=editing&&active();
+    if(!updating&&draft.units.length>=64)throw Error('一套最多 64 个单元');
+    record();
+    if(updating){active().faces=faces;markUnitChanged(active());}
+    else{
+      const role=q('[data-extract-role]').value,number=String(draft.units.length+1).padStart(2,'0');
+      const size_m=Math.min(preparationMaxSize(role),Math.max(.001,geometryExtent(geometry).longest));
+      draft.activeId=crypto.randomUUID();
+      draft.units.push({id:draft.activeId,name:PREPARATION_ROLES[role]+' '+number,role,faces,base:null,tip:null,front:null,roll:0,size_m,approved:false});
+    }
+    markAssetChanged();editing=previewing=false;selection.clear();setTool('base');schedule();render(true);
+    status(active().role==='BASE_BRANCH'?'已提取基础枝，点击枝根。':'已提取，点击叶柄／花梗的底点。');
+  });
   for(const key of ['base','tip'])q('[data-'+key+']').onclick=()=>{if(!active())return;previewing=false;setTool(key);renderView(true);};
   const centerBase=document.createElement('button');centerBase.type='button';centerBase.dataset.centerBase='';centerBase.textContent='底点端部居中';centerBase.title='按底点附近横截面范围居中，可再微调坐标';q('.pup-points').after(centerBase);centerBase.onclick=()=>{try{const unit=active(),point=centerPreparationBase(source.geometry,unit);const next=changePreparationFrame(source.geometry,unit,{base:point});record();Object.assign(unit,next);markUnitChanged(unit);schedule();render();status('已按底点附近端部范围居中，请检查标记位置。');}catch(error){status(error.message,true);}};
   q('[data-roll]').closest('label').before(q('.pup-size-calibration'));
@@ -183,7 +337,33 @@ export function createUnitPreparation({onSave}){
   q('[data-confirm]').onclick=safe(async()=>{const unit=active();if(!unit)return;if(!q('[data-unit-name]').reportValidity()||!q('[data-size]').reportValidity()||!q('[data-length]').reportValidity())return;const normalized=calibratePreparationUnit(source.geometry,unit);record();view.showCalibrated(normalized);unit.thumbnail=view.thumbnail();unit.approved=true;unit.size_checkpoint=preparationSizeCheckpoint(source.geometry,unit,'confirmed');draft.activeId='';selection.clear();editing=previewing=false;setTool('select');schedule();await flush();render(true);status('已确认 '+unit.name+'：长度 '+formatCm(unit.size_checkpoint.dimensions.y)+'。已存草稿；保存套装后才会收入内容库。');});
   for(const input of all('[data-pack-name],[data-unit-name],[data-role],[data-roll],[data-point]')){
     input.addEventListener('focus',()=>inputBefore=snapshot());input.addEventListener('blur',()=>{if(inputBefore&&JSON.stringify(inputBefore)!==JSON.stringify(snapshot())){history.push(inputBefore);if(history.length>20)history.shift();future.length=0;}inputBefore=null;buttons();});
-    input.addEventListener('input',()=>{if(busy||!draft)return;const unit=active();if(input.matches('[data-pack-name]')){draft.name=input.value;markAssetChanged();}else if(unit){markUnitChanged(unit);if(input.matches('[data-unit-name]'))unit.name=input.value;else if(input.matches('[data-role]'))unit.role=input.value;else if(input.matches('[data-size]')){if(!input.value||!input.checkValidity()){buttons();badges();schedule();return;}unit.size_m=+input.value/100;}else if(input.matches('[data-roll]')){unit.roll=+input.value;q('[data-roll-label]').textContent=unit.roll+'°';}else if(input.matches('[data-point]')){if(!input.value||!input.checkValidity())return;const key=input.dataset.point;if(!unit[key])unit[key]=[0,0,0];unit[key][+input.dataset.axis]=+input.value;q('[data-'+key+'-note]').textContent='已设置';}markUnitChanged(unit);}schedule();sizeInfo();buttons();badges();if(input.matches('[data-roll],[data-point],[data-size]')){renderView(input.matches('[data-size]'));sizeInfo();}});
+    input.addEventListener('input',()=>{
+      if(busy||!draft)return;
+      const unit=active();
+      if(input.matches('[data-pack-name]')){draft.name=input.value;markAssetChanged();}
+      else if(unit){
+        if(input.matches('[data-unit-name]'))unit.name=input.value;
+        else if(input.matches('[data-role]')){
+          const maximum=preparationMaxSize(input.value);
+          if(unit.size_m>maximum){
+            input.value=unit.role;status('请先将最大边调整到 '+maximum*100+' cm 以内，再更改类型。',true);return;
+          }
+          if(unit.size_checkpoint?.size_m>maximum)delete unit.size_checkpoint;
+          unit.role=input.value;
+        }else if(input.matches('[data-roll]')){
+          unit.roll=+input.value;q('[data-roll-label]').textContent=unit.roll+'°';
+        }else if(input.matches('[data-point]')){
+          if(!input.value||!input.checkValidity())return;
+          const key=input.dataset.point;
+          if(!unit[key])unit[key]=[0,0,0];
+          unit[key][+input.dataset.axis]=+input.value;q('[data-'+key+'-note]').textContent='已设置';
+        }
+        markUnitChanged(unit);
+      }
+      schedule();
+      if(input.matches('[data-roll],[data-point],[data-role]'))renderView();
+      sizeInfo();buttons();badges();
+    });
   }
   for(const input of all('[data-length],[data-size],[data-known-length]')){input.addEventListener('focus',()=>inputBefore=snapshot());input.addEventListener('blur',()=>{if(inputBefore&&JSON.stringify(inputBefore)!==JSON.stringify(snapshot())){history.push(inputBefore);if(history.length>20)history.shift();future.length=0;}inputBefore=null;buttons();});}
   q('[data-length]').oninput=()=>changeSize('length');q('[data-size]').oninput=()=>changeSize('size');
@@ -203,5 +383,5 @@ export function createUnitPreparation({onSave}){
   async function close(){view?.cancelCalibration();view?.cancelScale();await flush();generation++;dialog.close();dialog.hidden=true;view?.dispose();view=null;syncResourceOverlay();if(opener?.isConnected)opener.focus({preventScroll:true});}
   q('[data-close]').onclick=()=>close().catch(error=>status(error.message,true));dialog.oncancel=event=>{event.preventDefault();if(tool==='base'||tool==='tip'||tool.startsWith('measure-')){setTool('orbit');return;}close().catch(error=>status(error.message,true));};
   for(const type of ['keydown','keyup'])dialog.addEventListener(type,event=>{if(type==='keydown'&&(event.ctrlKey||event.metaKey)){if(event.key.toLowerCase()==='s'){event.preventDefault();flush().then(()=>status(sizeInputError?'当前有效尺寸已存草稿；未生效的输入仍需修正。':'整理草稿已保存；收入内容库还需保存套装。')).catch(error=>status(error.message,true));}if(event.key.toLowerCase()==='z'&&!event.target.matches('input,select')){event.preventDefault();undo(event.shiftKey);}}event.stopPropagation();});
-  return {async open(options={}){if(dialog.open)return;if(busy)throw Error('整理台仍在结束上次读取，请稍后再打开');openContext=options;const returnLabel=options.returnLabel||'返回工作台';q('[data-close]').innerHTML=icon('arrow-left')+esc(returnLabel);q('[data-close]').setAttribute('aria-label',options.source==='resource-center'?'返回资源中心':'返回叶花果工作台');opener=document.activeElement;generation++;dialog.hidden=false;dialog.showModal();syncResourceOverlay();window.lucide?.createIcons({root:dialog});q('[data-import]').focus();busy=true;buttons();try{const items=await drafts();if(draft&&source){createView();await view.load(source);render(true);}else if(items.length)await loadDraft(items[0].id);else render();}catch(error){status(error.message,true);}finally{busy=false;buttons();}},close,flush,get draft(){return draft;},get source(){return source;},get view(){return view;},get busy(){return busy;}};
+  return {async open(options={}){if(dialog.open)return;if(busy)throw Error('整理台仍在结束上次读取，请稍后再打开');openContext=options;const returnLabel=options.returnLabel||'返回工作台';q('[data-close]').innerHTML=icon('arrow-left')+esc(returnLabel);q('[data-close]').setAttribute('aria-label',options.source==='resource-center'?'返回资源中心':'返回叶花果工作台');opener=document.activeElement;generation++;q('[data-merge-unit-materials]').checked=false;dialog.hidden=false;dialog.showModal();syncResourceOverlay();window.lucide?.createIcons({root:dialog});q('[data-import]').focus();busy=true;buttons();try{const items=await drafts();if(draft&&source){createView();await view.load(source);render(true);}else if(items.length)await loadDraft(items[0].id);else render();}catch(error){status(error.message,true);}finally{busy=false;buttons();}},close,flush,get draft(){return draft;},get source(){return source;},get view(){return view;},get busy(){return busy;}};
 }

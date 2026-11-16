@@ -1,9 +1,15 @@
 import {restoreSculptGeometry} from './model-sculpt-patch.js';
+import {applyTrunkGeometryCleanup} from './trunk-geometry-cleanup.js';
 import {removeTrunkWeightGuides} from './trunk-weight-data.js';
 import * as T from './vendor/three.module.min.js';
 import {validateImportedTrunk,validateTrunkGuides,trunkCalibrationMatrix,setTrunkPhysicalLength,pointOnTrunkGuide,closestTrunkGuide} from './imported-trunk-data.js';
-export const trunkEditable=model=>({id:model.id,name:model.name,revision:model.revision,calibration:structuredClone(model.calibration),guides:structuredClone(model.guides),binding:structuredClone(model.binding||{}),thumbnail:model.thumbnail||'',...(model.material_workflow?{material_workflow:structuredClone(model.material_workflow),material_parent:structuredClone(model.material_parent)}:{}),...(model.sculpt_parent?{sculpt_parent:structuredClone(model.sculpt_parent)}:{}),physical_size_confirmed:!!model.physical_size_confirmed,...(model.sculpt?{sculpt:structuredClone(model.sculpt),sculptMask:model.sculptMask||''}:{})});
-export function restoreTrunkEdits(source,edits){const result={...source,...structuredClone(edits),primitives:restoreSculptGeometry(source.primitives,edits.sculpt)};validateImportedTrunk(result);validateTrunkGuides(result.guides);trunkCalibrationMatrix(result.calibration);return result;}
+export const trunkEditable=model=>({id:model.id,name:model.name,revision:model.revision,calibration:structuredClone(model.calibration),guides:structuredClone(model.guides),binding:structuredClone(model.binding||{}),thumbnail:model.thumbnail||'',...(model.geometry_cleanup?{geometry_cleanup:structuredClone(model.geometry_cleanup)}:{}),...(model.material_workflow?{material_workflow:structuredClone(model.material_workflow),material_parent:structuredClone(model.material_parent)}:{}),...(model.sculpt_parent?{sculpt_parent:structuredClone(model.sculpt_parent)}:{}),physical_size_confirmed:!!model.physical_size_confirmed,...(model.sculpt?{sculpt:structuredClone(model.sculpt),sculptMask:model.sculptMask||''}:{})});
+export function restoreTrunkEdits(source,edits){
+ const result={...source,...structuredClone(edits)};
+ result.primitives=restoreSculptGeometry(applyTrunkGeometryCleanup(source.primitives,result.geometry_cleanup),edits.sculpt);
+ if(result.geometry_cleanup)result.triangles=result.primitives.reduce((sum,p)=>sum+p.geometry.index.length/3,0);
+ validateImportedTrunk(result);validateTrunkGuides(result.guides);trunkCalibrationMatrix(result.calibration);return result;
+}
 export function recalibrateTrunk(model,next,{anchorRoot=true}={}){
  const before=trunkCalibrationMatrix(model.calibration),after=trunkCalibrationMatrix(next),matrix=after.clone().multiply(before.invert()),ratio=next.scale/model.calibration.scale;
  const guides=model.guides.map(g=>({...g,points:g.points.map(p=>new T.Vector3(...p).applyMatrix4(matrix).toArray()),start_radius:g.start_radius*ratio,end_radius:g.end_radius*ratio}));

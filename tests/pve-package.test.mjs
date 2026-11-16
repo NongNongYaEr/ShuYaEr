@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import * as T from 'three';
 import { exportGlb } from '../web/glb-export.js';
@@ -68,4 +69,33 @@ test('complete package validates payloads, preserves prior files on generation/v
  }finally{
   assert.ok(root.startsWith(path.resolve('.runtime')+path.sep));fs.rmSync(root,{recursive:true,force:true});
  }
+});
+
+test('ordinary complete packages accept explicit shared atlas materials and validate their geometry roles', async t => {
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'pve-with-shared-atlas-'));
+ t.after(()=>{
+  for(const entry of fs.readdirSync(directory))fs.unlinkSync(path.join(directory,entry));
+  fs.rmdirSync(directory);
+ });
+ const source=Buffer.from('procedural source tree');
+ await fixture(directory,source);
+ const image=fs.readFileSync(path.join(directory,'leaf_atlas_color.png'));
+ const file='trunk-image-unit-atlas.png';
+ fs.writeFileSync(path.join(directory,file),image);
+ const setup='setup_imported_trunk_materials.py';
+ fs.writeFileSync(path.join(directory,setup),'# fixture setup script');
+ const manifestPath=path.join(directory,'whole.resolved.json');
+ const manifest=JSON.parse(fs.readFileSync(manifestPath,'utf8'));
+ const id='unit-atlas-0123456789abcdef12345678';
+ manifest.imported_trunk_materials={version:1,setup,materials:[{
+  id,name:'M_UnitAtlas',unit_atlas_role:'shared',alpha_mode:'OPAQUE',
+  maps:{baseColor:{file,bytes:image.length,sha256:hash(image).toLowerCase()}}
+ }]};
+ manifest.chunks[0].imported_trunk_material={material_id:id,uv_policy:'source_gltf_uv0_no_extra_flip'};
+ fs.writeFileSync(manifestPath,JSON.stringify(manifest));
+ assert.equal(validatePackage(directory,source).sources,1);
+
+ manifest.chunks[0].material_role='light';
+ fs.writeFileSync(manifestPath,JSON.stringify(manifest));
+ assert.throws(()=>validatePackage(directory,source),/合并的枝叶原图集材质绑定错误/);
 });

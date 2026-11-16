@@ -20,6 +20,32 @@ test('old structural polylines become exactly the point-editor curves before any
  const doc=createProjectDocument(model,[],r.authoring),cold=build(normalizeAuthoring(JSON.parse(JSON.stringify(doc)).authoring));assert.deepEqual(graph(cold),graph(model));assert.deepEqual(createPVESkeleton(cold,[]),createPVESkeleton(model,[]));assert(validatePVESkeleton(createPVESkeleton(cold,[])).valid);
 });
 test('fixed descendants veto the conversion rather than silently breaking their anchors',()=>{const a=normalizeAuthoring({branch_shape:shape,overrides:{CHILD:{pinned_points:[0]}}}),r=upgradeStructuralCurves(settings,a);assert(r.skipped.includes('ROOT'));assert(!r.upgraded.includes('ROOT'));assert.deepEqual(r.authoring.branch_shape,a.branch_shape);});
+test('built-in trunk controls are compact without changing the fitted axis or mounts after save and reopen',()=>{
+ const points=Array.from({length:41},(_,i)=>[.2*Math.sin(i/8),0,i*.06]);
+ const authoring=normalizeAuthoring({branch_shape:{branches:[{...shape.branches[0],points,knots:points},shape.branches[1]]}});
+ const baseline=build(upgradeStructuralCurves(settings,authoring).authoring);
+ const compact=upgradeStructuralCurves(settings,authoring,{compactTrunkControls:true});
+ const model=build(compact.authoring);
+ const [root,...children]=graph(model),[baselineRoot,...baselineChildren]=graph(baseline);
+ assert.equal(root[4].length,10);
+ assert.equal(baselineRoot[4].length,41);
+ assert.deepEqual([root[4][0],root[4].at(-1)],[baselineRoot[4][0],baselineRoot[4].at(-1)]);
+ assert.deepEqual(root.slice(0,4),baselineRoot.slice(0,4));
+ assert.deepEqual(children,baselineChildren);
+ assert.deepEqual(createPVESkeleton(model,[]),createPVESkeleton(baseline,[]));
+ const saved=JSON.parse(JSON.stringify(createProjectDocument(model,[],compact.authoring)));
+ const reopened=build(upgradeStructuralCurves(settings,saved.authoring).authoring);
+ assert.deepEqual(graph(reopened),graph(model));
+ const trunk=reopened.masterBranches[0];
+ const knots=trunk.controlPoints.map(p=>p.clone());
+ const unchanged=evaluateControlCurve(reopened.masterBranches,controlCurveOperation(trunk,knots))[0];
+ assert.deepEqual(unchanged.points,trunk.points);
+ knots[1].x+=.01;
+ const moved=evaluateControlCurve(reopened.masterBranches,controlCurveOperation(trunk,knots))[0];
+ assert.deepEqual(axisTimes(moved.points),axisTimes(trunk.points));
+ assert.deepEqual(moved.points.slice(-10),trunk.points.slice(-10));
+ assert(moved.points.some(p=>p.distanceTo(knots[1])<1e-9));
+});
 test('vine and source-only workbench data are not interpreted as assembled structural carriers',()=>{const a=normalizeAuthoring({});assert.deepEqual(upgradeStructuralCurves(settings,a).upgraded,[]);});
 test('carriers with edited bark sections and buttress recipes also use the same curve while retaining their full surface authoring',()=>{
  const a=normalizeAuthoring({branch_shape:shape,workbench:{trunk_forms:{version:1,branches:{ROOT:createTrunkFormPreset('BUTTRESS')}}}}),r=upgradeStructuralCurves(settings,a),asset=build(r.authoring);assert.deepEqual(r.upgraded,['ROOT','CHILD']);assert.deepEqual(r.authoring.workbench.trunk_forms,a.workbench.trunk_forms);const b=asset.masterBranches.find(b=>b.stableId==='ROOT');assert(b.trunkForm);assert.deepEqual(b.points.map(p=>p.toArray()),controlCurveAxis(b.controlPoints).map(p=>p.toArray()));

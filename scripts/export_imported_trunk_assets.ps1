@@ -14,7 +14,7 @@ if($GraphAsset -notmatch '^/Game/[\p{L}\p{N}_/]+\.[\p{L}\p{N}_]+$'){throw 'Graph
 if($OutputFolder -notmatch '^/Game/[\p{L}\p{N}_/]+$'){throw 'OutputFolder must be a new /Game folder; existing assets are never replaced'}
 $manifest=Join-Path $PSScriptRoot 'whole.resolved.json'
 $metadata=Get-Content -LiteralPath $manifest -Raw -Encoding UTF8|ConvertFrom-Json
-if($metadata.imported_trunk_skin.version -ne 1){throw 'The fixed trunk binding is missing'}
+if($metadata.imported_trunk_skin.version -notin 1,2){throw 'The fixed trunk binding is missing'}
 $reports=Join-Path (Split-Path -Parent $project) ('Saved/TreeDuckExports/'+[Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $reports -Force|Out-Null
 function Invoke-TreeDuckExport([string[]]$Arguments,[string]$Name){

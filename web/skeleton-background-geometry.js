@@ -32,9 +32,9 @@ export async function prepareBackgroundSkeleton(client,asset,previous,next,{skel
   const unchanged=previous&&equalData(previous.settings,next.settings)&&Boolean(asset?.skeletonOnly)===skeletonOnly&&equalData(geometryState(previous.authoring),geometryState(next.authoring));
   if(unchanged&&!reuseUnchanged)return null;
   const a=next.authoring,{bark_materials,...workbench}=a.workbench||{};
-  const authoring={...a,workbench,branch_library:[],branch_instances:[],leaf_material:undefined,sample_materials:undefined,tree_organs:{...a.tree_organs,units:[]},
+  const authoring={...a,workbench,branch_library:[],branch_instances:[],leaf_material:undefined,sample_materials:undefined,base_branch_assembly:undefined,tree_organs:{...a.tree_organs,units:[]},
     sculpt_layers:(structuralSculptLayers(a)||a.sculpt_layers).map(layer=>layer.operation?.type==='DUPLICATE'?{...layer,operation:{...layer.operation,records:(layer.operation.records||[]).filter(r=>!r.owner)}}:layer)};
-  const job={settings:next.settings,authoring,lodIndex:next.settings.preview_lod,options:{continuousBark:Boolean(skeletonOnly||a.branch_library.length||Object.keys(a.workbench?.trunk_forms?.branches||{}).length),hadInstances:skeletonOnly&&a.branch_instances.length>0}};
+  const job={settings:next.settings,authoring,lodIndex:next.settings.preview_lod,options:{continuousBark:Boolean(skeletonOnly||a.branch_library.length||Object.keys(a.workbench?.trunk_forms?.branches||{}).length),hadInstances:skeletonOnly&&a.branch_instances.length>0,hasBaseBranchAssembly:Boolean(a.base_branch_assembly)}};
   // Cache validity covers the entire actual worker job, including wind,
   // growth, unshown overrides and all operations. The support-only shortcut
   // above is never used as proof for reusing a previous computed result.

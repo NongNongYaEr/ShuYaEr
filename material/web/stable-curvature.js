@@ -27,11 +27,23 @@ export function buildStableCurvature(mesh,{topology=buildBrushTopology(mesh)}={}
 }
 export function sampleStableCurvature(field,mesh,{actualHeightMeters=10,radiusMeters=.18,maxVisits=2048}={}){
  if(!(actualHeightMeters>0&&radiusMeters>0))throw Error('稳定曲率的物理尺度无效。');const radius=radiusMeters/actualHeightMeters*mesh.height,filtered=new Float64Array(field.vertices.length);let truncatedVertices=0,maxVisited=0;
- for(const v of field.vertices){const queue=[v.id],seen=new Set(queue);let sum=0,weight=0,at=0;
-  for(;at<queue.length&&at<maxVisits;at++){const u=field.vertices[queue[at]],d2=dot(sub(u.p,v.p),sub(u.p,v.p)),w=u.area*Math.exp(-d2/Math.max(radius*radius*.5,1e-24));sum+=field.mean[u.id]*w;weight+=w;
-   for(const id of u.neighbors)if(!seen.has(id)){seen.add(id);const d=sub(field.vertices[id].p,v.p);if(dot(d,d)<=radius*radius)queue.push(id);}
+ const radiusSquared=radius*radius,variance=Math.max(radiusSquared*.5,1e-24),queue=new Uint32Array(field.vertices.length),seen=new Uint32Array(queue.length);
+ for(const v of field.vertices){
+  const marker=v.id+1,[x,y,z]=v.p;
+  queue[0]=v.id;seen[v.id]=marker;
+  let sum=0,weight=0,at=0,tail=1;
+  for(;at<tail&&at<maxVisits;at++){
+   const u=field.vertices[queue[at]],dx=u.p[0]-x,dy=u.p[1]-y,dz=u.p[2]-z;
+   const w=u.area*Math.exp(-(dx*dx+dy*dy+dz*dz)/variance);
+   sum+=field.mean[u.id]*w;weight+=w;
+   for(const id of u.neighbors){
+    if(seen[id]===marker)continue;
+    seen[id]=marker;
+    const p=field.vertices[id].p,px=p[0]-x,py=p[1]-y,pz=p[2]-z;
+    if(px*px+py*py+pz*pz<=radiusSquared)queue[tail++]=id;
+   }
   }
-  if(at<queue.length)truncatedVertices++;maxVisited=Math.max(maxVisited,at);filtered[v.id]=weight>0?sum/weight:field.mean[v.id];
+  if(at<tail)truncatedVertices++;maxVisited=Math.max(maxVisited,at);filtered[v.id]=weight>0?sum/weight:field.mean[v.id];
  }
  const signed=Float32Array.from(field.mapping,id=>filtered[id]*radius),convex=Float32Array.from(signed,v=>Math.min(1,Math.max(0,v))),concave=Float32Array.from(signed,v=>Math.min(1,Math.max(0,-v)));
  return{signed,convex,concave,metadata:{...field.metadata,actualHeightMeters,radiusMeters,maxVisited,truncatedVertices,confidence:truncatedVertices||field.metadata.unsupportedVertices?'limited':'supported',neighborhood:'connected surface within physical Euclidean radius; bounded visits recorded, never joins disconnected components'}};

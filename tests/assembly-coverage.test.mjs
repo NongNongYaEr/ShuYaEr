@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { findAssemblyGaps } from '../web/assembly-coverage.js';
-import { redistributeAssembly, recordGeneratedPlacements } from '../web/assembly-distribution.js';
+import { isPreservedAssemblyGap, redistributeAssembly, recordGeneratedPlacements } from '../web/assembly-distribution.js';
 import { seedAssemblyInstances, resizeAssemblyInstances } from '../web/branch-assembly.js';
 const bone=(id,parentId,order,x,z,length=1,extra={})=>({id,stableId:'B'+id,parentId,order,length,points:[[x,0,z],[x,0,z+length]],...extra});
 const shape={connector:{position:[0,0,0]},branches:[{points:[[0,0,0],[1,0,0]],start_radius:.02,end_radius:.01}]};
@@ -33,4 +33,66 @@ test('insufficient movable instances keep count and do not strip another carrier
 test('quantity increase uses empty tips before repeating occupied carriers',()=>{
  const a=state(),bs=branches(),single={MATURE:['A'],MIXED:[],YOUNG:[]};a.branch_instances=a.branch_instances.filter(i=>i.asset_id==='A');
  const next=resizeAssemblyInstances(a.branch_instances,single,library,a.branch_instances.length+3,bs,1000,50);assert.equal(next.length,a.branch_instances.length+3);assert.ok(next.slice(-3).every(i=>i.parent!=='B1'&&i.scale===1&&i.attach===.82));
+});
+
+test('quantity increase finds free stations between saved deletion gaps and keeps manual placements', () => {
+ const a = state(), bs = branches();
+ const manual = { ...a.branch_instances[0], attach: .15, assembly_manual: true };
+ a.branch_instances = [manual];
+ const parents = bs.slice(1).map(branch => branch.stableId);
+ const gaps = [.36, .5, .64, .78, .82, .9].map(t => ({ parents, start: t - .025, end: t + .025, role: 'ANY' }));
+ a.workbench.assembly_voids = [...gaps, ...structuredClone(gaps)];
+ const before = structuredClone(a);
+ const next = resizeAssemblyInstances(a.branch_instances, slots, library, 31, bs, 1000, bs.length, a);
+ assert.deepEqual(a, before);
+ assert.equal(next.length, 31);
+ assert.equal(next[0], manual);
+ assert.equal(new Set(next.map(instance => `${instance.parent}/${instance.attach}`)).size, next.length);
+ a.branch_instances = next;
+ recordGeneratedPlacements(a, next.slice(1).map(instance => instance.id));
+ redistributeAssembly(a, bs, slots);
+ assert.equal(a.branch_instances[0], manual);
+ assert.equal(a.branch_instances.length, next.length);
+ assert.ok(a.branch_instances.every(i => !isPreservedAssemblyGap(a, i.parent, i.attach, i.shootRole)));
+ assert.deepEqual(a.workbench.assembly_voids, before.workbench.assembly_voids);
+});
+
+test('a blocked preferred role uses another carrier without changing the requested source or role', () => {
+ const bs = [bone(0, -1, 0, 0, 0), bone(1, 0, 1, 1, 0), bone(2, 0, 1, 2, 0), bone(3, 0, 1, 3, 0)];
+ const a = state();
+ a.branch_instances = [];
+ a.workbench.assembly_voids = [{ parents: ['B1'], start: 0, end: 1, role: 'MATURE' }];
+ const twoRoles = { ...slots, YOUNG: [] };
+ const [added] = resizeAssemblyInstances([], twoRoles, library, 1, bs, 1000, bs.length, a);
+ assert.ok(['B2', 'B3'].includes(added.parent));
+ assert.equal(added.asset_id, 'A');
+ assert.equal(added.shootRole, 'MATURE');
+ assert.equal(added.attach, .82);
+});
+
+test('one free standard station does not concentrate a masked division on one branch', () => {
+ const bs = [bone(0, -1, 0, 0, 0), bone(1, 0, 1, 1, 0), bone(2, 0, 1, 2, 0), bone(3, 0, 1, 3, 0)];
+ const a = state();
+ a.branch_instances = [];
+ a.workbench.assembly_voids = [.36, .5, .64, .78, .82, .9].map(t => ({
+  parents: t === .82 ? ['B2', 'B3'] : ['B1', 'B2', 'B3'], start: t - .02, end: t + .02, role: 'MIXED',
+ }));
+ const mixedOnly = { MATURE:[], MIXED:['B'], YOUNG:[] };
+ const added = resizeAssemblyInstances([], mixedOnly, library, 12, bs, 1000, bs.length, a);
+ assert.equal(new Set(added.map(i => i.parent)).size, 3);
+ assert.equal(new Set(added.map(i => `${i.parent}/${i.attach}`)).size, added.length);
+ assert.ok(added.every(i => !isPreservedAssemblyGap(a, i.parent, i.attach, i.shootRole)));
+});
+
+test('a fully blocked role leaves the entire quantity change unapplied', () => {
+ const a = state(), bs = branches();
+ a.branch_instances = [];
+ const parents = bs.slice(1).map(branch => branch.stableId);
+ a.workbench.assembly_voids = [
+  { parents, start: 0, end: .55, role: 'MIXED' },
+  { parents, start: .55, end: 1, role: 'MIXED' },
+ ];
+ const before = structuredClone(a);
+ assert.throws(() => resizeAssemblyInstances(a.branch_instances, slots, library, 2, bs, 1000, bs.length, a), /空隙/);
+ assert.deepEqual(a, before);
 });

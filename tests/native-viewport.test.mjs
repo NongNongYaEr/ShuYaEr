@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../web/vendor/three.module.min.js';
-import {packNativePacket,nativeRetryResources,nativeGeometry,nativeLineIndices,nativeDrawRanges,createNativeViewport,nativeMaterialUnsupported,nativeAttributeVersion,planNativeResourceBatch,createNativeMaterialTable} from '../web/native-viewport.js';
+import {packNativePacket,nativeRetryResources,nativeGeometry,nativeLineIndices,nativeDrawRanges,createNativeViewport,nativeMaterialUnsupported,nativeAttributeVersion,planNativeResourceBatch,createNativeMaterialTable,createNativeResourceTransfer,nextNativeResourceChunk} from '../web/native-viewport.js';
 
 test('native packets align typed sections, preserve original buffers and validate offsets after UTF-8 headers grow',()=>{
   const vertices=new Float32Array([1.25,-2,3,4]),indices=new Uint32Array([3,2,1]),a={},b={};
@@ -31,6 +31,24 @@ test('a resource that changes every input frame is submitted together with that 
 });
 test('large uploads preserve a complete resource and defer the scene without exceeding the packet bound',()=>{
  const item=n=>{const spec={},bytes=new Uint8Array(n);return {resource:{id:'large',type:'buffer',data:spec},parts:[{spec,bytes}]};};const scene={description:'x'.repeat(2500)},batch=planNativeResourceBatch([item(1024)],4096,scene);assert.equal(batch.complete,false);assert.equal(batch.selected.length,1);assert(packNativePacket({version:1,resources:batch.selected.map(r=>r.resource)},batch.parts).byteLength<=4096);assert.throws(()=>planNativeResourceBatch([item(5000)],4096,{}),/容量/);
+});
+test('resource chunks preserve typed-array offsets, section boundaries and retry bytes',()=>{
+ const a={},b={},vertices=Uint8Array.from({length:2308},(_,i)=>i%251).subarray(4),indices=Uint32Array.of(0,31,1);
+ const item={resource:{id:'大型网格',type:'geometry',vertices:a,indices:b},parts:[{spec:a,bytes:vertices},{spec:b,bytes:indices}],mutable:true};
+ const transfer=createNativeResourceTransfer(item),expected=Buffer.concat([vertices,new Uint8Array(indices.buffer)]),result=[];
+ vertices.fill(42);indices.fill(42);
+ while(transfer.offset<transfer.total){
+   const chunk=nextNativeResourceChunk(transfer,5120),packet=packNativePacket({version:1,...chunk.metadata},chunk.parts);
+   const retry=nextNativeResourceChunk(transfer,5120);
+   assert.deepEqual(packNativePacket({version:1,...retry.metadata},retry.parts),packet);
+   const size=new DataView(packet.buffer).getUint32(0,true),{resourceChunk}=JSON.parse(new TextDecoder().decode(packet.subarray(4,4+size)));
+   assert.equal(resourceChunk.offset,transfer.offset);assert(packet.byteLength<=5120);
+   if(transfer.offset===0){assert.equal(resourceChunk.total,expected.length);assert.deepEqual(resourceChunk.resource.indices,{offset:2304,bytes:12});}
+   else assert.equal(resourceChunk.resource,undefined);
+   result.push(packet.subarray(resourceChunk.data.offset,resourceChunk.data.offset+resourceChunk.data.bytes));
+   transfer.offset=chunk.end;
+ }
+ assert.deepEqual(Buffer.concat(result),expected);assert.equal(result.length,4);
 });
 test('replacing a zero-version attribute or instance array invalidates the native resource identity',()=>{
  const first=new THREE.Float32BufferAttribute([0,0,0],3),second=new THREE.Float32BufferAttribute([1,0,0],3);assert.equal(first.version,second.version);assert.notEqual(nativeAttributeVersion(first),nativeAttributeVersion(second));const old=nativeAttributeVersion(first);first.array=new Float32Array([4,0,0]);assert.notEqual(nativeAttributeVersion(first),old);assert.equal(nativeAttributeVersion(first),nativeAttributeVersion(first));
@@ -88,3 +106,84 @@ test('a covering resource workspace suspends drawing and resumes the same browse
 });
 import {nativeRuntimeCompatibility} from '../web/native-viewport.js';
 test('native runtime compatibility rejects a stale renderer before scene submission',()=>{assert.match(nativeRuntimeCompatibility({ready:true,frames:0}),/运行库.*不匹配/);assert.match(nativeRuntimeCompatibility({material_table_protocol:1}),/运行库.*不匹配/);assert.equal(nativeRuntimeCompatibility({material_table_protocol:1,retained_scene_protocol:1,ready:false}),null);assert.equal(nativeRuntimeCompatibility({material_table_protocol:1,retained_scene_protocol:1,ready:true}),null);});
+
+test('DX12 keeps the last frame visible while sending a replacement and waits for its current presentation', async () => {
+  const posted = [], listeners = new Map(), alphas = [];
+  const buffer = new ArrayBuffer(8192);
+  const host = {
+    addEventListener: (type, listener) => listeners.set(type, listener),
+    removeEventListener: type => listeners.delete(type),
+    postMessage(value) {
+      const message = JSON.parse(value);
+      if (message.action === 'packet') {
+        const size = new DataView(buffer).getUint32(0, true);
+        message.packet = JSON.parse(new TextDecoder().decode(new Uint8Array(buffer, 4, size)));
+      }
+      posted.push(message);
+    },
+  };
+  const classes = new Set(), classList = {add: value => classes.add(value), remove: value => classes.delete(value)};
+  const node = () => ({textContent:'',classList,setAttribute(){},querySelector(){return node();},append(){},remove(){}});
+  const doc = {body:node(),documentElement:node(),createElement:node,querySelector:()=>null};
+  const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera();
+  let asset = 'base-14', alpha = 1, view;
+  const renderer = {getClearColor: color => color.set('#19211c'), getClearAlpha: () => alpha,
+    setClearAlpha: value => {alpha = value;}, render: () => alphas.push(alpha)};
+  const canvas = {parentElement:node(),getBoundingClientRect:()=>({x:0,y:0,width:640,height:480})};
+  const message = (action, fields = {}) => listeners.get('message')({data:{topic:'branchforge-native',action,...fields}});
+  const ack = () => message('ack', {accepted:true});
+  const protocol = {ready:true,material_table_protocol:1,retained_scene_protocol:1,resource_chunk_protocol:1};
+  const present = (packet, id) => message('status', {status:{...protocol,frames:1,
+    revision:packet.revision,scene_session:packet.sceneSession,asset_identity:id}});
+  const nativePacket = () => posted.findLast(item => item.action === 'packet').packet;
+  globalThis.window = {chrome:{webview:host},__branchForgeNativeHost:true,addEventListener(){}};
+  globalThis.document = doc;
+  globalThis.devicePixelRatio = 1;
+  try {
+    view = createNativeViewport({scene,camera,renderer,canvas,assetIdentity:()=>asset});
+    listeners.get('sharedbufferreceived')({getBuffer:()=>buffer});
+    message('status', {status:protocol});
+    view.render();
+    const initial = nativePacket();
+    assert.equal(initial.scene.assetIdentity, asset);
+    ack();present(initial, asset);
+    view.render();
+    assert.equal(view.stats.active, true);
+    assert.equal(alphas.at(-1), 0);
+
+    asset = 'base-13';
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(400 * 3), 3));
+    const model = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial());
+    scene.add(model);
+    let replacement;
+    for (let i = 0; i < 16; i++) {
+      view.render();
+      const packet = nativePacket();
+      assert.equal(view.stats.active, false);
+      assert.equal(view.stats.presentation, 'pending');
+      assert.equal(alphas.at(-1), 0);
+      assert.equal(classes.has('native-viewport-active'), true);
+      ack();
+      if (packet.scene) { replacement = packet; break; }
+      assert.ok(packet.resourceChunk);
+      present(initial, 'base-14');
+    }
+    assert.equal(replacement?.scene.assetIdentity, asset);
+    assert.equal((await view.waitForPresentation({timeout:0})).presentationReady, false);
+    present(replacement, asset);
+    assert.equal(view.stats.active, true);
+    assert.equal((await view.waitForPresentation({timeout:0})).presentationReady, true);
+    message('error', {message:'real transport failure'});
+    view.render();
+    assert.equal(view.stats.active, false);
+    assert.equal(classes.has('native-viewport-active'), false);
+    assert.equal(alphas.at(-1), 1);
+    geometry.dispose();model.material.dispose();
+  } finally {
+    view?.dispose();
+    delete globalThis.window;
+    delete globalThis.document;
+    delete globalThis.devicePixelRatio;
+  }
+});

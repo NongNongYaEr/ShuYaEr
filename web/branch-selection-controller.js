@@ -20,7 +20,7 @@ import { TransformControls } from './vendor/TransformControls.js';
 import { SCULPT_TOOLS, createSculptSnapshot, createMeshPreview } from './tree-sculpt.js';
 import { SELECTION_TOOLS, TRANSFORM_TOOLS, descendants, polylineInRegion, transformBundles, bundleOverrides, createIsolationView } from './branch-selection.js';
 
-export function createBranchSelectionController({ canvas, camera, controls, modelRoot, skeletonRoot, getAsset, getLeafSources = () => [], getDuplicateAsset = getAsset, releaseDuplicateAsset = () => {}, getAuthoring, getSelection, setSelection, getWorkspace = () => 'TREE', selectableBranch = () => true, selectionId = b => b.stableId, getRegionHits = null, getBoxSelection = () => null, getSelectedPoint = () => null, getSelectionExclusions = () => new Set(), getEditTargets = null, getOutlineTargets = () => null, includeSelectionChildren = () => false, temporarySelectionDone = () => {}, temporaryClick = () => {}, renderMountPreview = () => {}, renderPointSlidePreview = () => {}, getTool, transact, commitPreview, status }) {
+export function createBranchSelectionController({ canvas, camera, controls, modelRoot, skeletonRoot, getAsset, getLeafSources = () => [], getDuplicateAsset = getAsset, releaseDuplicateAsset = () => {}, getAuthoring, getSelection, setSelection, getWorkspace = () => 'TREE', selectableBranch = () => true, selectionId = b => b.stableId, getRegionHits = null, getBoxSelection = () => null, getSelectedPoint = () => null, getSelectionExclusions = () => new Set(), getEditTargets = null, getOutlineTargets = () => null, editingBlocked = () => false, hideSelectionPreview = () => false, includeSelectionChildren = () => false, temporarySelectionDone = () => {}, temporaryClick = () => {}, renderMountPreview = () => {}, renderPointSlidePreview = () => {}, getTool, transact, commitPreview, status }) {
   const $ = (id) => document.getElementById(id);
   const proxy = new THREE.Object3D();
   const outline = new THREE.Group();
@@ -47,7 +47,7 @@ export function createBranchSelectionController({ canvas, camera, controls, mode
   const overlay = $('regionOverlay');
   const path = $('regionPath');
   const mode = () => ({ BUNDLE_MOVE: 'translate', BUNDLE_ROTATE: 'rotate', BUNDLE_SCALE: 'scale' }[getTool()] || 'translate');
-  const busy = () => !getAsset() || getAsset().group.userData.pending_rebuild || !$('busyOverlay').hidden;
+  const busy = () => editingBlocked() || !getAsset() || getAsset().group.userData.pending_rebuild || !$('busyOverlay').hidden;
   // Selection belongs to the saved graph. A preview LOD can remove an internal
   // twig or an entire tier without removing its complete unit from the project.
   const available = () => getAsset()?.masterBranches.filter((branch) => (!visibleIds || visibleIds.has(branch.stableId)) && selectableBranch(branch)) || [];
@@ -72,6 +72,7 @@ export function createBranchSelectionController({ canvas, camera, controls, mode
     $('isolationBadge').hidden = !visibleIds;
   }
   function drawOutline(branches = getAsset()?.masterBranches, targets = null, transforms = null) {
+    if (hideSelectionPreview()) { outline.visible = false; return; }
     const entries=[];
     const selected = getSelection();
     const sculpting = SCULPT_TOOLS.has(getTool());
@@ -108,6 +109,12 @@ export function createBranchSelectionController({ canvas, camera, controls, mode
     ['X', 'Y', 'Z'].forEach((axis) => { $(`bundlePivot${axis}`).value = proxy.position[axis.toLowerCase()].toFixed(4); });
   }
   function refresh() {
+    if (hideSelectionPreview()) {
+      outline.visible = false;
+      gizmo.detach();
+      gizmo.enabled = false;
+      return;
+    }
     if(pendingCopies?.every(id=>getAsset()?.masterBranches.some(b=>b.stableId===id))){const ids=pendingCopies;pendingCopies=null;setSelection(new Set(ids));return;}
     if (drag || region || mountDrag) return;
     updateVisibility();
@@ -327,6 +334,7 @@ export function createBranchSelectionController({ canvas, camera, controls, mode
   }
   $('mountRotationHandles').addEventListener('change', () => { cancel(); refresh(); });
   document.addEventListener('branch-mount-edit', event => {
+    if (editingBlocked()) return;
     const layer = getAuthoring().sculpt_layers.find(l => l.id === event.detail);
     if (!layer?.operation?.root) return;
     cancel(); setSelection(new Set([layer.operation.root]));
@@ -767,6 +775,7 @@ export function createBranchSelectionController({ canvas, camera, controls, mode
     get mounting() { return Boolean(mountDrag || drag?.mountRotation || drag?.pointRotation); },
     beginMount,
     get debug() { return { selected: [...getSelection()], isolated: visibleIds ? [...visibleIds] : null, dragging: Boolean(drag), pivot: proxy.position.toArray(), gizmo }; },
+    get isolationRoots() { return isolatedRoots ? [...isolatedRoots] : null; },
     isVisible(id) { return !visibleIds || visibleIds.has(id); },
     refresh, cancel, keyboardTransform, keyboardDuplicate, drawOutline,
     isolate(ids) { cancel(); isolatedRoots=ids?.length?new Set(ids):null; refresh(); },

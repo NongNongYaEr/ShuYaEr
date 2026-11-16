@@ -1,5 +1,5 @@
 const fs = require('fs'), path = require('path'), assert = require('node:assert/strict'), crypto = require('crypto');
-const { chromium } = require('playwright');
+const { chromium } = require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 
 // One isolated run per revision: identical original documents, camera, pointer
 // coordinates and brush parameters. Instrument only public methods in this

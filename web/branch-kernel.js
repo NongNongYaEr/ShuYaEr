@@ -1,3 +1,4 @@
+import {buildTreeLightGroup} from './tree-light-mesh.js';
 import {assemblyBranchLimit} from './assembly-budget.js';
 import {deriveLodBranches} from './branch-lod.js';
 import {importedTrunkHostIds,buildImportedTrunkMeshes,disposeImportedTrunkTextures} from './imported-trunk-runtime.js';
@@ -20,7 +21,7 @@ import { sampleLeafMaterial, sampleLeafMaterialName, normalizeLeafMaterial } fro
 import { resolveSampleMaterial, sampleMaterialId } from './sample-materials.js';
 import { completeInstanceMatrix } from './branch-instance-matrix.js';
 import { branchMountAt,transportMountFrames } from './branch-mount-frame.js';
-import { transformBranchShape, sampleTangent, resolveInstanceShape, resolveInstanceAsset } from './branch-workbench-data.js';
+import { equalData, transformBranchShape, sampleTangent, resolveInstanceShape, resolveInstanceAsset } from './branch-workbench-data.js';
 import {packMeshUnitImages} from './mesh-unit-state.js';
 import { sampleFoliagePlacements, localSampleBranches, mountSamplePlacement, sampleInstanceUnitEditing } from './sample-foliage.js';
 import { sectionAt, branchRadiusAt, branchSampleTs } from './branch-shaping.js';
@@ -31,12 +32,15 @@ import { normalizeTrunkForm, trunkFormForBranch, trunkFormSectionAt, trunkFormRa
 import { createTrunkDetailSampler } from './trunk-details.js';
 import { createTrunkMeshSampling } from './trunk-mesh-density.js';
 import {applyLegacyTrunkRotation} from './trunk-legacy-rotation.js';
-import { barkMaterialForBranch, createBarkSurfaceMaterial } from './bark-materials.js';
+import { barkMaterialForBranch, createBarkSurfaceMaterial, DEFAULT_BARK_PRESET } from './bark-materials.js';
+import { BASE_BRANCH_GUIDE, baseBranchGeometry, baseBranchAnchorFrame, baseBranchUnitMatrix, baseBranchUnitReach, baseBranchWoodSize, hasBaseBranchAtlas, normalizeBaseBranchAssembly } from './base-branch-assembly.js';
+import { projectUntexturedTrunkBarkUV } from './whole-tree-shared-bark.js';
 import { applyProceduralGrowth } from './procedural-growth.js';
 import { DEFAULT_AUTHORING, evaluateProfile, normalizeAuthoring, stableSeed } from './authoring-state.js';
 import { generationSlots, applySculptLayerSteps } from './generator-geometry.js';
 import { applyBranchSymmetry } from './branch-symmetry.js';
-import { attachmentLayerMatches, evaluateTimeline, resamplePolyline } from './v4-tools.js';
+import { attachmentLayerMatches, evaluateTimeline, resamplePolyline, simplifyCurvePoints } from './v4-tools.js';
+import { isZeroAreaTriangle } from './triangle-area.js';
 import { createVineShape } from './vine-geometry.js';
 import { vineSettings } from './vine-data.js';
 import { createFloweringShape } from './flowering-shape.js';
@@ -52,6 +56,8 @@ import {finishBuildSteps,runBuildSteps} from './cooperative-build.js';
 import { localBranchShape } from './local-branch-geometry.js';
 import { attachmentOverlapRatio } from './attachment-overlap.js';
 import {smoothStructuralCurves} from './structural-curve-upgrade.js';
+import {markNativeModelChanged} from './native-model-changes.js';
+import {setNativePreviewPose} from './native-preview-geometry.js';
 
 export const GENERATOR_VERSION = '4.0.0';
 export const PROJECT_FORMAT = 'ProceduralBranchProject';
@@ -603,6 +609,16 @@ export function branchInstanceFrame(instance, parent, settings) {
   return { position, direction, scale: instance.scale * (1 + (createRng(instance.seed)() * 2 - 1) * instance.variation) };
 }
 
+function transformCompleteShapeRecords(shape, matrix, radiusScale) {
+  const scale = new THREE.Vector3().setFromMatrixScale(matrix).x;
+  const transform = p => new THREE.Vector3(...p).applyMatrix4(matrix).toArray();
+  return shape.branches.map(record => ({
+    ...record, points: record.points.map(transform), knots: record.knots?.map(transform),
+    length: record.length * scale, start_radius: record.start_radius * scale * radiusScale,
+    end_radius: record.end_radius * scale * radiusScale,
+  }));
+}
+
 function buildBranchGraph(settings, state, rawAuthoring, hadInstances = false) {
   return finishBuildSteps(buildBranchGraphSteps(settings,state,rawAuthoring,hadInstances));
 }
@@ -816,8 +832,8 @@ function* buildBranchGraphSteps(settings, state, rawAuthoring, hadInstances = fa
     while(progress){progress=false;for(let n=0;n<prefabPending.length;n++){
       const instance=prefabPending[n],parent=branches.find(b=>b.stableId===instance.parent),shape=resolveInstanceShape(instance,authoring.branch_library);
       if(!parent||!shape||!branches.some(b=>b.stableId===instance.prefab_root))continue;
-      const matrix=completeInstanceMatrix(instance,shape,parent,settings,branchInstanceFrame),scale=new THREE.Vector3().setFromMatrixScale(matrix).x;
-      const records=shape.branches.map(r=>({...r,points:r.points.map(p=>new THREE.Vector3(...p).applyMatrix4(matrix).toArray()),knots:r.knots?.map(p=>new THREE.Vector3(...p).applyMatrix4(matrix).toArray()),length:r.length*scale,start_radius:r.start_radius*scale*instance.radius_scale,end_radius:r.end_radius*scale*instance.radius_scale}));
+      const matrix=completeInstanceMatrix(instance,shape,parent,settings,branchInstanceFrame);
+      const records=transformCompleteShapeRecords(shape,matrix,instance.radius_scale);
       const startIndex=branches.length;appendShape(records,instance.id,parent,instance.attach,instance.junction);
       for(const branch of branches.slice(startIndex)){branch.shootRole=instance.shootRole;branch.mountMatrix=branchMountAt(parent,instance.attach)?.clone()||new THREE.Matrix4();if(instance.trunk_anchor)branch.trunkAnchorPlacement=matrix;}
       prefabPending.splice(n--,1);progress=true;
@@ -828,12 +844,18 @@ function* buildBranchGraphSteps(settings, state, rawAuthoring, hadInstances = fa
     const shape = resolveInstanceShape(instance, authoring.branch_library);
     const parent = branches.find((b) => b.stableId === instance.parent);
     if (!shape || (instance.parent && !parent)) continue;
-    const { position, direction, scale } = branchInstanceFrame(instance, parent, settings);
-    const records = transformBranchShape(shape, position, direction, scale, instance.roll);
-    records.forEach((r) => { r.start_radius *= instance.radius_scale; r.end_radius *= instance.radius_scale; });
+    const base = resolveInstanceAsset(instance, authoring.branch_library)?.sample?.authoring?.base_branch_assembly;
+    const complete = base ? completeInstanceMatrix(instance, shape, parent, settings, branchInstanceFrame) : null;
+    let records;
+    if (complete) records = transformCompleteShapeRecords(shape, complete, instance.radius_scale);
+    else {
+      const { position, direction, scale } = branchInstanceFrame(instance, parent, settings);
+      records = transformBranchShape(shape, position, direction, scale, instance.roll);
+      records.forEach(r => { r.start_radius *= instance.radius_scale; r.end_radius *= instance.radius_scale; });
+    }
     const startIndex = branches.length;
     appendShape(records, instance.id, parent, instance.attach, instance.junction);
-    const trunkPlacement=instance.trunk_anchor?completeInstanceMatrix(instance,shape,parent,settings,branchInstanceFrame):null;
+    const trunkPlacement=instance.trunk_anchor?(complete || completeInstanceMatrix(instance,shape,parent,settings,branchInstanceFrame)):null;
     for (const branch of branches.slice(startIndex)){branch.shootRole = instance.shootRole;if(trunkPlacement)branch.trunkAnchorPlacement=trunkPlacement;}
     yield {stage:'graph-instances'};
   }
@@ -1364,21 +1386,31 @@ function expandFoliagePlacements(placements, branches, settings) {
   return expanded.slice(0, settings.max_leaves);
 }
 
-function assignLookupUvs(records, elementCount) {
+function lookupDimensions(elementCount) {
   const width = Math.min(256, Math.max(1, 2 ** Math.ceil(Math.log2(Math.ceil(Math.sqrt(Math.max(1, elementCount)))))));
   const height = Math.max(1, Math.ceil(elementCount / width));
+  return { width, height };
+}
+
+function lookupAttribute(record, {width,height}) {
+  const uvs = new Float32Array(record.elementIndices.length * 2);
+  record.elementIndices.forEach((elementIndex,i) => {
+    uvs[i * 2] = ((elementIndex % width) + .5) / width;
+    uvs[i * 2 + 1] = (Math.floor(elementIndex / width) + .5) / height;
+  });
+  return record.mesh?.isInstancedMesh ? new THREE.InstancedBufferAttribute(uvs,2) : new THREE.BufferAttribute(uvs,2);
+}
+
+function assignLookupUvs(records, elementCount) {
+  const dimensions = lookupDimensions(elementCount);
   for (const record of records) {
-    const uvs = new Float32Array(record.elementIndices.length*2);
-    record.elementIndices.forEach((elementIndex,i) => {
-      uvs[i*2]=((elementIndex%width)+.5)/width;uvs[i*2+1]=(Math.floor(elementIndex/width)+.5)/height;
-    });
-    record.geometry.setAttribute('uv1', record.mesh?.isInstancedMesh ? new THREE.InstancedBufferAttribute(uvs,2) : new THREE.BufferAttribute(uvs, 2));
+    record.geometry.setAttribute('uv1', lookupAttribute(record,dimensions));
     const materialUv = record.geometry.getAttribute('uv');
     record.geometry.setAttribute('uv2', materialUv
       ? materialUv.clone()
       : new THREE.Float32BufferAttribute(new Array(record.geometry.attributes.position.count * 2).fill(0), 2));
   }
-  return { width, height };
+  return dimensions;
 }
 
 function buildLeafMesh(branches, placements, settings, sourceGeometry, material, elements, sourceIndex = 0, sourceName = '', calibration = {}, instanced = false) {
@@ -1728,39 +1760,79 @@ function addJunctionCollars(group, branches, settings, material) {
   return records;
 }
 
-function hasDegenerateArea(a,b,c) {
-  b.sub(a); c.sub(a);
-  // Relative area keeps valid, uniformly small flowers valid.
-  const edgeProduct = b.lengthSq() * c.lengthSq();
-  return b.cross(c).lengthSq() <= Math.max(1e-24, edgeProduct * 1e-12);
+function zeroAreaFace(position, a, b, c) {
+  return isZeroAreaTriangle(position.getX(a),position.getY(a),position.getZ(a),
+    position.getX(b),position.getY(b),position.getZ(b),position.getX(c),position.getY(c),position.getZ(c));
 }
 
-// The dedicated export build owns these imported primitives. Keep the vertex
-// buffer and source-vertex mapping intact for texture coordinates and skinning.
-export function removeDegenerateImportedFaces(group) {
-  let removed = 0;
-  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
-  group.traverse(object=>{
-    if(!object.isMesh || !object.userData.imported_trunk)return;
-    const geometry = object.geometry, index = geometry.index, position = geometry.getAttribute('position');
-    if(!index || geometry.groups.length || !position)return;
-    const retained = new index.array.constructor(index.count);
-    let length = 0;
-    for(let i=0;i<index.count;i+=3){
-      const ia=index.getX(i),ib=index.getX(i+1),ic=index.getX(i+2);
-      a.fromBufferAttribute(position,ia);
-      b.fromBufferAttribute(position,ib);
-      c.fromBufferAttribute(position,ic);
-      if(hasDegenerateArea(a,b,c))continue;
-      retained[length++]=ia;
-      retained[length++]=ib;
-      retained[length++]=ic;
+function repairedExportMesh(geometry) {
+  const position = geometry.getAttribute('position'), index = geometry.index;
+  const count = index?.count ?? position.count;
+  if (count % 3) return null;
+  const { start, count: drawCount } = geometry.drawRange;
+  const validRange = ({ start, count: length }) => Number.isInteger(start) && start >= 0 && start % 3 === 0 && start <= count
+    && (length === Infinity || Number.isInteger(length) && length >= 0 && length % 3 === 0);
+  if (!validRange(geometry.drawRange) || !geometry.groups.every(validRange)) return null;
+  const Index = index?.array.constructor ?? (position.count <= 65536 ? Uint16Array : Uint32Array);
+  const retained = new Index(count), offsets = new Uint32Array(count / 3 + 1);
+  const read = corner => index ? index.getX(corner) : corner;
+  let length = 0;
+  for (let corner = 0; corner < count; corner += 3) {
+    const a = read(corner), b = read(corner + 1), c = read(corner + 2);
+    if (!zeroAreaFace(position,a,b,c)) {
+      retained[length++] = a;
+      retained[length++] = b;
+      retained[length++] = c;
     }
-    if(!length || length===index.count)return;
-    geometry.setIndex(new THREE.BufferAttribute(retained.slice(0,length),1));
-    removed += (index.count-length)/3;
+    offsets[corner / 3 + 1] = length;
+  }
+  if (!length || length === count) return null;
+  const remap = corner => offsets[Math.min(corner,count) / 3];
+  const groups = geometry.groups.map(group => ({...group,start:remap(group.start),count:remap(group.start+group.count)-remap(group.start)})).filter(group => group.count);
+  if (geometry.groups.length && !groups.length) return null;
+  const copy = geometry.clone();
+  copy.setIndex(new THREE.BufferAttribute(retained.slice(0,length),1));
+  copy.clearGroups();
+  for (const group of groups) copy.addGroup(group.start,group.count,group.materialIndex);
+  copy.setDrawRange(remap(start),drawCount===Infinity?Infinity:remap(start+drawCount)-remap(start));
+  return { geometry: copy, removedFaces: (count - length) / 3 };
+}
+
+const exportGeometryRepairs = new WeakMap();
+
+// The caller owns an export build. Swap only its mesh references, because some
+// builds share geometry with the editor or with another export plan.
+export function repairExportAssetGeometry(asset) {
+  const existing = exportGeometryRepairs.get(asset);
+  if (existing) return existing.report;
+  if (!asset.report.degenerate_faces) return { removedFaces: 0, remainingFaces: 0 };
+  const copies = new Map(), replaced = [];
+  const result = { removedFaces: 0, remainingFaces: asset.report.degenerate_faces };
+  exportGeometryRepairs.set(asset, { report: result, copies, replaced });
+  asset.group.traverse(object => {
+    if (!object.isMesh || !object.geometry?.getAttribute('position')) return;
+    const original = object.geometry;
+    const known = asset.geometryQualityCache?.get(original);
+    if (known?.degenerate === 0) return;
+    if (!copies.has(original)) copies.set(original,repairedExportMesh(original));
+    const copy = copies.get(original);
+    if (!copy) return;
+    replaced.push({ object, original });
+    object.geometry = copy.geometry;
+    result.removedFaces += copy.removedFaces;
   });
-  return removed;
+  if (!result.removedFaces) return result;
+  refreshExportGeometryReport(asset);
+  result.remainingFaces = asset.report.degenerate_faces;
+  return result;
+}
+
+export function refreshExportGeometryReport(asset) {
+  const report = asset.report;
+  const quality = analyzeGroup(asset.group,asset.settings,asset.geometryQualityCache);
+  const extraWarnings = report.warnings.filter(message => !/^(?:三角面 .+ 超过预算 |\d+ 个(?:退化三角面|无效顶点|网格缺少 ))/.test(message));
+  Object.assign(report,quality,{ warnings: [...new Set([...quality.warnings,...extraWarnings])] });
+  if (report.attachment_overlap_ratio > report.attachment_overlap_limit) report.ok = false;
 }
 
 export function analyzeGroup(group, settings = DEFAULT_SETTINGS, geometryCache = null) {
@@ -1777,9 +1849,6 @@ export function* analyzeGroupSteps(group, settings = DEFAULT_SETTINGS, geometryC
   let missingNormals = 0;
   let missingTangents = 0;
   const materials = new Set();
-  const a = new THREE.Vector3();
-  const b = new THREE.Vector3();
-  const c = new THREE.Vector3();
   group.updateMatrixWorld(true);
   const meshes=[];group.traverse(object=>{if(object.isMesh&&object.geometry)meshes.push(object);});
   for(const object of meshes){
@@ -1809,10 +1878,7 @@ export function* analyzeGroupSteps(group, settings = DEFAULT_SETTINGS, geometryC
       }
       const read = (value) => index ? index.getX(value) : value;
       for (let face = 0; face < triangleCount; face += 1) {
-        a.fromBufferAttribute(position, read(face * 3));
-        b.fromBufferAttribute(position, read(face * 3 + 1));
-        c.fromBufferAttribute(position, read(face * 3 + 2));
-        if (hasDegenerateArea(a,b,c)) quality.degenerate += 1;
+        if (zeroAreaFace(position,read(face * 3),read(face * 3 + 1),read(face * 3 + 2))) quality.degenerate += 1;
       }
       geometryCache?.set(geometry, quality);
     }
@@ -1860,12 +1926,15 @@ export function createTrunkFormPreviewGeometry(branch,settings,form,lodIndex=0,o
 
 // Structural projection only: complete source meshes and images never enter
 // this worker job. The same graph and LOD routines remain authoritative.
-export function createStructuralSweepJobs(rawSettings,rawAuthoring,lodIndex=0,{continuousBark=true,hadInstances=false}={}){
+export function createStructuralSweepJobs(rawSettings,rawAuthoring,lodIndex=0,{continuousBark=true,hadInstances=false,hasBaseBranchAssembly=Boolean(rawAuthoring?.base_branch_assembly)}={}){
   let settings=normalizeSettings({...rawSettings,preview_lod:lodIndex});
   const authoring=normalizeAuthoring(rawAuthoring,settings.seed);settings={...applyTimeline(vineSettings(settings,authoring.vine),authoring),wind_profile:authoring.wind_profile};
   const graph=buildBranchGraph(settings,stateFactors(settings),authoring,hadInstances),lod=LOD_PROFILES[clamp(lodIndex,0,3)];
   const adjusted=authoring.recipe.tags.includes('NATURAL_BRANCH_V2')||authoring.recipe.tags.includes('CN_TREE_STARTER')&&authoring.recipe.tags.includes('GINKGO')?{...lod,maxLevelOffset:Math.max(-1,lod.maxLevelOffset)}:lod;
   const imported=importedTrunkHostIds(authoring);
+  // The assembled branch already has its own authored mesh. The worker still
+  // needs its curve in branch_shape for any other branches growing from it.
+  if(hasBaseBranchAssembly)imported.add(BASE_BRANCH_GUIDE);
   return deriveLodBranches(graph,settings,adjusted).filter(b=>!imported.has(b.stableId)&&!b.unitOwner&&!b.instanceId&&!b.sourceAssetId&&!b.copySnapshot&&!b.localBundle).map(branch=>({id:branch.stableId,branch:encodeSweepBranch(branch),form:branch.trunkForm||null,lodIndex,settings,adaptiveCurveDetail:settings.curvature_detail*lod.segment,radialSegments:Math.max(4,Math.round(settings.radial_segments*lod.radial)),continuousBark:continuousBark&&(!branch.trunkForm||isDirectTrunkForm(branch.trunkForm))}));
 }
 
@@ -1902,7 +1971,7 @@ export function createBranchCurveReference(rawSettings={},rawAuthoring={}){
 }
 export function buildBranchReferenceCurves(rawSettings={},rawAuthoring={},options={}){return createBranchCurveReference(rawSettings,rawAuthoring)(options.owners||null);}
 
-export function upgradeStructuralCurves(rawSettings={},rawAuthoring={}){
+export function upgradeStructuralCurves(rawSettings={},rawAuthoring={}, {compactTrunkControls=false}={}){
   let settings=normalizeSettings({...rawSettings,preview_lod:0});
   const authoring=normalizeAuthoring(rawAuthoring,settings.seed);
   if(!authoring.branch_shape||authoring.vine)return {authoring,upgraded:[],skipped:[]};
@@ -1910,6 +1979,19 @@ export function upgradeStructuralCurves(rawSettings={},rawAuthoring={}){
   // attachment dependencies. It allocates no source meshes or textures.
   settings={...applyTimeline(vineSettings(settings,authoring.vine),authoring),wind_profile:authoring.wind_profile};
   const branches=buildBranchGraph(settings,stateFactors(settings),authoring),result=smoothStructuralCurves(branches,authoring);
+  if(compactTrunkControls){
+    const trunk=authoring.branch_shape.branches[0],limit=10;
+    const root=branches.find(branch=>branch.stableId===trunk.id);
+    const migration=result.layers.find(layer=>layer.operation?.root===trunk.id)?.operation;
+    const override=authoring.overrides[trunk.id];
+    const hasEdits=override?.curve_knots?.length||override?.locked||override?.pinned_points?.length||override?.sculpt_mask?.length||
+      authoring.sculpt_layers.some(layer=>layer.branches[trunk.id]||layer.operation?.root===trunk.id||layer.operation?.targets?.includes(trunk.id));
+    if(trunk.knots.length>limit&&root&&!root.importedTrunkHost&&!hasEdits&&(migration||trunk.sample_times)){
+      // Keep the legacy fit knots so the smoothed axis and descendant mounts agree with older builds.
+      if(migration?.knots.length>limit)migration.edit_knot_limit=limit;
+      trunk.knots=simplifyCurvePoints(trunk.knots,Number.MAX_VALUE,[],limit);
+    }
+  }
   if(!result.layers.length)return {authoring,upgraded:[],skipped:result.skipped};
   const sculpt_layers=[...authoring.sculpt_layers,...result.layers];
   return {authoring:normalizeAuthoring({...authoring,sculpt_layers,active_sculpt_layer:sculpt_layers.at(-1).id},settings.seed,authoring),upgraded:result.upgraded,skipped:result.skipped};
@@ -1932,6 +2014,245 @@ function assemblyBuildHelpers(branchGeometries){
     graph:(s,a)=>buildBranchGraph(s,stateFactors(s),a),graphSteps:(s,a)=>buildBranchGraphSteps(s,stateFactors(s),a),overlap:attachmentOverlapRatio,allows:foliageMasksAllow,
   };
 }
+
+function baseBranchMounts(authoring, branches, settings) {
+  const mounts = new Map();
+  if (authoring.base_branch_assembly) {
+    mounts.set(BASE_BRANCH_GUIDE, { assembly: authoring.base_branch_assembly, owner: authoring });
+  }
+  const byStable = new Map(branches.map(branch => [branch.stableId, branch]));
+  for (const instance of authoring.branch_instances) {
+    const id = instance.id + '.' + BASE_BRANCH_GUIDE;
+    const branch = byStable.get(id);
+    if (!branch) continue;
+    const owner = resolveInstanceAsset(instance, authoring.branch_library)?.sample?.authoring;
+    if (!owner?.base_branch_assembly) continue;
+    const shape = resolveInstanceShape(instance, authoring.branch_library);
+    const matrix = completeInstanceMatrix(instance, shape, byStable.get(instance.parent), settings, branchInstanceFrame);
+    matrix.setPosition(branch.points[0]);
+    mounts.set(id, { assembly: normalizeBaseBranchAssembly(owner.base_branch_assembly), owner, matrix });
+  }
+  return mounts;
+}
+
+function baseBranchAtlas(assembly,leaf,authoring) {
+  const textured = hasBaseBranchAtlas(assembly);
+  if (!textured && !assembly.placements.length) return null;
+  const material = leaf.clone();
+  material.name = sampleLeafMaterialName(assembly.pack_id || 'base_branch', assembly.material, authoring.leaf_material);
+  material.sampleLeafMaterial = assembly.material;
+  if (textured) material.userData.base_branch_atlas = true;
+  material.vegetationTint = '#ffffff';
+  material.color.set('#ffffff');
+  material.side = THREE.DoubleSide;
+  material.alphaTest = assembly.material.color ? assembly.material.cutoff : 0;
+  material.roughness = assembly.material.roughness;
+  return material;
+}
+
+const baseBranchUnitSources = new WeakMap();
+function baseBranchFoliageGeometry(unit, phase, flutter) {
+  const geometry = deserializeGeometry(unit.geometry);
+  const source = geometry.attributes.position;
+  const colors = new Float32Array(source.count * 4);
+  for (let vertex = 0; vertex < source.count; vertex++) {
+    colors.set([clamp(source.getY(vertex), 0, 1), phase, flutter, .5], vertex * 4);
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 4));
+  return geometry;
+}
+
+function baseBranchUnitSource(unit, phase, flutter) {
+  const record = baseBranchUnitSources.get(unit.geometry);
+  if (record && record.phase === phase && record.flutter === flutter) return record.geometry;
+  const geometry = baseBranchFoliageGeometry(unit, phase, flutter);
+  baseBranchUnitSources.set(unit.geometry, { phase, flutter, geometry });
+  return geometry;
+}
+
+function renderBaseBranchPlacement(assembly,branch,placement,unit,material,settings,index,matrix) {
+  const frame = baseBranchAnchorFrame(assembly, placement);
+  if (!unit || !frame) return null;
+  const transform = baseBranchUnitMatrix(assembly, unit, placement, frame);
+  if (matrix) transform.premultiply(matrix);
+  // Only the editable standalone carrier uses the native draw pose.
+  const flutter = clamp(settings.wind_profile?.leaf_flutter ?? 1, 0, 1);
+  const source = branch.stableId === BASE_BRANCH_GUIDE ? baseBranchUnitSource(unit, branch.windPhase, flutter) : null;
+  const geometry = source ? source.clone() : baseBranchFoliageGeometry(unit, branch.windPhase, flutter);
+  geometry.applyMatrix4(transform);
+  const position = new THREE.Vector3().setFromMatrixPosition(transform);
+  const direction = new THREE.Vector3(0, 1, 0).transformDirection(transform);
+  const scale = new THREE.Vector3().setFromMatrixScale(transform).y;
+  const stableId = branch.stableId + '.' + placement.id;
+  const element = { index, type: unit.role === 'LEAF' ? 'LEAF' : 'ORGAN', id: stableId, parentIndex: branch.elementIndex,
+    pivot: position.toArray(), axis: direction.toArray(), extent: scale, order: branch.order + 1, phase: branch.windPhase };
+  const placed = { branchId: branch.id, branchStableId: branch.stableId, stableId, position, direction, scale,
+    t: frame.t, phase: branch.windPhase, baseBranchRole: unit.role };
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.name = unit.name;
+  mesh.castShadow = true;
+  mesh.userData = { category: 'leaf', base_branch_unit_id: placement.id, base_branch_host: branch.stableId, element_count: 1 };
+  // Viewport-only endpoints, in the same baked coordinates as the mesh.
+  mesh.baseBranchAxis = [position, new THREE.Vector3(0, baseBranchUnitReach(unit.geometry), 0).applyMatrix4(transform)];
+  return { mesh, element, placed, source, transform };
+}
+
+function constantLookupRecord(geometry,index) {
+  return { geometry, elementIndices: new Array(geometry.attributes.position.count).fill(index) };
+}
+
+function renderBaseBranch(mount, branch, bark, leaf, authoring, settings, elements, lookupRecords, branchGroup, foliageGroup) {
+  const { assembly, owner, matrix } = mount;
+  const geometry = baseBranchGeometry(assembly);
+  const textured = hasBaseBranchAtlas(assembly);
+  const material = baseBranchAtlas(assembly,leaf,authoring);
+  // The prepared pack's wood and foliage use different regions of the same atlas.
+  if (!textured) {
+    geometry.deleteAttribute('uv');
+    const recipe = barkMaterialForBranch(owner, BASE_BRANCH_GUIDE) || DEFAULT_BARK_PRESET;
+    projectUntexturedTrunkBarkUV(geometry, new THREE.Matrix4().makeRotationY(-Math.PI / 2), recipe);
+    if (bark.map) {
+      bark.map.updateMatrix();
+      geometry.getAttribute('uv').applyMatrix3(bark.map.matrix.clone().invert());
+    }
+  }
+  const woodPositions = geometry.attributes.position;
+  const woodColors = new Float32Array(woodPositions.count * 4);
+  const length = assembly.base.tip[1] * baseBranchWoodSize(assembly);
+  for (let vertex = 0; vertex < woodPositions.count; vertex++) {
+    woodColors.set([clamp(woodPositions.getX(vertex) / length, 0, 1), clamp(branch.order / 4, 0, 1),
+      branch.windPhase, settings.health], vertex * 4);
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(woodColors, 4));
+  if (matrix) geometry.applyMatrix4(matrix);
+  const wood = new THREE.Mesh(geometry, textured ? material : bark);
+  wood.name = assembly.base.name;
+  wood.castShadow = wood.receiveShadow = true;
+  wood.userData = { category: 'branch', branch_id: branch.id, stable_id: branch.stableId,
+    parent_id: branch.parentId, order: branch.order, element_index: branch.elementIndex, base_branch_mesh: true };
+  branchGroup.add(wood);
+  lookupRecords.push(constantLookupRecord(geometry,branch.elementIndex));
+  const units = new Map(assembly.units.map(unit => [unit.id, unit]));
+  const placements = [];
+  for (const placement of assembly.placements) {
+    const record = renderBaseBranchPlacement(assembly,branch,placement,units.get(placement.unit_id),material,settings,elements.length,matrix);
+    if (!record) continue;
+    if (record.source) setNativePreviewPose(record.mesh, record.source, record.transform);
+    elements.push(record.element);
+    placements.push(record.placed);
+    foliageGroup.add(record.mesh);
+    lookupRecords.push(constantLookupRecord(record.mesh.geometry,record.element.index));
+  }
+  return { material, placements };
+}
+
+function baseBranchPlacementUpdater(asset,rawSettings,branchGroup,foliageGroup,geometryWarnings) {
+  const [branch] = asset.branches, [wood] = branchGroup.children;
+  if (asset.skeletonOnly || asset.branches.length !== 1 || asset.masterBranches.length !== 1
+    || branch?.stableId !== BASE_BRANCH_GUIDE || !wood?.userData.base_branch_mesh
+    || branchGroup.children.length !== 1 || asset.authoring.vine || asset.authoring.branch_instances.length
+    || asset.authoring.imported_trunks) return null;
+
+  const settings = normalizeSettings({...rawSettings,preview_lod:asset.settings.preview_lod});
+  let renderedAuthoring = asset.authoring;
+  const otherAuthoring = ({base_branch_assembly,...data}) => data;
+  const fixedAssembly = ({placements,...data}) => data;
+  return function updateBaseBranchPlacements(raw,next,{beforeCommit=()=>{}}={}) {
+    const previous = renderedAuthoring.base_branch_assembly, candidate = next?.base_branch_assembly;
+    if (!previous || !candidate || exportGeometryRepairs.has(asset)
+      || !equalData(settings,normalizeSettings(raw))
+      || !equalData(otherAuthoring(renderedAuthoring),otherAuthoring(next))
+      || !equalData(fixedAssembly(previous),fixedAssembly(candidate))) return false;
+    // The base and its own attachments are the only lookup records on this
+    // path. A mixed scene needs the full builder to renumber other owners.
+    if (asset.elements.length !== 1 + previous.placements.length
+      || asset.placements.length + asset.treeOrgans.length !== previous.placements.length
+      || asset.masterPlacements.length !== asset.placements.length
+      || foliageGroup.children.length !== previous.placements.length) return false;
+    const nextAssembly = normalizeBaseBranchAssembly(candidate);
+    const textured = hasBaseBranchAtlas(previous);
+    if (!textured && Boolean(previous.placements.length) !== Boolean(nextAssembly.placements.length)) return false;
+    const material = textured ? wood.material : foliageGroup.children[0]?.material;
+    if (nextAssembly.placements.length && (!material?.sampleLeafMaterial || !equalData(material.sampleLeafMaterial,previous.material))) return false;
+    const oldMeshes = new Map(foliageGroup.children.map(mesh => [mesh.userData.base_branch_unit_id,mesh]));
+    const oldElements = new Map(asset.elements.slice(1).map(element => [element.id,element]));
+    const oldPlacements = new Map([...asset.placements,...asset.treeOrgans].map(placement => [placement.stableId,placement]));
+    const oldRecords = new Map(previous.placements.map(record => [record.id,record]));
+    const sources = new Map(nextAssembly.units.map(unit => [unit.id,unit]));
+    const added = [], final = [];
+    let committed = false;
+    try {
+      const count = 1 + nextAssembly.placements.length;
+      const dimensions = lookupDimensions(count);
+      const dimensionsChanged = !equalData(dimensions,asset.lookupTexture);
+      const woodLookup = dimensionsChanged ? lookupAttribute(constantLookupRecord(wood.geometry,branch.elementIndex),dimensions) : null;
+      for (const [offset,placement] of nextAssembly.placements.entries()) {
+        const index = offset + 1, stableId = BASE_BRANCH_GUIDE + '.' + placement.id;
+        const prior = oldRecords.get(placement.id);
+        const mesh = oldMeshes.get(placement.id), element = oldElements.get(stableId), placed = oldPlacements.get(stableId);
+        if (prior && (!mesh || !element || !placed)) return false;
+        if (prior && equalData(prior,placement)) {
+          const reindex = element.index !== index;
+          const lookup = dimensionsChanged || reindex ? lookupAttribute(constantLookupRecord(mesh.geometry,index),dimensions) : null;
+          final.push({mesh,element:reindex ? {...element,index} : element,placed,lookup});
+          continue;
+        }
+        const record = renderBaseBranchPlacement(nextAssembly,branch,placement,sources.get(placement.unit_id),material,asset.settings,index);
+        if (!record) return false;
+        added.push(record.mesh);
+        assignLookupUvs([constantLookupRecord(record.mesh.geometry,index)],count);
+        ensureGeometryTangents(record.mesh.geometry);
+        final.push({ ...record, reuse:prior?.unit_id === placement.unit_id ? mesh : null });
+      }
+      const report = asset.report;
+      const extraWarnings = report.warnings.filter(warning =>
+        !geometryWarnings.has(warning) && !warning.startsWith('生成耗时 '));
+      beforeCommit();
+      if (woodLookup) wood.geometry.setAttribute('uv1',woodLookup);
+      for (const record of final) {
+        if (record.reuse) {
+          const mesh = record.reuse, previousGeometry = mesh.geometry;
+          mesh.geometry = record.mesh.geometry;
+          mesh.baseBranchAxis = record.mesh.baseBranchAxis;
+          record.mesh = mesh;
+          previousGeometry.dispose();
+        }
+        if (record.source) setNativePreviewPose(record.mesh, record.source, record.transform);
+      }
+      const retained = new Set(final.map(record => record.mesh));
+      for (const mesh of [...foliageGroup.children]) {
+        if (retained.has(mesh)) continue;
+        mesh.removeFromParent();
+        mesh.geometry.dispose();
+      }
+      for (const record of final) {
+        if (record.lookup) record.mesh.geometry.setAttribute('uv1',record.lookup);
+        if (record.mesh.parent !== foliageGroup) foliageGroup.add(record.mesh);
+      }
+      // Preserve cold-build ordering for export, lookup and transparent ties.
+      foliageGroup.children.splice(0,foliageGroup.children.length,...final.map(record => record.mesh));
+      asset.elements.splice(1,asset.elements.length - 1,...final.map(record => record.element));
+      const leaves = final.filter(record => record.placed.baseBranchRole === 'LEAF').map(record => record.placed);
+      const organs = final.filter(record => record.placed.baseBranchRole !== 'LEAF').map(record => record.placed);
+      asset.placements.splice(0,asset.placements.length,...leaves);
+      if (asset.masterPlacements !== asset.placements) asset.masterPlacements.splice(0,asset.masterPlacements.length,...leaves);
+      asset.treeOrgans.splice(0,asset.treeOrgans.length,...organs);
+      const qualityAfter = analyzeGroup(asset.group,asset.settings,asset.geometryQualityCache);
+      geometryWarnings = new Set(qualityAfter.warnings);
+      asset.report = {...report,...qualityAfter,ok:qualityAfter.ok && report.attachment_overlap_ratio <= report.attachment_overlap_limit,
+        tree_organ_count:organs.length,warnings:[...qualityAfter.warnings,...extraWarnings]};
+      asset.lookupTexture = dimensions;
+      Object.assign(asset.group.userData,{leaf_count:leaves.length,hierarchy_elements:asset.elements.length,lookup_texture:dimensions,pending_rebuild:false});
+      asset.authoring = renderedAuthoring = {...next,base_branch_assembly:nextAssembly};
+      markNativeModelChanged(asset);
+      committed = true;
+      return true;
+    } finally {
+      if (!committed) for (const mesh of added) mesh.geometry.dispose();
+    }
+  };
+}
+
 function* buildBranchAssetSteps(rawSettings = {}, materials = null, leafSourceGeometry = null, lodIndex = 0, rawAuthoring = null, options = {}) {
   let settings = normalizeSettings({ ...rawSettings, preview_lod: lodIndex });
   const lod = LOD_PROFILES[clamp(lodIndex, 0, 3)];
@@ -1989,6 +2310,7 @@ function* buildBranchAssetSteps(rawSettings = {}, materials = null, leafSourceGe
   const unitBarkMaterials=new Map(),incomplete={group,materials:resolvedMaterials,ownsMaterials:ownedMaterials};let completed=false;
   try{
   const masterBranches = yield* buildBranchGraphSteps(settings, state, authoring, skeletonOnly && rawAuthoring?.branch_instances?.length > 0);
+  const baseMounts = baseBranchMounts(authoring, masterBranches, settings);
   const importedHosts=importedTrunkHostIds(authoring);
   for(const branch of masterBranches)if(importedHosts.has(branch.stableId))branch.importedTrunkHost=true;
   yield {stage:'graph-final'};
@@ -2049,6 +2371,7 @@ function* buildBranchAssetSteps(rawSettings = {}, materials = null, leafSourceGe
   }
   const elements = [];
   const lookupRecords = [];
+  const basePlacements = [];
   const radialSegments = Math.max(4, Math.round(settings.radial_segments * lod.radial));
   for(const branch of branches){
     branch.elementIndex = elements.length;
@@ -2060,6 +2383,18 @@ function* buildBranchAssetSteps(rawSettings = {}, materials = null, leafSourceGe
       extent: branch.length, order: branch.order, phase: branch.windPhase,
     });
     if(importedHosts.has(branch.stableId)){yield {stage:'imported-trunk-guides'};continue;}
+    const baseMount = baseMounts.get(branch.stableId);
+    if (baseMount) {
+      if (!skeletonOnly) {
+        const bark = hasBaseBranchAtlas(baseMount.assembly) ? null : barkForBranch(branch);
+        const rendered = renderBaseBranch(baseMount, branch, bark, resolvedMaterials.leaf, authoring,
+          settings, elements, lookupRecords, branchGroup, foliageGroup);
+        if (rendered.material) unitBarkMaterials.set('base-branch-atlas:' + branch.stableId, rendered.material);
+        basePlacements.push(...rendered.placements);
+      }
+      yield {stage:'base-branch-meshes'};
+      continue;
+    }
     const sweepSource=branch.legacyRigidGeometry?.baseline || branch;
     const renderSource = settings.adaptive_tessellation && lodIndex < 2 && !sweepSource.surfaceNormals
       ? { ...sweepSource, points: adaptiveCurvePoints(sweepSource.points, settings.curvature_detail * lod.segment) }
@@ -2080,7 +2415,8 @@ function* buildBranchAssetSteps(rawSettings = {}, materials = null, leafSourceGe
     lookupRecords.push({ geometry, elementIndices: new Array(geometry.getAttribute('position').count).fill(branch.elementIndex) });
     yield {stage:'structural-meshes'};
   }
-  addJunctionCollars(branchGroup, branches, settings, barkForBranch);
+  const proceduralBranches = branches.filter(branch => !baseMounts.has(branch.stableId));
+  addJunctionCollars(branchGroup, proceduralBranches, settings, barkForBranch);
   // Reserve room for both strata when real ivy units share a mixed patch.
   // The same master calculation applies at every LOD.
   if (authoring.vine && authoring.vegetation.enabled && authoring.vegetation.mode === 'REGION' && Object.entries(authoring.vegetation.weights).some(([k,v]) => k !== 'IVY' && v > 0)) {
@@ -2088,7 +2424,7 @@ function* buildBranchAssetSteps(rawSettings = {}, materials = null, leafSourceGe
     settings.max_leaves = Math.min(settings.max_leaves, Math.floor(available / Math.max(1, vegetationLeafCost(leafSourceGeometry, settings))));
   }
   const libraryFoliage = authoring.recipe.tags.includes('SAMPLE_FOLIAGE_FROM_LIBRARY');
-  const naturalBranches=masterBranches.filter(b=>!b.copySnapshot);
+  const naturalBranches=masterBranches.filter(b=>!b.copySnapshot&&!baseMounts.has(b.stableId));
   let masterPlacements = skeletonOnly ? [] : libraryFoliage
     ? sampleFoliagePlacements(naturalBranches,settings,authoring,leafSourceGeometry,{normalizeAuthoring,normalizeSettings,stateFactors,leafPlacements,expandFoliagePlacements,createRng,stableSeed,resolveInstanceAsset,leafYouthTarget,leafAgeWeight,masksAllow:foliageMasksAllow,
       instanceMatrix:(i,item,branches)=>completeInstanceMatrix(i,resolveInstanceShape(i,authoring.branch_library),branches.find(b=>b.stableId===i.parent),settings,branchInstanceFrame)})
@@ -2108,8 +2444,8 @@ function* buildBranchAssetSteps(rawSettings = {}, materials = null, leafSourceGe
     foliageGroup.add(leafRecord.mesh);
     lookupRecords.push(leafRecord);
   });
-  const markers = skeletonOnly ? [] : addMarkers(markerGroup, branches, settings, resolvedMaterials, state, createRng(stableSeed(authoring.seeds.foliage, `markers:${lodIndex}`)), authoring);
-  markers.push(...addDamageScars(markerGroup, branches, settings, resolvedMaterials));
+  const markers = skeletonOnly ? [] : addMarkers(markerGroup, proceduralBranches, settings, resolvedMaterials, state, createRng(stableSeed(authoring.seeds.foliage, `markers:${lodIndex}`)), authoring);
+  markers.push(...addDamageScars(markerGroup, proceduralBranches, settings, resolvedMaterials));
   markers.forEach((mesh) => { mesh.userData.category = 'marker'; });
   let blooms = [], masterBlooms = [], flowerBudgetLimited = false;
   if (!skeletonOnly && authoring.flowering.enabled && authoring.vine) {
@@ -2246,10 +2582,16 @@ function* buildBranchAssetSteps(rawSettings = {}, materials = null, leafSourceGe
     });
   }
   if(!skeletonOnly&&authoring.imported_trunks){const imported=buildImportedTrunkMeshes(authoring,masterBranches,elements);imported.meshes.forEach(mesh=>branchGroup.add(mesh));lookupRecords.push(...imported.lookup);imported.materials.forEach((material,i)=>unitBarkMaterials.set('imported:'+i,material));yield {stage:'imported-trunk-meshes'};}
+  if(!skeletonOnly&&authoring.tree_lights){
+    const lights=buildTreeLightGroup(authoring.tree_lights,authoring.tree_light_flow,masterBranches);
+    group.add(lights);
+    if(lights.children.length)unitBarkMaterials.set('tree-light-strip',lights.children[0].material);
+  }
   const lookupTexture = assignLookupUvs(lookupRecords, elements.length);
   group.traverse((object) => { if (object.isMesh && object.geometry) ensureGeometryTangents(object.geometry); });
   const geometryQualityCache=new WeakMap();
   const report = yield* analyzeGroupSteps(group, settings,geometryQualityCache);
+  const geometryWarnings = new Set(report.warnings);
   if(canopy.coverageReport)report.surface_canopy=canopy.coverageReport;
   if(masterPlacements.unitBudgetLimited)report.warnings.push('叶片生成达到当前单元数量上限，请缩小范围或增大节间距；手工单元优先保留');
   report.flower_count = blooms.length; report.flower_budget_limited = flowerBudgetLimited;
@@ -2264,6 +2606,11 @@ function* buildBranchAssetSteps(rawSettings = {}, materials = null, leafSourceGe
     report.ok = false;
     report.warnings.push(`附着物重叠率 ${(report.attachment_overlap_ratio * 100).toFixed(1)}%，超过 ${(report.attachment_overlap_limit * 100).toFixed(1)}%`);
   }
+  const baseLeaves = basePlacements.filter(placement => placement.baseBranchRole === 'LEAF');
+  treeOrgans.push(...basePlacements.filter(placement => placement.baseBranchRole !== 'LEAF'));
+  placements.push(...baseLeaves);
+  masterPlacements.push(...baseLeaves);
+  report.tree_organ_count = treeOrgans.length;
   group.userData = {
     generator: `Procedural Branch Generator ${GENERATOR_VERSION}`,
     format: PROJECT_FORMAT, lod: lodIndex, seed: settings.seed, settings, authoring_version: authoring.version,
@@ -2271,13 +2618,16 @@ function* buildBranchAssetSteps(rawSettings = {}, materials = null, leafSourceGe
     hierarchy_elements: elements.length, lookup_texture: lookupTexture,
     wind_mode: settings.wind_mode,
   };
-  completed=true;
-  return {
+  const asset = {
     skeletonOnly,geometryQualityCache,
     materialize: leafRecords.some(r=>r.mesh.isInstancedMesh) ? ()=>{const expanded=materializeCanopyRecords(leafRecords);assignLookupUvs(expanded,elements.length);leafRecords=expanded;} : undefined,
     group, branches, masterBranches, masterPlacements, elements, placements, blooms, masterBlooms, treeOrgans, settings, authoring: skeletonOnly ? rawAuthoring || authoring : authoring, state, report, lookupTexture,
     materials: resolvedMaterials, ownsMaterials: ownedMaterials, unitBarkMaterials: [...unitBarkMaterials.values()], vegetation,
   };
+  const updateBaseBranchPlacements = baseBranchPlacementUpdater(asset,rawSettings,branchGroup,foliageGroup,geometryWarnings);
+  if (updateBaseBranchPlacements) asset.updateBaseBranchPlacements = updateBaseBranchPlacements;
+  completed=true;
+  return asset;
   }finally{foliageUnits.dispose();if(!completed){incomplete.unitBarkMaterials=[...unitBarkMaterials.values()];disposeBranchAsset(incomplete);}}
 }
 
@@ -2290,6 +2640,12 @@ export function disposeBranchAssetAsync(asset,scheduling={}) {
   return runBuildSteps(disposeBranchAssetSteps(asset),{...rest,drainOnError:true});
 }
 function* disposeBranchAssetSteps(asset) {
+  const repair = exportGeometryRepairs.get(asset);
+  if (repair) {
+    for (const { object, original } of repair.replaced) object.geometry = original;
+    for (const copy of repair.copies.values()) copy?.geometry.dispose();
+    exportGeometryRepairs.delete(asset);
+  }
   disposeImportedTrunkTextures(asset?.group);
   asset?.activeEditPreview?.restore();
   if(asset?.disposeCompiledSampleSteps)yield* asset.disposeCompiledSampleSteps();

@@ -13,7 +13,7 @@ export function createBranchMultiview(api) {
     const div = document.createElement('div'); div.className = `orthographic-pane plane-${key}`; div.hidden = true;
     const label = document.createElement('span'); label.textContent = `${plane.label} · 正交`; label.className = 'orthographic-label'; div.append(label);
     const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5)); renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = api.renderer.toneMapping; renderer.toneMappingExposure = api.renderer.toneMappingExposure;
-    renderer.setClearColor(window.treeDuckAppearance?.viewportBackground||'#0b100d', 1);
+    renderer.setClearColor(window.treeDuckAppearance?.viewportBackground||'#34383d', 1);
     renderer.domElement.dataset.orthoPlane = key; div.append(renderer.domElement); host.append(div);
     const camera = new THREE.OrthographicCamera(-2, 2, 2, -2, 0.01, 2000); camera.up.fromArray(plane.up); camera.layers.enable(30);
     const reference = new THREE.Mesh(new THREE.PlaneGeometry(), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false })); reference.layers.set(30); reference.visible = false; referenceRoot.add(reference);

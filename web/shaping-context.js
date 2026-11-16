@@ -32,7 +32,8 @@ export function createShapingContext(api, tools, sectionControls) {
     <div data-unit-brush="SPREAD" class="unit-brush-reference"><label>作用方式<select id="unitBrushSpreadMode" aria-label="散开或收拢"><option value="OUT">向外散开</option><option value="IN">向内收拢</option></select></label><button id="unitBrushCenter" type="button">在画面中点取中心</button><span id="unitBrushCenterStatus" role="status">尚未设置中心</span></div>
     <div data-unit-brush="SCALE"><div class="unit-size-directions" role="group" aria-label="整支放大或缩小"><button type="button" data-unit-size-mode="GROW" aria-pressed="true">＋ 放大</button><button type="button" data-unit-size-mode="SHRINK" aria-pressed="false">− 缩小 <kbd>Alt</kbd></button></div><select id="unitBrushSizeMode" aria-label="放大或缩小完整单元枝" hidden><option value="GROW">放大整支</option><option value="SHRINK">缩小整支</option></select><span id="unitBrushSizeState" class="unit-size-state">左键放大 · 按住 Alt 临时缩小</span><label>每笔最大变化（%）<input id="unitBrushSizeLimit" aria-label="每笔尺寸变化上限" type="number" min="1" max="80" step="1" value="20"></label></div>
     <div data-unit-brush="SPREAD JITTER"><label>每笔最多转动（°）<input id="unitBrushAngleLimit" aria-label="每笔旋转角度上限" type="number" min="1" max="90" step="1" value="25"></label></div>
-    <div data-unit-brush="JITTER"><div class="unit-brush-seed"><label>变化组<input id="unitBrushSeed" aria-label="自然扰动变化组" type="number" min="1" max="2147483647" step="1" value="1"></label><button id="unitBrushShuffle" type="button">换一组</button></div></div>`;
+    <div data-unit-brush="DISPERSE"><label>最大偏角（°）<input id="unitBrushDisperseAngleLimit" aria-label="打散朝向最大偏角" type="number" min="1" max="60" step="1" value="30"></label></div>
+    <div data-unit-brush="JITTER DISPERSE"><div class="unit-brush-seed"><label>变化组<input id="unitBrushSeed" aria-label="朝向变化组" type="number" min="1" max="2147483647" step="1" value="1"></label><button id="unitBrushShuffle" type="button">换一组</button></div></div>`;
   $('quick_unitCombOrientation').closest('label').after(unitBrush);
   sculpt.append(brushAdvanced);
   const brushHint = document.createElement('p'); brushHint.className = 'wb-note'; brushHint.textContent = 'F 调半径 · Shift+F 调强度 · 左键确认 / Esc 取消。枝干上 Shift 拖动临时平滑；Shift 框选加选，Ctrl 框选减选，Ctrl 空白框清空。每种笔刷独立记忆参数。'; sculpt.prepend(brushHint);
@@ -66,30 +67,39 @@ export function createShapingContext(api, tools, sectionControls) {
     records.forEach((p) => { ctx.fillStyle = Math.abs(p.t - tools.sectionT) < 0.006 ? '#eac86d' : '#83c3d0'; ctx.beginPath(); ctx.arc(12 + p.t * (w - 24), h - 12 - p.radius / 4 * (h - 24), 5, 0, 2 * Math.PI); ctx.fill(); });
   }
   function refresh() {
-    const unit=api.isTree?.()&&api.getTreeEditMode?.()==='UNIT';
+    const baseBrush=['COMB','TWIST_BRUSH'].includes(mode)&&api.baseBranchBrushSummary?.();
+    const twisting=Boolean(baseBrush&&mode==='TWIST_BRUSH');
+    const unit=Boolean(baseBrush)||(api.isTree?.()&&api.getTreeEditMode?.()==='UNIT');
     retractHint.hidden = mode !== 'RETRACT';
-    combHint.hidden = mode !== 'COMB';
+    combHint.hidden = mode !== 'COMB'&&!twisting;
     const orientation=$('unitCombOrientation').value,effect=$('unitBrushEffect').value;
-    const effectHints={ALIGN:'点取一支作为方向样本，刷过目标整支以对齐；各自枝根与尺寸保持。',SPREAD:'先点取固定中心，再刷过整支散开或收拢；各自枝根保持，每笔转动限幅。',SCALE:'左键刷过放大，按住 Alt 刷过缩小；枝根固定，木枝与叶花果一起等比变化。F 调范围，Shift+F 调强度。',JITTER:'整支轻微转向，各自枝根与尺寸保持；同一笔目标固定，换一组只改变下一笔。'};
+    const effectHints={ALIGN:'点取一支作为方向样本，刷过目标整支以对齐；各自枝根与尺寸保持。',SPREAD:'先点取固定中心，再刷过整支散开或收拢；各自枝根保持，每笔转动限幅。',SCALE:'左键刷过放大，按住 Alt 刷过缩小；枝根固定，木枝与叶花果一起等比变化。F 调范围，Shift+F 调强度。',JITTER:'整支轻微转向，各自枝根与尺寸保持；同一笔目标固定，换一组只改变下一笔。',DISPERSE:'扫过朝向接近的一簇单元枝，让各支在原生长方向附近错开。每支绕自己的挂点转动。'};
     combHint.textContent=unit?(effectHints[effect]||(orientation==='DOWN'?'刷过的整支枝梢朝世界下方转向，与拖动方向和视角无关；各自枝根固定。':orientation==='ROLL'?'保持整支长轴，绕轴翻转让源模型标定的一侧朝下；未标定的单元枝跳过，请在枝条工作台设置悬垂参考。':'沿拖动方向批量转动整支；各自枝根固定，长度、粗细与内部样式保持。')):'沿拖动方向梳理，保长保粗；固定点之前不变，子枝和叶片跟随。枝干上 Shift 临时平滑。';
+    if (baseBrush) {
+      const hints={ALIGN:'点取一个挂件的主轴方向，再刷过所选挂件使其对齐。',SPREAD:'点取固定中心，再刷过所选挂件使其散开或收拢。',SCALE:'左键刷过放大，按住 Alt 刷过缩小。挂点固定。',JITTER:'刷过所选挂件，使姿态产生自然变化。'};
+      combHint.textContent=twisting?'左右拖动，围绕各自的叶柄、花梗或果柄轴扭转。挂点和朝向轴保持。':hints[effect]||({DOWN:'刷过所选挂件，使叶柄、花梗或果柄朝下。',ROLL:'刷过所选挂件，绕柄轴翻转，使素材正面朝下。'}[orientation]||'沿拖动方向转动所选叶花果，挂点固定。');
+    }
     combHint.title=combHint.textContent;
-    brushHint.textContent=unit?'F 半径 · Shift+F 强度 · Esc 取消本笔 · Ctrl 空白框清空':'F 调半径 · Shift+F 调强度 · 左键确认 / Esc 取消。枝干上 Shift 拖动临时平滑；Shift 框选加选，Ctrl 框选减选，Ctrl 空白框清空。每种笔刷独立记忆参数。';
+    brushHint.textContent=baseBrush?'F 半径 · Shift+F 强度 · Shift/Ctrl 加减选 · Esc 取消本笔':unit?'F 半径 · Shift+F 强度 · Esc 取消本笔 · Ctrl 空白框清空':'F 调半径 · Shift+F 调强度 · 左键确认 / Esc 取消。枝干上 Shift 拖动临时平滑；Shift 框选加选，Ctrl 框选减选，Ctrl 空白框清空。每种笔刷独立记忆参数。';
     for(const id of ['sculptFlexibility','sculptLength','sculptProtectTrunk'])$('quick_'+id).closest('label').hidden=Boolean(unit);
-    $('quick_unitBrushEffect').closest('label').hidden=!unit||mode!=='COMB'||effect==='SCALE';
+    $('quick_unitBrushEffect').closest('label').hidden=!unit||mode!=='COMB'||(effect==='SCALE'&&!baseBrush);
+    $('quick_unitBrushEffect').closest('label').firstChild.textContent=baseBrush?'叶花果笔刷':'完整单元枝笔刷';
     $('quick_unitBrushEffect').closest('label').classList.toggle('unit-brush-wide',effect!=='TURN');
     $('quick_unitCombOrientation').closest('label').hidden=!unit||mode!=='COMB'||effect!=='TURN';
     unitBrush.hidden=!unit||mode!=='COMB'||effect==='TURN';
     unitBrush.querySelectorAll('[data-unit-brush]').forEach(row=>row.hidden=!row.dataset.unitBrush.split(' ').includes(effect));
-    $('quick_sculptDirection').closest('label').hidden=Boolean(unit&&(effect!=='TURN'||orientation!=='DRAG'));
-    unitSummary.hidden=!unit;unitSummary.textContent=unit?api.getUnitSelectionSummary?.()||'':'';
-    unitHit.hidden=!unit||mode!=='COMB';
-    const hitMode=$('unitBrushHitMode').value, allScope=$('branchEditScope').value==='ALL';
+    $('quick_sculptDirection').closest('label').hidden=twisting||Boolean(unit&&(effect!=='TURN'||orientation!=='DRAG'));
+    unitSummary.hidden=!unit;unitSummary.textContent=baseBrush?`已选 ${baseBrush.selected} 件叶花果 · ${baseBrush.editable} 件可刷`:unit?api.getUnitSelectionSummary?.()||'':'';
+    unitHit.hidden=!unit||(mode!=='COMB'&&!twisting);
+    const hitMode=$('unitBrushHitMode').value, allScope=!baseBrush&&$('branchEditScope').value==='ALL';
+    const hitTarget=baseBrush?'叶花果':'单元枝';
     $('unitBrushHitHint').textContent=hitMode==='AUTO'
-      ? allScope?'全树范围只刷表层；框选后自动限定为选区。':'只刷已选整支；忽略前后遮挡，仍须在笔刷圆内。'
-      :hitMode==='SURFACE'?'在选区内按深度筛选表层，后方单元枝可能不受影响。'
-        :hitMode==='THROUGH'?'笔刷圆内前后均可命中，选区外始终不受影响。':'按三维距离命中选区内单元枝。';
+      ? allScope?'全树范围只刷表层；框选后自动限定为选区。':`只刷已选${baseBrush?'叶花果':'整支'}；忽略前后遮挡，仍须在笔刷圆内。`
+      :hitMode==='SURFACE'?`在选区内按深度筛选表层，后方${hitTarget}可能不受影响。`
+        :hitMode==='THROUGH'?'笔刷圆内前后均可命中，选区外始终不受影响。':`按三维距离命中选区内${hitTarget}。`;
     $('quick_sculptScope').closest('label').hidden=Boolean(unit);
     $('quick_sculptDepth').closest('label').hidden=Boolean(unit&&!(hitMode==='SURFACE'||hitMode==='AUTO'&&allScope));
+    $('quick_sculptSelection').closest('label').hidden=Boolean(baseBrush);
     $('quick_sculptSelection').closest('label').firstChild.textContent=unit?'选择对象范围':'枝条范围';
     clearMask.hidden=Boolean(unit);
     for(const option of $('quick_sculptSelection').options)option.textContent=$('sculptSelection').querySelector(`option[value="${option.value}"]`)?.textContent||option.textContent;
@@ -106,7 +116,7 @@ export function createShapingContext(api, tools, sectionControls) {
     const activeActions = extensions.get(mode)?.element.querySelector('.form-actions'); if (activeActions) { actionHomes.set(activeActions, activeActions.parentElement); dock.append(activeActions); }
     panel.hidden = !extensions.has(mode) && !['SECTION', 'JUNCTION', 'LEAF_ADD', 'LEAF_ERASE', ...SCULPT_TOOLS].includes(mode);
     document.querySelector('.inspector-panel').classList.toggle('has-shaping-context', !panel.hidden);
-    find('shapingContextTitle').textContent = extensions.get(mode)?.title || (mode === 'SECTION' ? '连续截面' : mode === 'JUNCTION' ? '树杈连接' : mode === 'RETRACT' ? '沿枝路回缩' : mode === 'COMB' ? unit?`单元枝 · ${{TURN:'整支转向',ALIGN:'取样对齐',SPREAD:'散开 / 收拢',SCALE:'大小刷',JITTER:'自然扰动'}[effect]||'整支梳理'}`:'主枝干 · 保长梳理' : mode === 'LEAF_ADD' ? '补叶画笔' : mode === 'LEAF_ERASE' ? '擦叶画笔' : '雕刻参数');
+    find('shapingContextTitle').textContent = extensions.get(mode)?.title || (twisting?'叶花果 · 绕柄轴扭转':mode === 'SECTION' ? '连续截面' : mode === 'JUNCTION' ? '树杈连接' : mode === 'RETRACT' ? '沿枝路回缩' : mode === 'COMB' ? unit?`${baseBrush?'叶花果':'单元枝'} · ${{TURN:'整支转向',ALIGN:'取样对齐',SPREAD:'散开 / 收拢',SCALE:'大小刷',JITTER:'自然扰动',DISPERSE:'打散朝向'}[effect]||'整支梳理'}`:'主枝干 · 保长梳理' : mode === 'LEAF_ADD' ? '补叶画笔' : mode === 'LEAF_ERASE' ? '擦叶画笔' : '雕刻参数');
     if (mode === 'SECTION' && editableBranch) {
       draw(); if (graphDrag || api.isEditing()) return;
       const records = sectionRecords(); const select = find('sectionNode'); select.replaceChildren();

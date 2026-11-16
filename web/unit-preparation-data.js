@@ -1,9 +1,12 @@
 import * as THREE from './vendor/three.module.min.js';
-import {geometryExtent,normalizePlantUnit,normalizePlantUnitPack,UNIT_ROLES} from './plant-unit-data.js';
+import {BASE_BRANCH_MAX_SIZE_M,geometryExtent,normalizePlantBaseBranch,normalizePlantUnit,normalizePlantUnitPack,UNIT_ROLES} from './plant-unit-data.js';
 
 export const PREPARATION_VERSION=1;
+export const PREPARATION_ROLES={...UNIT_ROLES,BASE_BRANCH:'基础枝'};
+export const preparationMaxSize=role=>role==='BASE_BRANCH'?BASE_BRANCH_MAX_SIZE_M:1;
 export function validatePreparationDraft(raw,faceCount=500000){
   if(raw?.version!==PREPARATION_VERSION||!Array.isArray(raw.units)||raw.units.length>64)throw Error('整理草稿格式无效');
+  if(raw.merge_unit_materials!=null&&typeof raw.merge_unit_materials!=='boolean')throw Error('材质合并选项无效');
   if(raw.selection&&(!Array.isArray(raw.selection)||raw.selection.length>faceCount||!raw.selection.every(face=>Number.isInteger(face)&&face>=0&&face<faceCount)))throw Error('草稿待选面片无效');
   const used=new Set(),ids=new Set();
   for(const unit of raw.units){
@@ -11,8 +14,9 @@ export function validatePreparationDraft(raw,faceCount=500000){
     for(const face of unit.faces){if(!Number.isInteger(face)||face<0||face>=faceCount||used.has(face))throw Error('草稿面片重复或超出源模型');used.add(face);}
     for(const key of ['base','tip','front'])if(unit[key]!=null&&(!Array.isArray(unit[key])||unit[key].length!==3||!unit[key].every(Number.isFinite)))throw Error('校准点无效');
     if(unit.size_reference!=null){const ref=unit.size_reference;for(const key of ['a','b'])if(ref[key]!=null&&(!Array.isArray(ref[key])||ref[key].length!==3||!ref[key].every(Number.isFinite)))throw Error('尺寸参照点无效');if(ref.cm!=null&&(!Number.isFinite(ref.cm)||ref.cm<=0))throw Error('参照长度无效');}
-    if(unit.size_checkpoint!=null){const p=unit.size_checkpoint;if(p.source_scale!=null&&(!Number.isFinite(p.source_scale)||p.source_scale<=0))throw Error('尺寸对比比例无效');if(p.version!==1||!['initial','confirmed'].includes(p.kind)||!Number.isFinite(p.size_m)||p.size_m<.001||p.size_m>1||!p.bounds||!p.dimensions)throw Error('尺寸对比记录无效');for(const key of ['min','max'])if(!Array.isArray(p.bounds[key])||p.bounds[key].length!==3||!p.bounds[key].every(Number.isFinite))throw Error('尺寸对比范围无效');if(p.bounds.min.some((v,i)=>v>p.bounds.max[i])||['x','y','z','longest'].some(key=>!Number.isFinite(p.dimensions[key])||p.dimensions[key]<0))throw Error('尺寸对比数值无效');}
-    if(!UNIT_ROLES[unit.role]||!Number.isFinite(unit.size_m)||unit.size_m<.001||unit.size_m>1||!Number.isFinite(unit.roll))throw Error('单元类型或尺寸无效');
+    const maximum=preparationMaxSize(unit.role);
+    if(unit.size_checkpoint!=null){const p=unit.size_checkpoint;if(p.source_scale!=null&&(!Number.isFinite(p.source_scale)||p.source_scale<=0))throw Error('尺寸对比比例无效');if(p.version!==1||!['initial','confirmed'].includes(p.kind)||!Number.isFinite(p.size_m)||p.size_m<.001||p.size_m>maximum||!p.bounds||!p.dimensions)throw Error('尺寸对比记录无效');for(const key of ['min','max'])if(!Array.isArray(p.bounds[key])||p.bounds[key].length!==3||!p.bounds[key].every(Number.isFinite))throw Error('尺寸对比范围无效');if(p.bounds.min.some((v,i)=>v>p.bounds.max[i])||['x','y','z','longest'].some(key=>!Number.isFinite(p.dimensions[key])||p.dimensions[key]<0))throw Error('尺寸对比数值无效');}
+    if(!Object.hasOwn(PREPARATION_ROLES,unit.role)||!Number.isFinite(unit.size_m)||unit.size_m<.001||unit.size_m>maximum||!Number.isFinite(unit.roll))throw Error('单元类型或尺寸无效');
   }
   return raw;
 }
@@ -41,14 +45,24 @@ export function preparationUnitGeometry(source,unit){
   const transform=(values,point)=>{const out=[];for(let i=0;i<values.length;i+=3){const p=new THREE.Vector3(values[i],values[i+1],values[i+2]);if(point)p.sub(base);const a=p.dot(x),b=p.dot(y),c=p.dot(z);out.push(a*cos-c*sin,b,a*sin+c*cos);}return out;};
   return {...geometry,position:transform(geometry.position,true),normal:transform(geometry.normal,false)};
 }
+function calibratedGeometryRecord(source,unit){
+  const {id,name,size_m}=unit;
+  const record={id,name,size_m,source_file:source.source_name,geometry:preparationUnitGeometry(source,unit)};
+  if(unit.role==='BASE_BRANCH'){
+    const root=new THREE.Vector3(...unit.base),tip=new THREE.Vector3(...unit.tip);
+    return {...record,tip:[0,root.distanceTo(tip),0]};
+  }
+  return {...record,role:unit.role};
+}
 export function calibratePreparationUnit(source,unit){
-  return normalizePlantUnit({id:unit.id,name:unit.name,role:unit.role,size_m:unit.size_m,source_file:source.source_name,geometry:preparationUnitGeometry(source,unit)});
+  const record=calibratedGeometryRecord(source,unit);
+  return unit.role==='BASE_BRANCH'?normalizePlantBaseBranch(record):normalizePlantUnit(record);
 }
 // Keep physical vertex distances when editing the calibration frame. size_m
 // owns the axis-aligned longest edge, which may change after a rigid rotation.
 export function changePreparationFrame(source,unit,patch){
   const next={...unit,...patch},before=geometryExtent(preparationUnitGeometry(source,unit)).longest,after=geometryExtent(preparationUnitGeometry(source,next)).longest;
-  next.size_m=checkedPreparationSize(unit.size_m*after/before);return next;
+  next.size_m=checkedPreparationSize(unit.size_m*after/before,unit.role);return next;
 }
 export function rotatePreparationCalibration(source,unit,delta){
   if(!delta?.isQuaternion||![delta.x,delta.y,delta.z,delta.w].every(Number.isFinite)||delta.lengthSq()<1e-10)throw Error('旋转数值无效');
@@ -63,7 +77,7 @@ export function centerPreparationBase(source,unit){
   if(!unit.base||!unit.tip)throw Error('请先设置底点和朝向点');const geometry=extractPreparationGeometry(source,unit.faces),base=new THREE.Vector3(...unit.base),axis=new THREE.Vector3(...unit.tip).sub(base);if(axis.length()<1e-7)throw Error('底点与朝向点不能重合');axis.normalize();
   let front=new THREE.Vector3(...(unit.front||[0,0,1]));front.addScaledVector(axis,-front.dot(axis));if(front.length()<1e-6){front.set(...(Math.abs(axis.z)<.8?[0,0,1]:[1,0,0]));front.addScaledVector(axis,-front.dot(axis));}front.normalize();const right=new THREE.Vector3().crossVectors(axis,front).normalize(),tolerance=Math.max(1e-7,geometryExtent(geometry).longest*.015),bounds=[Infinity,-Infinity,Infinity,-Infinity];let count=0;
   for(let i=0;i<geometry.position.length;i+=3){const p=new THREE.Vector3(...geometry.position.slice(i,i+3)).sub(base);if(Math.abs(p.dot(axis))>tolerance)continue;const x=p.dot(right),z=p.dot(front);bounds[0]=Math.min(bounds[0],x);bounds[1]=Math.max(bounds[1],x);bounds[2]=Math.min(bounds[2],z);bounds[3]=Math.max(bounds[3],z);count++;}
-  if(count<2)throw Error('底点附近缺少端部顶点，请靠近叶柄／花梗端部重新点取');return base.addScaledVector(right,(bounds[0]+bounds[1])/2).addScaledVector(front,(bounds[2]+bounds[3])/2).toArray();
+  if(count<2)throw Error('底点附近缺少端部顶点，请靠近'+(unit.role==='BASE_BRANCH'?'枝根':'叶柄／花梗')+'端部重新点取');return base.addScaledVector(right,(bounds[0]+bounds[1])/2).addScaledVector(front,(bounds[2]+bounds[3])/2).toArray();
 }
 export function preparationDimensions(source,unit){
   const value=calibratePreparationUnit(source,unit),extent=geometryExtent(value.geometry),factor=value.size_m*100;
@@ -77,14 +91,15 @@ export function preparationSizeFeedback(source,unit){
   const current=preparationDimensions(source,unit),baseline=unit.size_checkpoint||null,ratio=baseline?.source_scale?unit.size_m/geometryExtent(preparationUnitGeometry(source,unit)).longest/baseline.source_scale:baseline?unit.size_m/baseline.size_m:1;
   return {current,baseline,ratio,scaleChanged:!!baseline&&Math.abs(ratio-1)>1e-8,changed:!!baseline&&(Math.abs(ratio-1)>1e-8||['x','y','z'].some(k=>Math.abs(current[k]-baseline.dimensions[k])>1e-6))};
 }
-function checkedPreparationSize(value){
-  if(!Number.isFinite(value)||value<.001-1e-10||value>1+1e-10)throw Error('校准后最大边需在 0.1～100 cm 内，请检查输入的实际长度');
-  return Math.max(.001,Math.min(1,value));
+function checkedPreparationSize(value,role){
+  const maximum=preparationMaxSize(role);
+  if(!Number.isFinite(value)||value<.001-1e-10||value>maximum+1e-10)throw Error('校准后最大边需在 0.1～'+maximum*100+' cm 内，请检查输入的实际长度');
+  return Math.max(.001,Math.min(maximum,value));
 }
 export function preparationSizeFromLength(source,unit,cm){
   if(!Number.isFinite(cm)||cm<=0)throw Error('请输入有效的实际长度');
   const current=preparationDimensions(source,unit).y;if(current<1e-7)throw Error('当前单元缺少有效的生长方向长度');
-  return checkedPreparationSize(unit.size_m*cm/current);
+  return checkedPreparationSize(unit.size_m*cm/current,unit.role);
 }
 export function preparationReferenceLength(source,unit){
   const ref=unit.size_reference;if(!ref?.a||!ref?.b)return null;
@@ -94,12 +109,17 @@ export function preparationReferenceLength(source,unit){
 export function preparationSizeFromReference(source,unit,cm){
   const distance=preparationReferenceLength(source,unit);if(!(distance>1e-6))throw Error('请点取两个不同的尺寸参照点');
   if(!Number.isFinite(cm)||cm<=0)throw Error('请输入参照段的实际厘米长度');
-  return checkedPreparationSize(unit.size_m*cm/distance);
+  return checkedPreparationSize(unit.size_m*cm/distance,unit.role);
 }
 export function preparationPack(source,draft){
   validatePreparationDraft(draft,source.geometry.index.length/3);if(!draft.units.length)throw Error('请先提取至少一个单元');
+  if(draft.merge_unit_materials===true&&source.material?.merge_unit_materials!==true)throw Error('共享材质未完成验证，请重新打开整理草稿');
   const incomplete=draft.units.filter(unit=>!unit.approved||!unit.name?.trim());if(incomplete.length)throw Error('还有 '+incomplete.length+' 个单元未确认校准');
-  return normalizePlantUnitPack({id:'prepared-'+draft.id,name:draft.name,species:'',source:'GLB 整包整理 · '+draft.sourceName,material:source.material,units:draft.units.map(unit=>calibratePreparationUnit(source.geometry,unit))});
+  const units=[],base_branches=[];
+  for(const unit of draft.units){
+    (unit.role==='BASE_BRANCH'?base_branches:units).push(calibratedGeometryRecord(source.geometry,unit));
+  }
+  return normalizePlantUnitPack({id:'prepared-'+draft.id,name:draft.name,species:'',source:'GLB 整包整理 · '+draft.sourceName,material:source.material,units,base_branches});
 }
 
 // Triangle/rectangle overlap, rather than centroid selection, keeps thin stems

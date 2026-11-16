@@ -1,6 +1,8 @@
+import {normalizeTreeLights,normalizeTreeLightFlow} from './tree-light-data.js';
 import {normalizeWindPreview} from './wind-preview-settings.js';
 import {recoverImportedTrunkCurveLayers} from './imported-trunk-curve-recovery.js';
 import { normalizeUnitEditing } from './unit-authoring.js';
+import { normalizeBaseBranchAssembly } from './base-branch-assembly.js';
 import {normalizeImportedTrunks,normalizeImportedTrunkShapeTimes} from './imported-trunk-runtime.js';
 import {normalizeAxisTimes} from './branch-axis.js';
 import {DEFAULT_WIND_PROFILE} from './wind-profile-defaults.js';
@@ -188,6 +190,8 @@ export function normalizeAuthoring(raw = {}, fallbackSeed = 12037, previous = nu
     leaf_material: normalizeLeafMaterial(source.leaf_material),
     sample_materials: normalizeSampleMaterials(source.sample_materials),
     plant_unit_assembly: normalizeUnitAssembly(source.plant_unit_assembly),
+    ...(source.base_branch_assembly ? { base_branch_assembly: previous?.base_branch_assembly === source.base_branch_assembly
+      ? source.base_branch_assembly : normalizeBaseBranchAssembly(source.base_branch_assembly) } : {}),
     flowering: normalizeFlowering(source.flowering),
     tree_organs: normalizeTreeOrgans(source.tree_organs),
     unit_editing: normalizeUnitEditing(source.unit_editing),
@@ -386,6 +390,9 @@ export function normalizeAuthoring(raw = {}, fallbackSeed = 12037, previous = nu
     require_tangents: source.quality?.require_tangents !== false,
     require_uvs: source.quality?.require_uvs !== false,
   };
+  if(source.tree_lights!=null)result.tree_lights=normalizeTreeLights(source.tree_lights,result.imported_trunks);
+  if(result.tree_lights&&source.tree_light_flow)result.tree_light_flow=normalizeTreeLightFlow(source.tree_light_flow);
+  else delete result.tree_light_flow;
   result.branch_shape=normalizeImportedTrunkShapeTimes(result.branch_shape,result.imported_trunks);
   return recoverImportedTrunkCurveLayers(result);
 }

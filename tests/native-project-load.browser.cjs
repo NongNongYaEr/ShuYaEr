@@ -1,7 +1,7 @@
 // An isolated off-desktop host, using a read-only project snapshot. Never attach
 // to the user's editor. Exercise actual file load/save/cold load and DX12 output.
 const fs=require('node:fs'),path=require('node:path'),net=require('node:net'),crypto=require('node:crypto'),assert=require('node:assert/strict'),{spawn}=require('node:child_process');
-const {chromium}=require('playwright');
+const {chromium}=require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 const root=path.resolve(__dirname,'..'),arg=(name,fallback)=>{const i=process.argv.indexOf(name);return i<0?fallback:process.argv[i+1];},input=path.resolve(arg('--project','')),out=path.resolve(arg('--out','.runtime/native-load-header-fix/load-acceptance')),executable=path.resolve(arg('--executable','.runtime/native-load-header-fix/native-build/BranchForgeNativeLoadTest.exe'));
 if(!input||!out.toLowerCase().startsWith((path.join(root,'.runtime')+path.sep).toLowerCase()))throw Error('Use an explicit project and isolated runtime output');
 const delay=ms=>new Promise(r=>setTimeout(r,ms)),hash=bytes=>crypto.createHash('sha256').update(bytes).digest('hex'),inputHash=hash(fs.readFileSync(input)),report={input,inputHash,loads:[],errors:[]};

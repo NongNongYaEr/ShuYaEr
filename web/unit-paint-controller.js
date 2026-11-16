@@ -1,3 +1,5 @@
+import {getViewportNavigationMode} from './viewport-navigation.js';
+const mayaAltEdit=event=>getViewportNavigationMode()==='maya'&&event.altKey&&event.ctrlKey;
 import * as T from './vendor/three.module.min.js';
 import {nearestParameter,sampleLine,lineTangent} from './tree-sculpt.js';
 import {skeletonBranches} from './skeleton-thickness.js';
@@ -23,7 +25,7 @@ export function createUnitPaintController(api,context){
  const panel=document.createElement('section');panel.id='unitPaintSettings';
  panel.innerHTML=`<div class="unit-paint-source"><img id="unitPaintSourceImage" alt=""><div><small>当前生成素材</small><strong id="unitPaintSourceName">先在左侧选择单元枝</strong><span id="unitPaintSourceVersion"></span></div></div>
  <p id="unitPaintState" class="wb-note" role="status">选择素材后，在承重枝上单击或拖动。</p>
- <div id="unitPaintMode" class="unit-paint-mode" role="status"><b>＋ 刷生成</b><span>按住 Alt 临时擦除完整单元枝</span></div>
+ <div id="unitPaintMode" class="unit-paint-mode" role="status"><b>＋ 刷生成</b><span>按住 Alt 临时擦除（Maya 用 Ctrl＋Alt）</span></div>
  <label>笔刷半径 · F <output id="unitPaintRadiusValue"></output><input id="unitPaintRadius" type="range" min="20" max="700" step="1" value="160"></label>
  <div class="field-grid"><label>最小间距（cm）<input id="unitPaintSpacing" type="number" min="1" max="500" step="1" value="30"></label><label>完整模型倍率<input id="unitPaintScale" type="number" min="0.01" max="10" step="any" value="1"></label></div>
  <label>母枝范围<select id="unitPaintScope"><option value="VISIBLE">当前可见母枝</option><option value="SELECTED">仅指定母枝</option></select></label>
@@ -32,7 +34,7 @@ export function createUnitPaintController(api,context){
  <label>装配分区<select id="unitPaintRole"><option value="AUTO">自动归区</option><option value="MATURE">内部</option><option value="MIXED">中间</option><option value="YOUNG">末端</option></select></label>
  <details class="companion-advanced"><summary>朝向与变化</summary><div class="field-grid"><label>向枝梢偏转（°）<input id="unitPaintTilt" type="number" min="-60" max="80" value="20"></label><label>随机滚转（±°）<input id="unitPaintRoll" type="number" min="0" max="180" value="15"></label></div></details>
  <div class="unit-paint-summary"><span>已装配 <b id="unitPaintTotal">0</b></span><span>本轮新增 <b id="unitPaintRound">0</b></span></div>
- <p class="wb-note">单击补一支 · 拖动连续生成 · Alt＋左键擦除 · 松手确认 · Esc 取消整笔。擦除穿透笔刷内可见实例，包含挂接子枝；锁定或隐藏家族保留。每笔固定操作，松手后切换。</p>`;
+ <p class="wb-note">单击补一支 · 拖动连续生成 · Alt＋左键擦除（Maya 用 Ctrl＋Alt＋左键） · 松手确认 · Esc 取消整笔。擦除穿透笔刷内可见实例，包含挂接子枝；锁定或隐藏家族保留。每笔固定操作，松手后切换。</p>`;
  context.register('UNIT_PAINT','单元枝 · 刷生成',panel);
  const overlay=node('svg',{id:'unitPaintOverlay','aria-hidden':'true',class:'unit-paint-overlay',hidden:''}),axis=node('path'),eraseMarks=node('path',{class:'unit-paint-erase-marks'}),ring=node('circle'),anchor=node('circle',{r:4}),sign=node('text',{'text-anchor':'middle','dominant-baseline':'central'});sign.textContent='+';overlay.append(axis,eraseMarks,ring,anchor,sign);canvas.parentElement.append(overlay);
  const feedback=document.createElement('div');feedback.className='sculpt-feedback unit-paint-feedback';feedback.hidden=true;feedback.innerHTML='<strong></strong><span></span><small></small>';canvas.parentElement.append(feedback);
@@ -140,7 +142,7 @@ export function createUnitPaintController(api,context){
   show(point,null,true);const entries=stroke?.erasePlan?.entries||erasePlan().entries,pending=stroke?.removed||new Set(hits.filter(e=>!e.reason).flatMap(e=>[...e.family])),blocked=hits.filter(e=>e.reason);
   const screen=screenErase(),key=[...pending].sort().join('|');if(key!==eraseMarkKey){eraseMarkKey=key;eraseMarks.setAttribute('d',[...pending].map(id=>screen.paths.get(id)||'').join(' '));}
   if(stroke?.erase)stroke.erasePreview.hide(pending);
-  feedback.querySelector('strong').textContent=stroke?'擦除 · 本笔移除 '+pending.size+' 支':'Alt 擦除 · 命中 '+pending.size+' 支';feedback.querySelector('span').textContent=blocked.length?'跳过 '+blocked.length+' 组 · '+blocked[0].reason:'完整单元枝 · 含挂接子枝';feedback.querySelector('small').textContent=stroke?'已即时隐藏 · 松手确认 · Esc 恢复整笔':'按住 Alt＋左键刷除 · Esc 取消';
+  feedback.querySelector('strong').textContent=stroke?'擦除 · 本笔移除 '+pending.size+' 支':'Alt 擦除 · 命中 '+pending.size+' 支';feedback.querySelector('span').textContent=blocked.length?'跳过 '+blocked.length+' 组 · '+blocked[0].reason:'完整单元枝 · 含挂接子枝';feedback.querySelector('small').textContent=stroke?'已即时隐藏 · 松手确认 · Esc 恢复整笔':'Alt＋左键刷除（Maya 用 Ctrl＋Alt＋左键） · Esc 取消';
  }
  function show(point,target,erase=false,plan=null){
   const asset=api.getAsset(),rect=canvas.getBoundingClientRect();overlay.removeAttribute("hidden");overlay.setAttribute('viewBox',`0 0 ${rect.width} ${rect.height}`);Object.assign(overlay.style,{left:canvas.offsetLeft+'px',top:canvas.offsetTop+'px',width:rect.width+'px',height:rect.height+'px'});
@@ -171,15 +173,15 @@ export function createUnitPaintController(api,context){
    api.setSelections(new Set(roots));message('已新增 '+s.pending.length+' 支 · 本轮已选 '+round.size+' 支');
   }catch(error){api.toast(error.message,true);}finally{committing=false;preview?.hide();overlay.setAttribute("hidden","");feedback.hidden=true;pickCache=null;refresh();}
  }
- canvas.addEventListener('pointerdown',e=>{if(!enabled()||e.button===1||e.button===4)return;if(e.button===2){consume(e);cancel();return;}if(e.button!==0||e.ctrlKey||e.shiftKey||e.metaKey)return;consume(e);canvas.focus({preventScroll:true});setAlt(e.altKey);if(blocked()||workflow.adjusting)return;if(!altErase&&!paintReady){message('请先在左侧选择完整单元枝素材；Alt 可直接擦除已装配实例');return;}if(!altErase&&!validate()){message('请检查笔刷参数的数值范围');return;}
+ canvas.addEventListener('pointerdown',e=>{if(!enabled()||e.button===1||e.button===4)return;if(e.button===2){consume(e);cancel();return;}if(e.button!==0||(e.ctrlKey&&!mayaAltEdit(e))||e.shiftKey||e.metaKey)return;consume(e);canvas.focus({preventScroll:true});setAlt(e.altKey&&(getViewportNavigationMode()!=='maya'||mayaAltEdit(e)));if(blocked()||workflow.adjusting)return;if(!altErase&&!paintReady){message('请先在左侧选择完整单元枝素材；Alt（Maya 用 Ctrl＋Alt）可直接擦除已装配实例');return;}if(!altErase&&!validate()){message('请检查笔刷参数的数值范围');return;}
   clearMoves();stroke={pointerId:e.pointerId,asset:api.getAsset(),authoring:api.getAuthoring(),controls:controls.enabled,pending:[],erase:altErase,removed:new Set(),erasePlan:altErase?erasePlan():null,erasePreview:altErase?createUnitErasePreview(api.getAsset()):null,selection:[...api.getSelections()],occupied:altErase?[]:[...occupied()],samplePoint:pointAt(e),reason:''};controls.enabled=false;canvas.setPointerCapture(e.pointerId);syncMode();dab(stroke.samplePoint);if(stroke.erase)showErase(stroke.samplePoint,eraseAt(stroke.samplePoint));else show(stroke.samplePoint,null);
  },true);
- canvas.addEventListener('pointermove',e=>{pointerInside=true;if(!enabled())return;if(stroke){consume(e);if(e.pointerId===stroke.pointerId)queueMove(e);}else if(!e.buttons){setAlt(e.altKey);queueMove(e);}},true);
+ canvas.addEventListener('pointermove',e=>{pointerInside=true;if(!enabled())return;if(stroke){consume(e);if(e.pointerId===stroke.pointerId)queueMove(e);}else if(!e.buttons){setAlt(e.altKey&&(getViewportNavigationMode()!=='maya'||mayaAltEdit(e)));queueMove(e);}},true);
  canvas.addEventListener('pointerup',e=>{if(!enabled()||!stroke||e.button!==0)return;consume(e);finish(e);},true);
  canvas.addEventListener('pointercancel',()=>cancel(),true);canvas.addEventListener('lostpointercapture',()=>{if(stroke)cancel();},true);
  canvas.addEventListener('pointerleave',()=>{pointerInside=false;if(!stroke){clearMoves();overlay.setAttribute("hidden","");feedback.hidden=true;preview?.hide();}});
  canvas.addEventListener('contextmenu',e=>{if(enabled()){consume(e);cancel();}},true);
- window.addEventListener('keydown',e=>{if(!enabled()||document.querySelector('dialog[open]'))return;if(e.key==='Alt'&&(pointerInside||stroke)){e.preventDefault();setAlt(true);return;}if(e.target?.isContentEditable||e.target?.matches?.('input,textarea,select'))return;if(e.key==='Escape'&&(stroke||workflow.adjusting)){consume(e);cancel();workflow.cancel();}else if(stroke&&(e.ctrlKey||e.metaKey||['g','r','s','Delete'].includes(e.key)))cancel();},true);
+ window.addEventListener('keydown',e=>{if(!enabled()||document.querySelector('dialog[open]'))return;if(e.key==='Alt'&&(pointerInside||stroke)){e.preventDefault();setAlt(getViewportNavigationMode()!=='maya'||mayaAltEdit(e));return;}if(e.target?.isContentEditable||e.target?.matches?.('input,textarea,select'))return;if(e.key==='Escape'&&(stroke||workflow.adjusting)){consume(e);cancel();workflow.cancel();}else if(stroke&&(e.ctrlKey||e.metaKey||['g','r','s','Delete'].includes(e.key)))cancel();},true);
  window.addEventListener('keyup',e=>{if(e.key==='Alt')setAlt(false);},true);
  window.addEventListener('blur',()=>{pointerInside=false;cancel();setAlt(false);});document.addEventListener('visibilitychange',()=>{if(document.hidden){pointerInside=false;cancel();setAlt(false);}});controls.addEventListener('change',()=>{pickCache=null;if(enabled()&&!stroke&&pointerInside&&lastHover)queueMove(lastHover);});
  document.addEventListener('tree-assembly-refreshed',()=>{eraseCache=pickCache=null;refresh();});

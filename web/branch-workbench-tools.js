@@ -107,6 +107,7 @@ export function createWorkbenchTools(api) {
   gizmo.addEventListener('objectChange', () => { if (!gizmo.dragging) return; api.preview((a) => { a.branch_shape.connector.position = connector.position.toArray(); a.branch_shape.connector.direction = new THREE.Vector3(1, 0, 0).applyQuaternion(connector.quaternion).toArray(); }); });
   gizmo.addEventListener('mouseUp', () => { controls.enabled = true; api.commit(); refresh(); });
   function activate(next) {
+    if (next && api.isBaseBranchAssembly?.()) return;
     if (next && !next.startsWith('CONNECT') && !getBranch()) return api.toast('单元枝样式请在枝条工作台编辑；整树中可用 G/R/S 调整整支');
     cancel(); tool = next; gizmo.detach(); gizmo.enabled = false;
     if (['CONNECT_MOVE', 'CONNECT_ROTATE'].includes(next) && api.isBranch()) { gizmo.setMode(next === 'CONNECT_MOVE' ? 'translate' : 'rotate'); gizmo.attach(connector); gizmo.enabled = true; }

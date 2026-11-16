@@ -1,5 +1,5 @@
 import {LOCAL_ENDGRAIN_RECIPES} from './web/local-endgrain-catalog.js';
-import {DEFAULT_STYLE_A_SHA256,DEFAULT_STYLE_A_THUMBNAIL} from './default-material-style-a.js';
+import {DEFAULT_STYLE_A_SHA256,DEFAULT_STYLE_A_THUMBNAIL,withDefaultRootFallback} from './default-material-style-a.js';
 import{decalAppearance,decalPlacement,decalColorMode}from'./surface-decal-styles.js';
 import{defaultBlend}from'./material-blend.js';
 import {WEATHERING_LAYERS} from './tree-weathering.js';
@@ -7,14 +7,21 @@ import {formDependencies,isFormEffect} from './form-effects.js';
 import {SCULPT_OVERLAY_RECIPES,SCULPT_COMBINATIONS} from './web/sculpt-effect-catalog.js';
 import {distributionDefaults,validateDistributionParams,distributionNeedsGeometry,DISTRIBUTION_KEYS} from './distribution-modes.js';
 import {SURFACE_VERSION,EFFECT_TYPES,addEffect,createRule,appendPaintRule,effectChannels,effectLayerKind} from './surface-effects.js';
-import {cloneLayerResources,insertLayer,layerIndex,layerLeafIds,pruneSurfaceResources,validateLayerTree} from './surface-layers.js';
+import {cloneLayerResources,insertLayer,layerIndex,layerIsLocked,layerLeafIds,pruneSurfaceResources,validateLayerTree} from './surface-layers.js';
 import {packSurfaceRecipe,importSurfaceRecipe,validateSurfaceRecipe} from './surface-recipe.js';
+import {isManualDecalPlacement} from './web/manual-decal-rules.js';
+import {SCENE_OVERLAYS} from './scene-overlay-catalog.js';
+import {SCENE_OVERLAY_RULE,sceneOverlayDefaults} from './scene-overlay-rules.js';
 export const EFFECT_CATEGORIES={all:'全部',attachment:'自然附着',weathering:'污染老化',paint:'人工覆盖',detail:'表面细节',damage:'伤痕与结构',bio:'苔藓与地衣',deposit:'沉积与污渍',coating:'涂层与残留',adjustment:'材质调整',form:'形体修饰',combo:'组合效果',mine:'我的效果'};
 const rule=(type,params={},extra={})=>({type,params,...extra});
 const noise=(threshold=.45,sizeMeters=.3,combine='intersect')=>rule('noise',{sizeMeters,threshold,softness:.12,seed:3},{combine});
 const height=maxFraction=>({type:'height',maxFraction});
+const wornPaintHeight=()=>rule('height',{featherMeters:.015},{maxFraction:.16});
 const coat=(type,name,params={},rules=[],extra={})=>({type,name,params:type==='burl'&&params.burlStyle?{...decalAppearance(params.burlStyle),...decalPlacement(params.burlStyle),...params}:params,rules,...extra});
-const moss=()=>coat('moss','根部厚苔',{mossNormalStrength:1.6,mossThicknessMm:6},[rule('ao',{threshold:.25,softness:.15}),noise(.4,.2),rule('paint')],{scopeFraction:.25});
+const rootMossAO={threshold:.25,softness:.15},rootMossNoise=noise(.4,.2);
+const rootMossHeight=.25,rootMossBase=.6;
+const moss=()=>coat('moss','根部厚苔',{mossNormalStrength:1.6,mossThicknessMm:6},
+ [rule('ao',rootMossAO,{combine:'add'}),rootMossNoise,rule('paint')],{scopeFraction:rootMossHeight,initial:rootMossBase});
 const oldPaint=()=>coat('paint','斑驳白漆',{paintWear:.3},[height(.16),noise(.4,.35,'subtract'),rule('paint')]);
 const rain=()=>coat('stain','纵向雨痕',{},[rule('streaks'),noise(.35,.5)]);
 const stableWeathering=WEATHERING_LAYERS.map(e=>({...e,rules:e.rules.map(r=>({...r,type:'treeauto',params:{role:r.params.role}}))}));
@@ -30,7 +37,7 @@ const entries=[
  ['form-rootwet','根部潮湿','form','低位、凹槽与遮蔽共同控制局部湿润。',[coat('rootwet','根部潮湿')]],
  ['form-old-tree','自然老树','form','接触深化、沟槽沉积与凸脊风化，自动适配模型的独立图层组。',[coat('contact','接触深化'),coat('groove','沟槽沉积',{surfaceAmount:.7}),coat('ridge','凸脊风化',{surfaceAmount:.6})]],
  ['moss-scattered','薄散苔藓','attachment','疏散小片附着，保留较多树皮。',[coat('moss','薄散苔藓',{mossThicknessMm:1.8,mossNormalStrength:.8},[noise(.58,.2,'replace')])]],
- ['moss-root','根部厚苔','attachment','根部限制、几何AO、斑驳与本层手绘。',[moss()]],
+ ['moss-root','根部厚苔','attachment','在树干低处形成苔斑，几何 AO 加强凹处，可用本层手绘修正。',[moss()]],
  ['moss-dry','干燥苔斑','attachment','偏黄的干苔与较粗糙叶簇。',[coat('moss','干燥苔斑',{mossColor:'#767333',mossRough:.98,mossThicknessMm:2},[noise(.62,.18,'replace')])]],
  ['algae-film','薄藻膜','attachment','薄层绿色附着，保留树皮凹凸。',[coat('algae','薄藻膜',{},[noise(.42,.32,'replace')])]],
  ['algae-waterline','潮湿水线藻膜','attachment','底部水线与条状薄藻。',[coat('algae','潮湿水线藻膜',{surfaceRoughness:.55},[height(.28),rule('streaks',{widthMeters:.08,lengthMeters:.6,threshold:.3,softness:.15,seed:11},{combine:'intersect'})])]],
@@ -42,9 +49,13 @@ const entries=[
  ['mud-splash','底部飞溅泥点','weathering','高度限制内的小片泥点。',[coat('dirt','底部飞溅泥点',{dirt:.8},[height(.12),noise(.65,.05)])]],
  ['rain-streaks','纵向雨痕','weathering','只调整颜色与粗糙度的连续水流污痕。',[rain()]],
  ['rain-dark','深色流挂','weathering','窄条流挂与深色渗痕。',[coat('stain','深色流挂',{surfaceAmount:.8,surfaceColor:'#403a2c'},[rule('streaks',{widthMeters:.018,lengthMeters:2,threshold:.6,softness:.12,seed:7})])]],
- ['paint-new','新刷白漆','paint','薄白漆跟随树皮结构。',[coat('paint','新刷白漆',{paintWear:.03,paintBarkNormal:1},[height(.135)])]],
- ['paint-old','大片斑驳白漆','paint','大片缺失与可补画的旧漆。',[oldPaint()]],
- ['paint-convex','凸处磨损白漆','paint','高度范围、斑驳及模型凸处磨损。',[coat('paint','凸处磨损白漆',{paintWear:.25},[height(.16),noise(.3,.28),rule('curvature',{threshold:.15,softness:.1}),rule('paint')])]],
+ ['paint-new','新刷白漆','paint','薄白漆跟随树皮结构。',[coat('paint','新刷白漆',{paintWear:.03,paintBarkNormal:1},[rule('height',{featherMeters:.015},{maxFraction:.135})])]],
+ ['paint-old','大片斑驳白漆','paint','漆面成片脱落，露出树皮，可局部补漆。',[coat('paint','大片斑驳白漆',{paintWear:.3},[
+  wornPaintHeight(),rule('noise',{sizeMeters:.35,threshold:.60,softness:.035,seed:3},{combine:'subtract'}),rule('paint')
+ ])]],
+ ['paint-convex','凸处磨损白漆','paint','按模型曲率磨掉凸脊漆面，凹处留漆，可手绘修正。',[coat('paint','凸处磨损白漆',{paintWear:.25},[
+  wornPaintHeight(),rule('curvature',{threshold:.32,softness:.04},{strength:.95}),rule('paint')
+ ])]],
  ['burl-scatter','自然树瘤散布','detail','按数量在源表面选点，避开狭窄、深凹与空间不足的位置；叠加瘤皮、起伏、法线、粗糙度与AO，不改模型轮廓。',[coat('burl','自然树瘤散布')]],
  ['decal-branch-scar','断枝节疤散布','damage','AI透明贴花：断枝节疤。按数量与源表面选点，多通道叠加；仅贴图起伏，不改变轮廓。',[coat('burl','断枝节疤散布',{burlStyle:1,surfaceHeightMm:5,burlCount:2})]],
  ['decal-healed-wound','愈合伤口散布','damage','AI透明贴花：愈合伤口。按数量与源表面选点，多通道叠加；仅贴图起伏，不改变轮廓。',[coat('burl','愈合伤口散布',{burlStyle:2,surfaceHeightMm:6,burlCount:2})]],
@@ -116,12 +127,42 @@ const entries=[
  ['combo-paint','旧漆与雨痕','combo','旧漆与雨痕分开调节，组合保存。',[oldPaint(),rain()]],
  ['combo-aged','自然老化组合','combo','褪色、零散地衣和轻雨痕。',[coat('bleach','轻度褪色',{surfaceAmount:.2},[]),coat('lichen','零散地衣',{},[noise(.68,.1,'replace')]),coat('stain','浅雨痕',{surfaceAmount:.25},[rule('streaks')])]]
 ];
-export const EFFECT_LIBRARY_BUILTINS=[...LOCAL_ENDGRAIN_RECIPES.map(e=>({...e,id:'builtin-'+e.id})),...entries.map(([id,name,category,description,layers])=>({id:'builtin-'+id,name,category,description,layers})),...[...SCULPT_OVERLAY_RECIPES,...SCULPT_COMBINATIONS].map(r=>({...r,id:'builtin-'+r.id}))].map(e=>({...e,kind:e.layers.length>1?'combo':'builtin',primaryType:e.layers.at(-1).type,types:[...new Set(e.layers.map(l=>l.type))],dependencies:libraryEntryDependencies(e),manual:e.layers.some(l=>l.initial===0),effectCount:e.layers.length}));
+const sceneCoatingNames={
+ 'tide':['旧泥带','浅色沉积线'],
+ 'strap':['带内压痕','磨亮带缘'],
+ 'sap':['下流树液','起点与尾滴'],
+ 'paint-peel':['表漆','底漆'],
+ 'hollow-rim':['磨亮口沿','洞壁暗色'],
+ 'litter':['碎叶','腐叶染色'],
+ 'graft':['接合暗线','愈伤隆边'],
+ 'lichen-ring':['旧内斑','生长边'],
+ 'rust':['下淌锈迹','钉孔锈圈'],
+ 'brand':['烙印主体','热变色边'],
+ 'evaporation':['未干水斑','蒸发残边']
+};
+const sceneEntries=Object.entries(SCENE_OVERLAYS).map(([sceneStyle,spec])=>({
+ id:'builtin-scene-'+sceneStyle,sceneStyle,collection:'scene',name:spec.name,category:spec.category,
+ description:spec.description,layers:spec.coatings.map((coating,i)=>({...coating,name:sceneCoatingNames[sceneStyle]?.[i]||spec.name,rules:[]}))
+}));
+export const EFFECT_LIBRARY_BUILTINS=[...LOCAL_ENDGRAIN_RECIPES.map(e=>({...e,id:'builtin-'+e.id})),...sceneEntries,...entries.map(([id,name,category,description,layers])=>({id:'builtin-'+id,name,category,description,layers})),...[...SCULPT_OVERLAY_RECIPES,...SCULPT_COMBINATIONS].map(r=>({...r,id:'builtin-'+r.id}))].map(e=>({...e,kind:e.layers.length>1?'combo':'builtin',primaryType:e.layers.at(-1).type,types:[...new Set(e.layers.map(l=>l.type))],dependencies:libraryEntryDependencies(e),manual:e.layers.some(l=>l.initial===0),effectCount:e.layers.length}));
+export function libraryDecalEntry(id){
+ const entry=EFFECT_LIBRARY_BUILTINS.find(item=>item.id===id);
+ const layer=entry?.layers[0];
+ return entry?.kind==='builtin'&&entry.layers.length===1&&layer.type==='burl'&&
+  !layer.rules.length&&!layer.distribution&&!layer.scopeFraction?entry:null;
+}
 export function libraryMetadata(entry){const e=entry.layers?.at(-1),type=entry.primaryType||e?.type;return{...entry,isGroup:entry.effectCount>1||!!entry.surfaceRecipe?.surface.layers.some(n=>n.kind==='group'),layers:undefined,surfaceRecipe:undefined,channels:effectChannels(type),layerKind:effectLayerKind(type),thumbnailReady:entry.collection==='sculpt'||entry.sha256===DEFAULT_STYLE_A_SHA256,thumbnail:entry.collection==='sculpt'?'/assets/sculpt-effects/previews/'+entry.recipeId.toLowerCase()+'.png':entry.sha256===DEFAULT_STYLE_A_SHA256?DEFAULT_STYLE_A_THUMBNAIL:'/assets/effect-library/'+(type==='burl'&&e?.params.burlStyle?'decal-'+e.params.burlStyle:type)+'.png',swatch:e?.params.surfaceColor||e?.params.mossColor||e?.params.paintColor||EFFECT_TYPES[type]?.fields.surfaceColor?.value||'#7e8665'};}
 function builtinSurface(entry,document){
  let s={version:SURFACE_VERSION,active:true,effects:[],masks:[],areas:[],layers:[],analysis:{curvature:{radiusMeters:.1}}};
+ const sceneInstance=entry.sceneStyle?crypto.randomUUID():null;
  for(const spec of entry.layers){const added=addEffect(s,spec.type,{actualHeightMeters:document.actualHeightMeters,sourceSHA256:document.resources.source});s=added.s;const e=s.effects.at(-1),m=s.masks.find(m=>m.id===e.maskRef);e.name=spec.name;Object.assign(e.params,spec.params);if(spec.type==='burl'&&spec.params.burlStyle&&decalColorMode(spec.params.burlStyle)!=='normal'){e.blend=defaultBlend();e.blend.color.mode=decalColorMode(spec.params.burlStyle);}if(spec.channels)e.channels=structuredClone(spec.channels);if(spec.opacity!=null)e.opacity=spec.opacity;m.name=spec.name+'蒙版';m.initial=spec.initial??1;m.items=[];
-  for(const input of spec.rules){if(input.type==='paint'){s=appendPaintRule(s,e.id,document.resources.source).s;continue;}const rule=createRule(input.type);Object.assign(rule.params,input.params||{});if(input.type==='height'&&input.maxFraction!=null)rule.params.maxMeters=document.actualHeightMeters*input.maxFraction;if(input.combine)rule.combine=input.combine;if(input.polarity)rule.polarity=input.polarity;s.masks.find(x=>x.id===e.maskRef).items.push(rule);}
+  for(const input of spec.rules){if(input.type==='paint'){s=appendPaintRule(s,e.id,document.resources.source).s;continue;}const rule=createRule(input.type);Object.assign(rule.params,input.params||{});if(input.type==='height'&&input.maxFraction!=null)rule.params.maxMeters=document.actualHeightMeters*input.maxFraction;if(input.combine)rule.combine=input.combine;if(input.polarity)rule.polarity=input.polarity;if(input.strength!=null)rule.strength=input.strength;s.masks.find(x=>x.id===e.maskRef).items.push(rule);}
+  if(sceneInstance){
+   m.initial=0;
+   m.items.push(createRule(SCENE_OVERLAY_RULE,{scene:{
+    version:1,style:entry.sceneStyle,role:spec.role,instance:sceneInstance,params:sceneOverlayDefaults(entry.sceneStyle),points:[],source:null
+   }}));
+  }
   const current=s.effects.find(x=>x.id===e.id);
   if(spec.blend)current.blend=structuredClone(spec.blend);
   if(spec.emission)current.emission=structuredClone(spec.emission);
@@ -135,8 +176,49 @@ export function instantiateLibraryEntry(document,entry,location={}){
  let template,warnings=[];if(entry.surfaceRecipe){const imported=importSurfaceRecipe(entry.surfaceRecipe,document);template=imported.surface;warnings=imported.warnings;}else template=builtinSurface(entry,document);
  const s=structuredClone(document.surface);if(entry.category==='form'&&!location.parentId&&!location.targetId&&s.layers.length)location={targetId:s.layers[0].id,position:'before'};if(s.effects.length+template.effects.length>16)throw Error('图层预算不足：此效果需要'+template.effects.length+'个叶层，最多16个。');const copy=cloneLayerResources(template,template.layers),nodes=copy.layers;let top;
  if(nodes.length===1){top=nodes[0];if(top.kind==='group')top.name=entry.name;else copy.effects[0].name=entry.name;}else top={id:crypto.randomUUID(),kind:'group',name:entry.name,enabled:true,locked:false,opacity:1,children:nodes};
- if([...s.effects,...copy.effects].filter(e=>e.type==='burl').reduce((n,e)=>n+e.params.burlCount,0)>8)throw Error('表面贴花总数量最多8个（包括隐藏图层）。');s.effects.push(...copy.effects);s.masks.push(...copy.masks);s.areas.push(...copy.areas);insertLayer(s,top,location);pruneSurfaceResources(s);validateLayerTree(s);s.active=true;return{surface:s,id:top.id,warnings};
+ if([...s.effects,...copy.effects].filter(e=>e.type==='burl').reduce((n,e)=>n+e.params.burlCount,0)>8)throw Error('表面贴花总数量最多8个（包括隐藏图层）。');s.effects.push(...copy.effects);s.masks.push(...copy.masks);s.areas.push(...copy.areas);insertLayer(s,top,location);pruneSurfaceResources(s);validateLayerTree(s);s.active=true;
+ return{surface:withDefaultRootFallback(s,top.id),id:top.id,warnings};
 }
+export function instantiateLibraryDecal(document,entry,location={}){
+ const builtin=libraryDecalEntry(entry?.id);
+ if(!builtin)throw Error('此效果不能直接拖到模型表面。');
+ const layer=builtin.layers[0];
+ const pointLayer={...layer,params:{...layer.params,burlCount:0}};
+ const result=instantiateLibraryEntry(document,{...builtin,layers:[pointLayer]},location);
+ result.surface.effects.find(effect=>effect.id===result.id).manualDecals=[];
+ return result;
+}
+export function withBuiltinRootMossFallback(surface){
+ const matches=(actual,expected)=>Object.keys(actual).length===Object.keys(expected).length
+  &&Object.entries(expected).every(([key,value])=>actual[key]===value);
+ const masks=new Set();
+ for(const effect of surface.effects){
+  if(effect.type!=='moss'||effect.name!=='根部厚苔'||effect.coverageMode!=='rules'||
+     effect.distribution||effect.paint||effect.manualBrush||layerIsLocked(surface,effect.id))continue;
+  if(surface.effects.some(other=>other!==effect&&other.maskRef===effect.maskRef))continue;
+  const scope=surface.areas.find(area=>area.id===effect.scopeRef);
+  if(scope?.kind!=='height'||scope.ownedBy!==effect.id||!scope.presetOwned||scope.partId||
+     !matches(scope.scope||{},{kind:'height',min:0,max:rootMossHeight,feather:.03}))continue;
+  const mask=surface.masks.find(item=>item.id===effect.maskRef);
+  if(mask?.name!=='根部厚苔蒙版'||mask.initial!==1||mask.items.length!==3)continue;
+  const [ao,pattern,paint]=mask.items;
+  if(!mask.items.every(item=>item.enabled&&item.strength===1))continue;
+  if(ao.type!=='ao'||ao.polarity!=='cavity'||ao.combine!=='replace'||!matches(ao.params,rootMossAO))continue;
+  if(pattern.type!=='noise'||pattern.combine!==rootMossNoise.combine||!matches(pattern.params,rootMossNoise.params))continue;
+  if(paint.type!=='paint'||![paint.addRef,paint.eraseRef].every(id=>surface.areas.some(area=>
+   area.id===id&&area.ownedBy===effect.id&&area.kind==='surface'&&area.mode==='painted'&&
+   !area.scope&&!area.partId&&!area.strokes.length)))continue;
+  masks.add(mask.id);
+ }
+ if(!masks.size)return surface;
+ const next=structuredClone(surface);
+ for(const mask of next.masks)if(masks.has(mask.id)){
+  mask.initial=rootMossBase;
+  mask.items[0].combine='add';
+ }
+ return next;
+}
+
 export function saveLayerPreset(document,id,{name}={}){
  const node=layerIndex(document.surface).get(id)?.node;if(!node)throw Error('请选择要保存的图层或组。');const s=structuredClone(document.surface),leaves=new Set(layerLeafIds(s,id));s.layers=[structuredClone(node)];s.effects=s.effects.filter(e=>leaves.has(e.id));pruneSurfaceResources(s);const usedAreas=new Set(s.effects.map(e=>e.scopeRef).filter(Boolean));for(const mask of s.masks)for(const r of mask.items)for(const k of ['areaRef','addRef','eraseRef'])if(r[k])usedAreas.add(r[k]);s.areas=s.areas.filter(a=>usedAreas.has(a.id));if(!s.effects.length)throw Error('空图层组不能保存为效果。');
  for(const e of s.effects)if(e.paint)e.paint.strokes=[];const surfaceRecipe=packSurfaceRecipe({...document,surface:s});return{kind:'tree-effect-preset',version:1,name:name||node.name||s.effects[0].name,description:'自存图层预设',tags:[],surfaceRecipe};
@@ -149,11 +231,11 @@ export function validateEffectPreset(raw){
 // Analysis preparation is independent of layer insertion. Failed/cancelled preparation inserts nothing.
 export function libraryEntryDependencies(entry){
  const effects=entry.surfaceRecipe?.surface.effects||entry.layers||[],masks=entry.surfaceRecipe?.surface.masks||[];
- return [...new Set(effects.flatMap(e=>[...(!entry.manualPlacement&&!e.manualDecal?formDependencies(e.type):[]),...(e.distribution?.mode&&distributionNeedsGeometry({mode:DISTRIBUTION_KEYS.indexOf(e.distribution.mode)})?['stable']:[]),...(e.rules||masks.find(m=>m.id===e.maskRef)?.items||[]).filter(r=>r.enabled!==false&&['ao','curvature','treeweather','treeauto','distribution'].includes(r.type)).flatMap(r=>r.type==='distribution'?(distributionNeedsGeometry(r.params)?['stable']:[]):[r.type==='treeweather'?'weathering':r.type==='treeauto'?'stable':r.type])]))];
+ return [...new Set(effects.filter(e=>e.enabled!==false&&e.opacity!==0).flatMap(e=>[...(!entry.manualPlacement&&!isManualDecalPlacement(e)&&!e.distribution?formDependencies(e.type):[]),...(e.distribution?.mode&&distributionNeedsGeometry({mode:DISTRIBUTION_KEYS.indexOf(e.distribution.mode)})?['stable']:[]),...(e.rules||masks.find(m=>m.id===e.maskRef)?.items||[]).filter(r=>r.enabled!==false&&['ao','curvature','treeweather','treeauto','distribution'].includes(r.type)).flatMap(r=>r.type==='distribution'?(distributionNeedsGeometry(r.params)?['stable']:[]):[r.type==='treeweather'?'weathering':r.type==='treeauto'?'stable':r.type])]))];
 }
 export async function prepareLibraryEntry(entry,{document:getDocument,state,prepare,progress=()=>{}}){
  const doc=getDocument();if(!doc)throw Error('请先导入模型。');const identity=JSON.stringify([doc.id,doc.resources.source,doc.actualHeightMeters]);
- const needsVerifiedAO=(entry.surfaceRecipe?.surface.effects||entry.layers||[]).some(e=>e.type==='burl');const ready=type=>type==='ao'&&needsVerifiedAO?state().aoVerified:state()[type];
+ const ready=type=>type==='ao'?state().aoVerified:state()[type];
  for(const type of libraryEntryDependencies(entry)){
   if(!ready(type)){progress('正在为“'+entry.name+'”准备'+(type==='ao'?'模型 AO':'形体分析')+'…');await prepare(type,{strict:true});}
   const now=getDocument();if(!now||JSON.stringify([now.id,now.resources.source,now.actualHeightMeters])!==identity)throw Error('模型已切换，本次效果未添加。');

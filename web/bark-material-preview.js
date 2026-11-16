@@ -1,3 +1,4 @@
+import {configureViewportNavigation} from './viewport-navigation.js';
 import * as THREE from 'three';
 import {OrbitControls} from './vendor/OrbitControls.js';
 import {createBarkPreviewSample} from './bark-preview-sample.js';
@@ -14,7 +15,7 @@ export function createBarkMaterialPreview(canvas){
     renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:false});renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,1.5));renderer.outputColorSpace=THREE.SRGBColorSpace;
     scene=new THREE.Scene();scene.background=new THREE.Color('#18221e');camera=new THREE.PerspectiveCamera(38,1,.001,10000);camera.up.set(0,0,1);
     scene.add(new THREE.HemisphereLight(0xe9f2ff,0x3d3525,2));const key=new THREE.DirectionalLight(0xffefdd,3);key.position.set(3,-4,5);scene.add(key);const fill=new THREE.DirectionalLight(0xc6ddff,1);fill.position.set(-3,1,2);scene.add(fill);
-    controls=new OrbitControls(camera,canvas);controls.enableDamping=false;controls.addEventListener('change',request);
+    controls=new OrbitControls(camera,canvas);configureViewportNavigation(controls,{plainOrbit:true});controls.enableDamping=false;controls.addEventListener('change',request);
   }
   function clearMaterial(){if(!mesh?.material)return;for(const key of ['map','normalMap','roughnessMap'])mesh.material[key]?.dispose();mesh.material.dispose();}
   function material(){if(!mesh||!recipe)return;clearMaterial();mesh.material=createBarkSurfaceMaterial(recipe,{branch:displayContext?.branch||{startRadius:.48},settings:displayContext?.settings||{},continuousBark:!!mesh.geometry.userData.barkSurface,referencePerimeter:mesh.geometry.userData.barkSurface?.referencePerimeter});

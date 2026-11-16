@@ -6,7 +6,7 @@ import { normalizeAuthoring } from '../web/authoring-state.js';
 import { buildBranchAsset, disposeBranchAsset, normalizeSettings, deserializeGeometry } from '../web/branch-kernel.js';
 import { applyInstanceFamilyPlacement, evaluatedInstanceFrame } from '../web/branch-instance-operations.js';
 import { resolvePveExportPlan } from '../web/pve-export-plan.js';
-import { prepareUnitCombEntries, combUnitInstance, advanceUnitCombEntries, evaluateUnitInstanceCombing, unitCombEffectState } from '../web/unit-instance-combing.js';
+import { prepareUnitCombEntries, prepareUnitDispersion, combUnitInstance, advanceUnitCombEntries, evaluateUnitInstanceCombing, unitCombEffectState } from '../web/unit-instance-combing.js';
 import { INSTANCE_SCALE_MIN, INSTANCE_SCALE_MAX } from '../web/assembly-scale.js';
 
 const wood=(id,parent,points)=>({id,parent,points,length:1,start_radius:.035,end_radius:.007});
@@ -114,6 +114,85 @@ test('JITTER is deterministic per actual instance and seed, stays within one ang
  }finally{disposeBranchAsset(asset);}
 });
 
+function parallelFixture() {
+  const authoring = fixture(), template = authoring.branch_instances[0];
+  const makeUnit = (id, attach, direction) => ({ ...template, id, attach, frame: {
+    position:[0, 0, attach * 3], direction, parent_position:[0, 0, attach * 3], parent_tangent:[0, 0, 1],
+  } });
+  authoring.branch_instances = Array.from({length:8}, (_, index) => makeUnit('FAN_' + index, .29 + index * .012,
+    [1, .014 * Math.sin(index), .018 * Math.cos(index)]));
+  authoring.branch_instances.push(makeUnit('OUTSIDE', .9, [1, 0, 0]), makeUnit('OPPOSITE', .32, [-1, 0, 0]));
+  return authoring;
+}
+
+function medianAngularSeparation(axes) {
+  const angles = axes.flatMap((axis, i) => axes.slice(i + 1).map(other => axis.angleTo(other))).sort((a, b) => a - b);
+  return THREE.MathUtils.radToDeg(angles[Math.floor(angles.length / 2)]);
+}
+
+test('DISPERSE separates a nearly parallel local fan without losing its general direction or altering mounts', () => {
+  const authoring = parallelFixture(), original = structuredClone(authoring), asset = buildBranchAsset(settings, null, [], 0, authoring);
+  try {
+    const entries = prepareUnitCombEntries({authoring, branches:asset.masterBranches, settings, scope:'ALL'});
+    const options = {effect:'DISPERSE', angleLimitDegrees:30, seed:19, worldRadius:.48};
+    const targets = prepareUnitDispersion(entries, options);
+    const fan = entries.filter(entry => entry.id.startsWith('FAN_'));
+    assert.equal(fan.length, 8);
+    const changed = fan.map(entry => paint(entry, {...options, dispersionTargets:targets}, {distance:2}).entry);
+    const beforeAxes = fan.map(entry => entry.longAxis), afterAxes = changed.map(entry => entry.longAxis);
+    assert.ok(medianAngularSeparation(beforeAxes) < 3);
+    assert.ok(medianAngularSeparation(afterAxes) > 24);
+    const mean = axes => axes.reduce((sum, axis) => sum.add(axis), new THREE.Vector3()).normalize();
+    assert.ok(THREE.MathUtils.radToDeg(mean(beforeAxes).angleTo(mean(afterAxes))) < 5);
+    for (let i = 0; i < fan.length; i++) {
+      const before = fan[i], after = changed[i];
+      assert.ok(THREE.MathUtils.radToDeg(before.longAxis.angleTo(after.longAxis)) <= 30 + 1e-7);
+      near(after.frame.position, before.frame.position, before.id + ' stays at its own anchor');
+      assert.equal(after.instance.parent, before.instance.parent);
+      assert.equal(after.instance.attach, before.instance.attach);
+      assert.equal(after.instance.scale, before.instance.scale);
+      assert.equal(after.instance.radius_scale, before.instance.radius_scale);
+      assert.equal(after.instance.asset_id, before.instance.asset_id);
+      assert.equal(after.instance.pinned_revision, before.instance.pinned_revision);
+    }
+    for (const id of ['OUTSIDE', 'OPPOSITE']) {
+      const degrees = THREE.MathUtils.radToDeg(targets.get(id).angleTo(new THREE.Quaternion()));
+      assert.ok(degrees > 0 && degrees <= 9.6 + 1e-7, `${id} receives only a slight independent tilt`);
+    }
+    assert.deepEqual(authoring, original);
+  } finally { disposeBranchAsset(asset); }
+});
+
+test('DISPERSE keeps deterministic stroke targets while respecting actual hits and one angular cap', () => {
+  const authoring = parallelFixture(), asset = buildBranchAsset(settings, null, [], 0, authoring);
+  try {
+    const entries = prepareUnitCombEntries({authoring, branches:asset.masterBranches, settings, scope:'ALL'});
+    const options = {effect:'DISPERSE', angleLimitDegrees:30, seed:113, worldRadius:.48};
+    const targets = prepareUnitDispersion(entries, options);
+    const reordered = prepareUnitDispersion([...entries].reverse(), options);
+    const newSeed = prepareUnitDispersion(entries, {...options, seed:114});
+    const maxTargets = prepareUnitDispersion(entries, {...options, angleLimitDegrees:180});
+    for (const [id, target] of targets) {
+      assert.deepEqual(target.toArray(), reordered.get(id).toArray());
+      assert.ok(maxTargets.get(id).angleTo(new THREE.Quaternion()) <= Math.PI / 3 + 1e-8);
+    }
+    assert.ok([...targets].some(([id, target]) => target.angleTo(newSeed.get(id)) > .05));
+
+    const project = p => ({x:p.x * 100, y:p.z * 100, depth:p.y, clip:0});
+    const hits = evaluateUnitInstanceCombing(entries, {...options, dispersionTargets:targets, project,
+      center:{x:48,y:100}, radius:38, depthMode:'THROUGH', delta:new THREE.Vector3(0, .5, 0)});
+    assert.equal(hits.updates.length, 8);
+    assert.ok(hits.updates.every(update => update.id.startsWith('FAN_')));
+
+    const entry = entries.find(item => item.id === 'FAN_0');
+    const once = paint(entry, {...options, dispersionTargets:targets}, {count:1, distance:.3});
+    const many = paint(entry, {...options, dispersionTargets:targets}, {count:75, distance:.3});
+    near(once.entry.longAxis, many.entry.longAxis, 'same pen distance reaches the same preset target');
+    const continued = paint(many.entry, {...options, dispersionTargets:newSeed}, {distance:2});
+    near(continued.entry.longAxis, entry.longAxis.clone().applyQuaternion(targets.get(entry.id)), 'same pen retains its original target');
+  } finally { disposeBranchAsset(asset); }
+});
+
 test('brush eligibility preserves surface/through/sphere selection and reports missing targets without touching any source',()=>{
  const a=fixture(),asset=buildBranchAsset(settings,null,[],0,a),project=p=>({x:p.x*100,y:p.y*100,depth:p.z,clip:0});
  try{
@@ -145,11 +224,13 @@ test('all new effects save and reload six actual camphor complete models without
  try{
   let current=buildBranchAsset(s,null,sources,0,a);assets.push(current);
   const triangleCount=current.report.triangles,leafCount=current.masterPlacements.length;
-  for(const config of configurations){
-   const entries=prepareUnitCombEntries({authoring:a,branches:current.masterBranches,settings:s,scope:'ALL'}),updates=entries.map(entry=>paint(entry,config,{distance:1}).entry);
+  for(const config of [...configurations, {effect:'DISPERSE', seed:733, angleLimitDegrees:30}]){
+   const entries=prepareUnitCombEntries({authoring:a,branches:current.masterBranches,settings:s,scope:'ALL'});
+   const options=config.effect==='DISPERSE'?{...config,dispersionTargets:prepareUnitDispersion(entries,config)}:config;
+   const updates=entries.map(entry=>paint(entry,options,{distance:1}).entry);
    assert.equal(updates.length,6);const matrices=new Map();
    for(let n=0;n<entries.length;n++){const original=entries[n],next=updates[n];
-    const result=paint(original,config,{distance:1});matrices.set(original.id,result.matrix);
+    const result=paint(original,options,{distance:1});matrices.set(original.id,result.matrix);
     applyInstanceFamilyPlacement(a,original.instance,next.instance,original.shape,current.masterBranches,s);
    }
    const loaded=buildBranchAsset(s,null,sources,0,normalizeAuthoring(JSON.parse(JSON.stringify(a))));assets.push(loaded);

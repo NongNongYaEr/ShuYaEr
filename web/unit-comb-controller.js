@@ -5,13 +5,13 @@ import { applyInstanceFamilyPlacement, createInstancePlacementContext, evaluated
 import { resolveInstanceShape } from './branch-workbench-data.js';
 import { unitBranchIndex } from './unit-branch-boundary.js';
 import { makeLegacyUnitPlacement } from './legacy-unit-placement.js';
-import { prepareUnitCombEntries, evaluateUnitInstanceCombing, advanceUnitCombEntries } from './unit-instance-combing.js';
+import { prepareUnitCombEntries, evaluateUnitInstanceCombing, advanceUnitCombEntries, prepareUnitDispersion } from './unit-instance-combing.js';
 
 const clamp = THREE.MathUtils.clamp;
 const finite = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const svgElement = tag => document.createElementNS('http://www.w3.org/2000/svg', tag);
-const orientationNames = { DRAG:'沿笔划转向', DOWN:'整支向下', ROLL:'绕长轴翻转' };
-const effectNames = { TURN:'梳理转向', ALIGN:'取样主轴对齐', SPREAD:'角度散开／收拢', SCALE:'整支大小', JITTER:'自然扰动' };
+const orientationNames = { DRAG:'沿笔划转向', DOWN:'整支向下', ROLL:'绕长轴翻转', TWIST:'绕柄轴扭转' };
+const effectNames = { TURN:'梳理转向', ALIGN:'取样主轴对齐', SPREAD:'角度散开／收拢', SCALE:'整支大小', JITTER:'自然扰动', DISPERSE:'打散朝向' };
 
 // TREE combing changes the placement of complete unit models. The brush never
 // writes curve knots, leaf edits or source assets. Old baked copies keep their
@@ -29,6 +29,9 @@ export function createUnitCombController(api) {
   const feedback = document.createElement('div'); feedback.id = 'unitCombFeedback'; feedback.className = 'sculpt-feedback'; feedback.hidden = true;
   feedback.innerHTML = '<strong></strong><span></span><small>围绕各自枝根转向 · 挂点、尺寸和内部样式保持</small>';
   canvas.parentElement.append(feedback);
+  const feedbackTitle=feedback.querySelector('strong'), feedbackSummary=feedback.querySelector('span'), feedbackHint=feedback.querySelector('small');
+  const setText = (node, value) => { if (node && node.textContent !== value) node.textContent = value; };
+  let feedbackBounds = '';
   let stroke = null, prepared = new WeakMap(), lastHover = null, previewFrame = 0, picking = '', toolActive = true, altShrink = false;
   let sampleDirectionWorld = null, sampleOriginWorld = null, centerPointWorld = null;
   const referenceMarkers = new THREE.Group(); referenceMarkers.name = 'unitBrushReferences'; referenceMarkers.visible = false;
@@ -46,15 +49,17 @@ export function createUnitCombController(api) {
   const blocked = () => api.isBlocked?.() || !api.getAsset() || api.getAsset().group.userData.pending_rebuild;
   const message = (text, state='ready') => api.status?.(text, state);
   const meshBrush = () => api.getMeshBrush?.() || null;
+  const handlesTool = tool => tool === 'COMB' || Boolean(api.handlesTool?.(tool));
   const brushName = () => meshBrush() ? '叶花果挂件笔刷' : '单元枝笔刷';
   const selectionSummary = () => meshBrush()?.summary() || api.getSelectionSummary?.();
 
   function updateReferences() {
     const sampleStatus=document.getElementById('unitBrushSampleStatus'),centerStatus=document.getElementById('unitBrushCenterStatus');
-    if(sampleStatus)sampleStatus.textContent=picking==='SAMPLE'?'点击可见模型取样 · Esc 取消':sampleDirectionWorld?'已取样主轴方向':'尚未取样主轴方向';
-    if(centerStatus)centerStatus.textContent=picking==='CENTER'?'点击画面设置固定中心 · Esc 取消':centerPointWorld?'固定中心已设置':'尚未设置固定中心';
+    setText(sampleStatus,picking==='SAMPLE'?'点击可见模型取样 · Esc 取消':sampleDirectionWorld?'已取样主轴方向':'尚未取样主轴方向');
+    setText(centerStatus,picking==='CENTER'?'点击画面设置固定中心 · Esc 取消':centerPointWorld?'固定中心已设置':'尚未设置固定中心');
     for(const [id,kind] of [['unitBrushSample','SAMPLE'],['unitBrushCenter','CENTER']]){
-      const button=document.getElementById(id);button?.setAttribute('aria-pressed',String(picking===kind));button?.classList.toggle?.('active',picking===kind);
+      const button=document.getElementById(id),pressed=String(picking===kind);
+      if(button&&button.getAttribute('aria-pressed')!==pressed){button.setAttribute('aria-pressed',pressed);button.classList.toggle?.('active',picking===kind);}
     }
     const effect=options().effect;
     referenceMarkers.visible=enabled()&&toolActive&&Boolean(effect==='ALIGN'&&sampleDirectionWorld||effect==='SPREAD'&&centerPointWorld);
@@ -75,7 +80,9 @@ export function createUnitCombController(api) {
     const read = (id, fallback) => document.getElementById(id)?.value ?? fallback;
     const asset=api.getAsset();asset?.group.updateWorldMatrix(true,false);
     const inverse=asset?.group.matrixWorld.clone().invert()||new THREE.Matrix4();
-    const effect=values.effect||read('unitBrushEffect','TURN');
+    const requested=values.effect||read('unitBrushEffect','TURN');
+    const effect=requested==='DISPERSE'&&meshBrush()?'JITTER':requested;
+    const disperse=effect==='DISPERSE';
     const hitMode=read('unitBrushHitMode','AUTO');
     return {
       effect:effectNames[effect]?effect:'TURN',
@@ -92,7 +99,7 @@ export function createUnitCombController(api) {
       centerPoint:centerPointWorld?.clone().applyMatrix4(inverse),
       spreadMode:(values.spreadMode||read('unitBrushSpreadMode','OUT'))==='IN'?'IN':'OUT',
       sizeMode:altShrink||(values.sizeMode||read('unitBrushSizeMode','GROW'))==='SHRINK'?'SHRINK':'GROW',
-      angleLimitDegrees:clamp(finite(values.angleLimitDegrees??read('unitBrushAngleLimit',25),25),1,90),
+      angleLimitDegrees:clamp(finite(values.angleLimitDegrees??(disperse?read('unitBrushDisperseAngleLimit',30):read('unitBrushAngleLimit',25)),disperse?30:25),1,disperse?60:90),
       sizeLimitPercent:clamp(finite(values.sizeLimitPercent??read('unitBrushSizeLimit',20),20),1,80),
       seed:Math.trunc(finite(values.seed??read('unitBrushSeed',1),1)),
     };
@@ -123,12 +130,13 @@ export function createUnitCombController(api) {
   }
   function projection(asset=api.getAsset()) {
     const bounds = canvas.getBoundingClientRect();
+    const left = canvas.offsetLeft, top = canvas.offsetTop;
     asset.group.updateWorldMatrix(true, false); camera.updateMatrixWorld();
     const view = camera.matrixWorldInverse.clone().multiply(asset.group.matrixWorld);
     const clip = camera.projectionMatrix.clone().multiply(view), inverse = clip.clone().invert();
     const cache = new WeakMap();
     return {
-      bounds,
+      bounds, left, top,
       project(point, cacheResult=true) {
         const x=point.x,y=point.y,z=point.z;
         const cached=cacheResult?cache.get(point):null;
@@ -235,11 +243,21 @@ export function createUnitCombController(api) {
   }
   function show(items, weights, point, settings, proj, skipped = new Map()) {
     const mesh=Boolean(meshBrush()),counter=mesh?'件':'支',noun=mesh?'叶花果挂件':'单元枝';
+    const { bounds:{width,height}, left, top } = proj;
     overlay.removeAttribute('hidden');
-    Object.assign(overlay.style,{left:`${canvas.offsetLeft}px`,top:`${canvas.offsetTop}px`,width:`${proj.bounds.width}px`,height:`${proj.bounds.height}px`});
-    overlay.setAttribute('viewBox',`0 0 ${proj.bounds.width} ${proj.bounds.height}`);
+    const viewport = `${left},${top},${width},${height}`;
+    if (feedbackBounds !== viewport) {
+      feedbackBounds = viewport;
+      Object.assign(overlay.style,{left:`${left}px`,top:`${top}px`,width:`${width}px`,height:`${height}px`});
+      overlay.setAttribute('viewBox',`0 0 ${width} ${height}`);
+    }
     const shrinking=settings.effect==='SCALE'&&settings.sizeMode==='SHRINK',tint=shrinking?'#89d5dc':'#f0cb58';outer.setAttribute('stroke',tint);inner.setAttribute('stroke',tint);
-    sizeMark.style.display=settings.effect==='SCALE'?'':'none';sizeMark.textContent=shrinking?'−':'+';sizeMark.setAttribute('x',point[0]);sizeMark.setAttribute('y',point[1]);sizeMark.setAttribute('fill',tint);
+    const isSize=settings.effect==='SCALE';
+    sizeMark.style.display=isSize?'':'none';
+    if (isSize) {
+      setText(sizeMark,shrinking?'−':'+');
+      sizeMark.setAttribute('x',point[0]);sizeMark.setAttribute('y',point[1]);sizeMark.setAttribute('fill',tint);
+    }
     for (const [circle,radius] of [[outer,settings.radius],[inner,settings.radius*settings.hardness]]) {
       circle.setAttribute('cx',point[0]);circle.setAttribute('cy',point[1]);circle.setAttribute('r',radius);
     }
@@ -273,19 +291,20 @@ export function createUnitCombController(api) {
       const path=paths.join(' ');if(element.unitBrushPath!==path){element.setAttribute('d',path);element.unitBrushPath=path;}
     }
     for (const [key,line] of weightLines) if (!batches.has(key)) {line.remove();weightLines.delete(key);}
-    const countLabel=document.getElementById('sculptTargetCount');if (countLabel) countLabel.textContent=`${count} ${counter}${noun}`;
+    setText(document.getElementById('sculptTargetCount'),`${count} ${counter}${noun}`);
     feedback.hidden=false;
-    feedback.style.left=`${canvas.offsetLeft+Math.max(8,Math.min(proj.bounds.width-300,point[0]+20))}px`;
-    feedback.style.top=`${canvas.offsetTop+Math.max(8,Math.min(proj.bounds.height-78,point[1]+24))}px`;
-    feedback.querySelector('strong').textContent=`${brushName()} · ${effectLabel(settings)} · 命中 ${count} ${counter}`;
+    feedback.style.left=`${left+Math.max(8,Math.min(width-300,point[0]+20))}px`;
+    feedback.style.top=`${top+Math.max(8,Math.min(height-78,point[1]+24))}px`;
+    setText(feedbackTitle,`${brushName()} · ${effectLabel(settings)} · 命中 ${count} ${counter}`);
     const scope=settings.depthMode==='THROUGH'?'穿透':settings.depthMode==='SPHERE'?'空间球':`表层 · 深度 ${settings.depthRadius*2} m`;
-    const summary=selectionSummary();
-    feedback.querySelector('span').textContent=`${summary?`已选 ${summary.selected} · 可刷 ${items.length} · `:''}${scope} · 半径 ${settings.radius} px`;
+    const summary=stroke ? stroke.summary : selectionSummary();
+    setText(feedbackSummary,`${summary?`已选 ${summary.selected} · 可刷 ${items.length} · `:''}${scope} · 半径 ${settings.radius} px`);
     const sizes=stroke?.options.effect==='SCALE'?[...stroke.updated].map(([id,after])=>Math.abs(after.scale/stroke.initialScales.get(id)-1)*100):[];
-    feedback.querySelector('small').textContent=skippedMessage(skipped)||(!items.length?summary?.reason||'缺少可用的完整模型，请检查源素材':'' )||(!count&&items.length?'移近所选模型。表层或空间球模式还会按深度筛选':null)||(settings.effect==='SCALE'?'完整模型等比缩放 · '+(sizes.length?'本笔最多已变 '+Math.max(...sizes).toFixed(1)+'% / 上限 '+settings.sizeLimitPercent+'%':'挂点与源模型保持')
+    setText(feedbackHint,skippedMessage(skipped)||(!items.length?summary?.reason||'缺少可用的完整模型，请检查源素材':'' )||(!count&&items.length?'移近所选模型。表层或空间球模式还会按深度筛选':null)||(settings.effect==='SCALE'?'完整模型等比缩放 · '+(sizes.length?'本笔最多已变 '+Math.max(...sizes).toFixed(1)+'% / 上限 '+settings.sizeLimitPercent+'%':'挂点与源模型保持')
       :settings.effect==='ALIGN'?'朝取样主轴逐步对齐 · 挂点与尺寸保持'
       :settings.effect==='JITTER'?`固定随机种子 ${settings.seed} · 每笔最多 ${settings.angleLimitDegrees}° · 挂点与尺寸保持`
-      :settings.effect==='TURN'?'围绕各自挂点转向 · 尺寸和内部样式保持':`围绕各自挂点转向 · 每笔最多 ${settings.angleLimitDegrees}°`);
+      :settings.effect==='DISPERSE'?`相邻单元枝错开朝向 · 每笔最多 ${settings.angleLimitDegrees}°`
+      :settings.effect==='TURN'?'围绕各自挂点转向 · 尺寸和内部样式保持':`围绕各自挂点转向 · 每笔最多 ${settings.angleLimitDegrees}°`));
   }
   function hoverAt(event) {
     lastHover={clientX:event.clientX,clientY:event.clientY};
@@ -301,45 +320,66 @@ export function createUnitCombController(api) {
     settings.sampleDirection?.toArray(),settings.centerPoint?.toArray(),settings.downDirection.toArray()]);
   function valid(s) {return enabled() && !blocked() && api.getAsset()===s.asset && api.getAuthoring()===s.source
     && meshBrush()===s.mesh && (s.preview.valid?.()??true) && optionKey(options())===s.optionKey;}
-  function flush(s) {
-    if (stroke!==s || !valid(s)) return;
+  function flush(s, feedbackVisible = true) {
     if (s.previewDirty) {
-      if(s.preview.updateTransforms)s.preview.updateTransforms(s.transforms);
+      if(s.preview.updateTransforms)s.preview.updateTransforms(s.pendingTransforms ?? s.transforms);
       else s.preview.update(s.snapshot,s.transforms);
+      s.pendingTransforms?.clear();
       s.previewDirty=false;
     }
     if(!s.mesh)api.showActiveUnits?.(s.working,s.transforms,s.outlineTargets);
-    show(s.working,s.weights,s.last,s.options,s.proj,s.skipped);
+    if (feedbackVisible) show(s.working,s.weights,s.last,s.options,s.proj,s.skipped);
   }
-  function compute(point,final=false) {
-    const s=stroke;if (!s) return;
-    if (!valid(s)) {cancel();return;}
-    if(s.options.effect==='SCALE')s.options.sizeMode=options().sizeMode;
+  function compute(s, points, final = false) {
     const sample = next => {
       const center=centerAt(s.working,s.proj,next,s.options.radius);
       if (!center) {s.lastSample=next.slice();s.weights=new Map();s.skipped=new Map();return;}
       let delta=s.proj.unproject(next,center.clip).sub(s.proj.unproject(s.lastSample,center.clip));
       if (s.options.effect==='TURN' && s.options.orientation==='DRAG' && s.options.direction!=='VIEW') delta=new THREE.Vector3(s.options.direction==='X'?1:0,s.options.direction==='Y'?1:0,s.options.direction==='Z'?1:0)
         .multiplyScalar((s.lastSample[1]-next[1])/s.options.radius*center.worldRadius);
-      const result=evaluateUnitInstanceCombing(s.working,{...s.options,center,worldRadius:center.worldRadius,delta,project:s.proj.project});
+      const signedTwist=(next[0]-s.lastSample[0])/s.options.radius;
+      const result=evaluateUnitInstanceCombing(s.working,{...s.options,dispersionTargets:s.dispersionTargets,center,worldRadius:center.worldRadius,delta,signedTwist,project:s.proj.project});
       s.weights=result.weights;s.skipped=result.skipped;
       for(const [id,reason] of result.skipped)s.skippedDuringStroke.set(id,reason);
       for (const update of result.updates) {
         s.previewDirty=true;
         s.updated.set(update.id,update.after);
         const cumulative=s.cumulative.get(update.id)||new THREE.Matrix4();cumulative.premultiply(update.matrix);s.cumulative.set(update.id,cumulative);
-        for (const id of s.branchIds.get(update.id)||[]) s.transforms.set(id,{matrix:cumulative});
+        for (const id of s.branchIds.get(update.id)||[]) {
+          const transform = {matrix:cumulative};
+          s.transforms.set(id,transform);
+          s.pendingTransforms?.set(id,transform);
+        }
       }
       s.working=advanceUnitCombEntries(s.working,result.updates,{inPlace:result.updates.length>s.working.length*.5,workspace:s.workspace});s.lastSample=next.slice();
     };
-    let distance=Math.hypot(point[0]-s.lastSample[0],point[1]-s.lastSample[1]);
-    while (distance>=6) {
-      sample([s.lastSample[0]+(point[0]-s.lastSample[0])/distance*6,s.lastSample[1]+(point[1]-s.lastSample[1])/distance*6]);
-      distance=Math.hypot(point[0]-s.lastSample[0],point[1]-s.lastSample[1]);
+    for (const point of points) {
+      let distance=Math.hypot(point[0]-s.lastSample[0],point[1]-s.lastSample[1]);
+      while (distance>=6) {
+        sample([s.lastSample[0]+(point[0]-s.lastSample[0])/distance*6,s.lastSample[1]+(point[1]-s.lastSample[1])/distance*6]);
+        distance=Math.hypot(point[0]-s.lastSample[0],point[1]-s.lastSample[1]);
+      }
+      s.last=point;
     }
-    if (final && distance>.01) sample(point);
-    s.last=point.slice();
-    if (!previewFrame) previewFrame=schedule(()=>{previewFrame=0;if (stroke===s) flush(s);});
+    if (final && Math.hypot(s.last[0]-s.lastSample[0],s.last[1]-s.lastSample[1])>.01) sample(s.last);
+  }
+  function flushFrame(feedbackVisible = true) {
+    const s = stroke;
+    if (!s?.pendingPoints?.length) return false;
+    if (!valid(s)) { cancel(); return false; }
+    compute(s, s.pendingPoints.splice(0));
+    flush(s, feedbackVisible);
+    return true;
+  }
+  function schedulePreview(s) {
+    if (previewFrame) return;
+    previewFrame = schedule(() => {
+      previewFrame = 0;
+      if (stroke !== s) return;
+      if (s.pendingPoints) flushFrame();
+      else if (valid(s)) flush(s);
+      else cancel();
+    });
   }
   function release(restore) {
     if (!stroke) return null;const s=stroke;stroke=null;
@@ -376,8 +416,9 @@ export function createUnitCombController(api) {
     // independent rest points for preview/cache validation without preparing the
     // much larger per-point sculpt state for every branch in the tree.
     const branchIds=new Map();
-    let snapshot,preview;
+    let snapshot,preview,dispersionTargets;
     try {
+      if(settings.effect==='DISPERSE')dispersionTargets=prepareUnitDispersion(items,{...settings,worldRadius:center.worldRadius});
       if(mesh){
         for(const item of items)branchIds.set(item.id,[item.id]);
         preview=mesh.preview(items);
@@ -399,9 +440,13 @@ export function createUnitCombController(api) {
     catch (error) {message(`${brushName()}预览失败 · ${error.message}`,'error');return true;}
     if (!preview) {message('当前模型暂不能建立实时梳理预览，请使用整支旋转调整','error');return true;}
     preview.dispose ||= preview.restore;
-    stroke={asset,source,mesh,settings:api.getSettings?.()||{},entries:items,working:items,snapshot,preview,branchIds,updated:new Map(),initialScales:new Map(items.map(i=>[i.id,i.instance.scale])),cumulative:new Map(),transforms:new Map(),
+    stroke={asset,source,mesh,settings:api.getSettings?.()||{},entries:items,working:items,snapshot,preview,branchIds,dispersionTargets,updated:new Map(),initialScales:new Map(items.map(i=>[i.id,i.instance.scale])),cumulative:new Map(),transforms:new Map(),summary:selectionSummary(),
       pointerId:event.pointerId,controls:controls.enabled,proj,options:settings,optionKey:optionKey(settings),last:point.slice(),lastSample:point.slice(),weights:initial.weights,
       skipped:initial.skipped,skippedDuringStroke:new Map(initial.skipped),previewDirty:false,outlineTargets:prepared.get(asset)?.outlineTargets,workspace:new WeakSet()};
+    if (mesh?.deferStrokeInput) {
+      stroke.pendingPoints = [];
+      stroke.pendingTransforms = new Map();
+    }
     controls.enabled=false;canvas.setPointerCapture?.(event.pointerId);
     show(items,initial.weights,point,settings,proj,initial.skipped);
     message(`${brushName()} · `+effectLabel(settings)+'，Esc 取消'+(initial.skipped.size?' · '+skippedMessage(initial.skipped):''),'busy');return true;
@@ -409,20 +454,37 @@ export function createUnitCombController(api) {
   function move(event) {
     if (!enabled()) return false;
     if (!stroke) {hoverAt(event);return true;}
-    if (event.pointerId===stroke.pointerId) compute(pointAt(event,stroke.proj));return true;
+    if (event.pointerId === stroke.pointerId) {
+      const s = stroke, point = pointAt(event, s.proj);
+      if (s.pendingPoints) {
+        s.pendingPoints.push(point);
+        if (!api.flushDeferredBeforeRender) schedulePreview(s);
+      } else if (valid(s)) {
+        compute(s, [point]);
+        schedulePreview(s);
+      } else cancel();
+    }
+    return true;
   }
   function end(event) {
     if (!stroke) return enabled()&&event.button===0;
     if (event.pointerId!==stroke.pointerId || event.button!==0) return true;
     if (!valid(stroke)) {cancel();return true;}
-    compute(pointAt(event,stroke.proj),true);if (!stroke) return true;
-    const s=stroke;flush(s);release(false);
+    const s = stroke, point = pointAt(event, s.proj);
+    compute(s, s.pendingPoints ? [...s.pendingPoints, point] : [point], true);
+    if (stroke !== s) return true;
+    flush(s, false);release(false);
     if (!s.updated.size) {s.preview.restore();message(`${brushName()} · 未产生修改`);return true;}
     if(s.mesh){
-      s.preview.restore();
       try{
         const label=`${effectLabel(s.options)} ${s.updated.size} 件叶花果挂件`;
-        const accepted=s.mesh.commit(s.updated,label),skipped=skippedMessage(s.skippedDuringStroke);
+        let accepted;
+        if (s.mesh.commitPreview) accepted = s.mesh.commitPreview(s.updated, label, s.preview);
+        else {
+          s.preview.restore();
+          accepted = s.mesh.commit(s.updated, label);
+        }
+        const skipped=skippedMessage(s.skippedDuringStroke);
         message(accepted===false?'叶花果挂件梳理 · 未提交':`已${label}${skipped?' · '+skipped:''}`);
       }catch(error){message(`叶花果挂件梳理未提交 · ${error.message}`,'error');}
       return true;
@@ -446,15 +508,16 @@ export function createUnitCombController(api) {
       const accepted=api.commitPreview?api.commitPreview(s.preview,apply):apply();
       if (!api.commitPreview || accepted===false) s.preview.restore();
       const skipped=skippedMessage(s.skippedDuringStroke);
-      prepared=new WeakMap();message(accepted===false?'单元枝梳理 · 未提交':'已梳理 '+s.updated.size+' 支单元枝'+(skipped?' · '+skipped:''));
+      const action=s.options.effect==='DISPERSE'?'已打散':'已梳理';
+      prepared=new WeakMap();message(accepted===false?'单元枝梳理 · 未提交':action+' '+s.updated.size+' 支单元枝'+(skipped?' · '+skipped:''));
     } catch (error) {s.preview.restore();message('单元枝梳理未提交：'+error.message,'error');}
     return true;
   }
-  function toolChanged(next) {cancel();toolActive=!next||next==='COMB';prepared=new WeakMap();lastHover=null;hide();updateReferences();}
+  function toolChanged(next) {cancel();toolActive=!next||handlesTool(next);prepared=new WeakMap();lastHover=null;hide();updateReferences();}
   function refreshTargets() {prepared=new WeakMap();if (stroke || picking&&!enabled()) cancel();else if (lastHover && enabled() && !blocked()) hoverAt(lastHover);else if(!meshBrush())api.showActiveUnits?.(enabled()?entries():[]);updateReferences();}
   function resetReferences() {cancel();sampleDirectionWorld=null;sampleOriginWorld=null;centerPointWorld=null;prepared=new WeakMap();updateReferences();}
   const settingsChanged=()=>{cancel();refreshTargets();};
-  for(const id of ['unitCombOrientation','unitBrushEffect','unitBrushSpreadMode','unitBrushSizeMode','unitBrushAngleLimit','unitBrushSizeLimit','unitBrushSeed',
+  for(const id of ['unitCombOrientation','unitBrushEffect','unitBrushSpreadMode','unitBrushSizeMode','unitBrushAngleLimit','unitBrushDisperseAngleLimit','unitBrushSizeLimit','unitBrushSeed',
     'sculptRadius','sculptStrength','sculptHardness','sculptScope','sculptDepth','sculptDirection','unitBrushHitMode']){
     const control=document.getElementById(id);control?.addEventListener('input',settingsChanged);control?.addEventListener('change',settingsChanged);
   }
@@ -465,7 +528,7 @@ export function createUnitCombController(api) {
     cancel();const seed=document.getElementById('unitBrushSeed');if(!seed)return;
     seed.value=String((Math.abs(Math.trunc(finite(seed.value,1)))+1)%2147483647||1);
     seed.dispatchEvent(new Event('input',{bubbles:true}));seed.dispatchEvent(new Event('change',{bubbles:true}));
-    message('已切换自然扰动种子，刷过时才会修改单元枝');
+    message(options().effect==='DISPERSE'?'已换一组朝向，下笔生效':'已切换自然扰动种子，刷过时才会修改单元枝');
   };
   let rightCancelled=false;
   canvas.addEventListener('pointerdown',event=>{rightCancelled=false;if(event.button===2&&(stroke||picking)){
@@ -474,7 +537,7 @@ export function createUnitCombController(api) {
   canvas.addEventListener('contextmenu',event=>{if(rightCancelled||stroke||picking){cancel();rightCancelled=false;event.preventDefault?.();event.stopImmediatePropagation?.();}},true);
   controls.addEventListener?.('change',updateReferences);
   function sizeDirectionChanged(){
-    if(stroke?.options.effect==='SCALE'){stroke.options.sizeMode=options().sizeMode;show(stroke.working,stroke.weights,stroke.last,stroke.options,stroke.proj,stroke.skipped);}
+    if(stroke?.options.effect==='SCALE'){flushFrame();if(stroke){stroke.options.sizeMode=options().sizeMode;show(stroke.working,stroke.weights,stroke.last,stroke.options,stroke.proj,stroke.skipped);}}
     else if(lastHover&&enabled()&&toolActive&&!blocked())hoverAt(lastHover);
     document.dispatchEvent?.(new CustomEvent('unit-brush-direction',{detail:{temporary:altShrink,sizeMode:options().sizeMode}}));
   }
@@ -485,7 +548,7 @@ export function createUnitCombController(api) {
   globalThis.window?.addEventListener('keyup',event=>{if(event.key==='Alt'&&altShrink){altShrink=false;sizeDirectionChanged();}},true);
   globalThis.window?.addEventListener('blur',()=>{altShrink=false;cancel();});
   updateReferences();
-  return {begin,move,end,cancel,hoverAt,hide,toolChanged,refreshTargets,requestSample,requestCenter,resetReferences,referenceMarkers,
+  return {begin,move,end,cancel,flushFrame,refreshStrokeFeedback(){if(stroke)show(stroke.working,stroke.weights,stroke.last,stroke.options,stroke.proj,stroke.skipped);},hoverAt,hide,handlesTool,toolChanged,refreshTargets,requestSample,requestCenter,resetReferences,referenceMarkers,
     key(event){return event.key==='Escape'&&cancel();},get active(){return Boolean(stroke||picking);},
     get debug(){const settings=stroke?.options||options();return {active:Boolean(stroke),picking,effect:settings.effect,
       references:{sampleDirectionWorld:sampleDirectionWorld?.toArray()||null,sampleOriginWorld:sampleOriginWorld?.toArray()||null,centerPointWorld:centerPointWorld?.toArray()||null},

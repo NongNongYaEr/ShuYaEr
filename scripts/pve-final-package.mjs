@@ -3,15 +3,17 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { createPveAtlas } from './pve-merged-atlas.mjs';
-import { checkPveGeometry } from './pve-geometry-quality.mjs';
+import { preparePveExportGeometry, pveGeometryCleanup } from './pve-geometry-quality.mjs';
 import { exportResolvedAssembly } from './export_branchforge_resolved_assembly.mjs';
 import { extractPveUnitGeometry, hashPveUnitGeometry, equalPveUnitGeometry, disposePveUnitGeometry, rebuildPveUnitTangents } from './pve-final-geometry.mjs';
 import { createPveBarkExporter } from './pve-bark-materials.mjs';
 import {ensureImportedTrunkSkinPoints} from './imported-trunk-skin.mjs';
 import { fitPveUnitPair, matchesTransformedPveGeometry } from './pve-unit-reuse.mjs';
 import { exportPveMeshUnit } from './pve-mesh-unit-glb.mjs';
+import { exportPveSharedBark, preparePveSharedBarkUnit } from './pve-shared-bark.mjs';
+import { baseBranchAtlasRole } from '../web/base-branch-export-materials.js';
 
-export async function generateFinalCompletePackage({ tool, input, document, sourceBytes, output, progress }) {
+export async function generateFinalCompletePackage({ tool, input, document, sourceBytes, output, progress, allowGeometryCleanup = true }) {
   const imp = relative => import(pathToFileURL(path.join(tool, relative)).href);
   const k = await imp('web/branch-kernel.js');
   const { normalizeAuthoring } = await imp('web/authoring-state.js');
@@ -24,6 +26,7 @@ export async function generateFinalCompletePackage({ tool, input, document, sour
   const sha = bytes => createHash('sha256').update(bytes).digest('hex').toUpperCase();
   const settings = k.normalizeSettings({ ...document.settings, preview_lod: 0 });
   const authoring = normalizeAuthoring(document.authoring, settings.seed);
+  const hasLights=!!authoring.tree_lights?.tracks.length;
   const sources = (document.leaf_meshes || []).map(source => ({ ...source, geometry: k.deserializeGeometry(source.geometry) }));
   const warnings = [], unitGroups = [];
   const barkExporter = createPveBarkExporter(output);
@@ -32,7 +35,8 @@ export async function generateFinalCompletePackage({ tool, input, document, sour
   try {
     progress('生成骨架与样本枝', '解析最终承重枝、完整成品枝及局部精修');
     asset = k.buildBranchAsset(settings, null, sources, 0, authoring);
-    warnings.push(...checkPveGeometry(asset.report, '整树实际装配'));
+    const assemblyQuality = preparePveExportGeometry(asset, k, '整树实际装配', allowGeometryCleanup);
+    warnings.push(...assemblyQuality.warnings);
     const plan = resolvePveExportPlan(asset, authoring);
     const meshUnits = [];
     if (authoring.mesh_units?.instances.length) {
@@ -40,7 +44,7 @@ export async function generateFinalCompletePackage({ tool, input, document, sour
       meshUnits.push(...resolveMeshUnitPlacements(authoring, asset, { strict: true }));
       if (meshUnits.length !== authoring.mesh_units.instances.length) throw Error('完整网格装配缺少素材或母枝，请先修复挂接');
     }
-    if (!plan.units.length&&!meshUnits.length&&!authoring.imported_trunks?.mounts.length) throw Error('工程没有可交付的完整成品枝实例');
+    if (!plan.units.length&&!meshUnits.length&&!authoring.imported_trunks?.mounts.length&&!hasLights) throw Error('工程没有可交付的完整成品枝实例');
     const skeleton = createPVESkeleton({ ...asset, masterBranches: plan.structuralBranches,
       masterPlacements: [], placements: [] }, []);
     ensureImportedTrunkSkinPoints(asset,skeleton);
@@ -52,6 +56,7 @@ export async function generateFinalCompletePackage({ tool, input, document, sour
     plan.units.forEach(unit => { if (unit.sourceAsset.sample) addTexture(sampleLeafMaterial(unit.sourceAsset.sample, authoring.branch_library, authoring.leaf_material)); });
     asset.group.traverse(mesh => {
       for (const material of [mesh.material].flat().filter(Boolean)) {
+        if (baseBranchAtlasRole(mesh, material) === 'bark') continue;
         if (material.sampleLeafMaterial) addTexture(material.sampleLeafMaterial);
         if (material.name === 'M_Leaf' || material.sampleLeafMaterial) {
           const texture = material.sampleLeafMaterial || authoring.leaf_material;
@@ -59,7 +64,8 @@ export async function generateFinalCompletePackage({ tool, input, document, sour
         }
       }
     });
-    progress('准备交付图集', '按实际完整枝材质合并图集，保留原图像素');
+    progress('准备交付贴图', '生成共用 2K 树皮，按实际完整枝材质整理叶花果图集');
+    const sharedBark = await exportPveSharedBark(output, asset, authoring);
     const atlas = plan.units.length||untexturedMaterials.length||textures.some(t=>t?.color)?createPveAtlas(textures, output, {untexturedMaterials}):null;
     unitGroups.push(...extractPveUnitGeometry(asset, plan, atlas));
     const extractionTransforms=plan.units.map(unit=>unit.transform.clone());
@@ -172,13 +178,23 @@ export async function generateFinalCompletePackage({ tool, input, document, sour
         leaf_instances: 0, organ_instances: 0, baked_unit_leaves: 0, baked_unit_organs: 0,
         max_unit_root_error_m: maxRootError } });
     if(authoring.imported_trunks?.mounts.length){skeleton.version=3;skeleton.required_capabilities=['imported_trunk_materials_v1','imported_trunk_skin_v1'];skeleton.imported_trunks={version:1,sources:authoring.imported_trunks.assets.map(a=>({id:a.id,revision:a.revision,source_sha256:a.source.sha256})),mounts:authoring.imported_trunks.mounts};}
+    if (hasLights) {
+      skeleton.version = 3;
+      (skeleton.required_capabilities ??= []).push('tree_light_flow_v1');
+    }
     if (meshUnits.length) {
       skeleton.version = 3;
       (skeleton.required_capabilities ??= []).push('native_mesh_units_v1');
     }
+    if (sharedBark) {
+      skeleton.version = 3;
+      (skeleton.required_capabilities ??= []).push('shared_tree_bark_v1');
+      skeleton.shared_tree_bark = sharedBark.reference;
+    }
     const validation = validatePVESkeleton(skeleton);
     if (!validation.valid) throw Error('完整枝骨架无效：' + validation.errors.slice(0, 8).join('；'));
     const manifest = { format: 'BranchForgeCompleteUnitSet', version: 1,
+      ...(sharedBark ? { shared_tree_bark: sharedBark.reference } : {}),
       source_whole_project: input, source_whole_sha256: sha(sourceBytes),
       strategy: 'Reusable authored complete-unit classes and independently mounted nested units; complete variants for historical edited families',
       authored_unit_classes: [...new Set([...plan.units.map(unit => unit.sourceAsset.id), ...meshUnits.map(unit => unit.source.id)])],
@@ -202,6 +218,13 @@ export async function generateFinalCompletePackage({ tool, input, document, sour
     }
     if (atlas) manifest.merged_atlas = { width: atlas.width, height: atlas.height, regions: atlas.sources,
       policy: 'original_pixels_export_only_uv_remap' };
+    const repairedSources = [];
+    const prepareSource = (built, source) => {
+      const { removedFaces, warnings: qualityWarnings } =
+        preparePveExportGeometry(built, k, source.id, allowGeometryCleanup);
+      warnings.push(...qualityWarnings);
+      if (removedFaces) repairedSources.push({ id: source.id, removed_faces: removedFaces });
+    };
     for (const [index, source] of ordered.entries()) {
       progress('生成骨架与样本枝', `正在生成 ${index + 1}/${ordered.length}：${source.id}`);
       let bytes, triangles, leaves, organs;
@@ -210,36 +233,45 @@ export async function generateFinalCompletePackage({ tool, input, document, sour
         const { GLTFExporter } = await imp('web/vendor/GLTFExporter.js');
         const { mergeGeometries } = await imp('web/vendor/surface/utils/BufferGeometryUtils.js');
         const model = buildMeshUnitModel(source.meshUnit);
+        const modelMaterials = new Set();
+        model.traverse(mesh => { if (mesh.isMesh) modelMaterials.add(mesh.material); });
+        const modelAsset = { group: model, unitBarkMaterials: [...modelMaterials] };
         try {
+          modelAsset.report = k.analyzeGroup(model);
+          prepareSource(modelAsset, source);
           ({ bytes, triangles } = await exportPveMeshUnit({ source: source.meshUnit, model, THREE: T,
             GLTFExporter, mergeGeometries, frame: pveGlbMatrix(source.meshUnit.connector) }));
         } finally {
-          model.traverse(mesh => { if (mesh.isMesh) { mesh.geometry.dispose(); mesh.material.dispose(); } });
+          k.disposeBranchAsset(modelAsset);
         }
         leaves = 0;
         organs = 0;
       } else if (source.group) {
         rebuildPveUnitTangents(source.group);
-        barkExporter.capture(source.group);
+        if (!sharedBark) barkExporter.capture(source.group);
         triangles = source.group.children.reduce((count, mesh) => count + mesh.geometry.index.count / 3, 0);
         if (!triangles) throw Error('局部完整枝没有可交付几何：' + source.id);
-        bytes = Buffer.from(await exportGlb(source.group, { singleMesh: true,
-          connector: { position: [0,0,0], direction: [0,1,0] } }));
+        const restoreBark = sharedBark ? preparePveSharedBarkUnit(source.group, sharedBark.recipe) : null;
+        try {
+          bytes = Buffer.from(await exportGlb(source.group, { singleMesh: true, mergeUnitMaterials: false,
+            connector: { position: [0,0,0], direction: [0,1,0] } }));
+        } finally { restoreBark?.(); }
         leaves = countUnits(source.representative, 'LEAF'); organs = countUnits(source.representative, 'ORGAN');
       } else {
         const sample = source.sourceAsset.sample;
         const localSources = sample.leaf_meshes.map(item => ({ ...item, geometry: k.deserializeGeometry(item.geometry) }));
-        let built;
+        let built, restoreBark;
         try {
           const unitAuthoring = normalizeAuthoring({ ...sample.authoring,
             leaf_material: sampleLeafMaterial(sample, authoring.branch_library, authoring.leaf_material) }, sample.settings.seed);
           built = k.buildBranchAsset(k.normalizeSettings({ ...sample.settings, export_lods: false, preview_lod: 0 }), null, localSources, 0, unitAuthoring);
-          warnings.push(...checkPveGeometry(built.report, source.id));
-          barkExporter.capture(built.group);
+          prepareSource(built, source);
+          if (sharedBark) restoreBark = preparePveSharedBarkUnit(built.group, sharedBark.recipe);
+          else barkExporter.capture(built.group);
           built.group.traverse(mesh => {
             if (!mesh.material) return;
             for (const material of [mesh.material].flat()) {
-              if (material.name === 'M_Leaf' || material.sampleLeafMaterial) {
+              if (baseBranchAtlasRole(mesh, material) !== 'bark' && (material.name === 'M_Leaf' || material.sampleLeafMaterial)) {
                 const texture = material.sampleLeafMaterial || unitAuthoring.leaf_material;
                 if (texture?.color) material.color.set(material.vegetationTint || '#ffffff');
                 if (atlas) {
@@ -250,9 +282,13 @@ export async function generateFinalCompletePackage({ tool, input, document, sour
               for (const key of Object.keys(material)) if (material[key]?.isTexture) material[key] = null;
             }
           });
-          bytes = Buffer.from(await exportGlb(built.group, { connector: source.connector, singleMesh: true }));
+          bytes = Buffer.from(await exportGlb(built.group, { connector: source.connector, singleMesh: true, mergeUnitMaterials: false }));
           triangles = built.report.triangles; leaves = built.masterPlacements.length; organs = built.treeOrgans.length;
-        } finally { k.disposeBranchAsset(built); localSources.forEach(item => item.geometry.dispose()); }
+        } finally {
+          restoreBark?.();
+          k.disposeBranchAsset(built);
+          localSources.forEach(item => item.geometry.dispose());
+        }
       }
       const glb = source.id + '.glb'; fs.writeFileSync(path.join(output, glb), bytes);
       manifest.units.push({ id: source.id, base_id: source.base_id, revision: source.revision,
@@ -268,13 +304,16 @@ export async function generateFinalCompletePackage({ tool, input, document, sour
     }
     progress('输出实际装配数据', '保存完整单元的独立挂接与精确枝叶，旧精修家族整体保留，几何只输出一次');
     const resolved = await exportResolvedAssembly({ tool, document, skeleton, output,
-      sourceSha256: sha(sourceBytes), asset, atlas, exportPlan: plan, barkExporter,
+      sourceSha256: sha(sourceBytes), asset, atlas, exportPlan: plan, barkExporter, sharedBark,
       onQualityWarnings: items => warnings.push(...items) });
     skeleton.resolved_assembly = resolved; manifest.resolved_assembly = resolved;
+    const geometryCleanup = pveGeometryCleanup(assemblyQuality.removedFaces, repairedSources);
+    if (geometryCleanup) manifest.geometry_cleanup = geometryCleanup;
     fs.writeFileSync(path.join(output, 'whole.pve-skeleton.json'), JSON.stringify(skeleton, null, 2) + '\n');
     fs.writeFileSync(path.join(output, 'complete_units.manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
     fs.writeFileSync(path.join(output, 'validation.json'), JSON.stringify({ ...validation,
       assembly: skeleton.complete_unit_assembly, sources: ordered.length, quality_warnings: warnings,
+      ...(geometryCleanup ? { geometry_cleanup: geometryCleanup } : {}),
       model_reuse: manifest.model_reuse,
       fixed_mesh_fallback_radius_p95_error: manifest.p95_relative_radius_error,
       resolved_assembly: resolved, standard_pve_radius_fidelity: manifest.standard_pve_radius_fidelity }, null, 2) + '\n');

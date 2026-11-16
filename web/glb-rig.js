@@ -2,6 +2,7 @@ import * as T from './vendor/three.module.min.js';
 import {axisTime} from './branch-axis.js';
 import {sampleLine,nearestParameter} from './tree-sculpt.js';
 import {unitBranchIndex} from './unit-branch-boundary.js';
+import {createTreeLightSkin} from './tree-light-skin.js';
 import {createTrunkPose} from './imported-trunk-binding.js';
 
 const clamp=t=>Number.isFinite(t)?Math.max(0,Math.min(1,t)):0;
@@ -71,7 +72,12 @@ export function createGlbRig(asset,frame,{maxBones=4096}={}){
   while(e&&e.type!=='BRANCH'&&!seen.has(e.index)){seen.add(e.index);e=asset.elements[e.parentIndex];}
   if(!e)return null;const owner=index.ownerOf(e.id),branch=index.byBranch.get(e.id);if(!branch)return null;const result=owner?{unit:owner.id}:{branch:e.id,rigid:origin?.type!=='BRANCH',t:nearestParameter(branch.points,new T.Vector3(...(origin?.pivot||e.pivot)))};elementCache.set(indexValue,result);return result;
  }
+ let lightSkin;
  function vertex(object,n,localPosition){const data=object.userData;
+  if(data.category==='tree_light'){
+   lightSkin??=createTreeLightSkin(asset,vertex);
+   return lightSkin(object,n);
+  }
   if(data.mesh_unit_instance){
    const index=attachmentJoints.get(data.mesh_unit_instance);
    if(index===undefined)throw Error('叶花果网格缺少挂接骨骼：'+object.name);

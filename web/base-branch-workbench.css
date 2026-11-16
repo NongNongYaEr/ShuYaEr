@@ -1,0 +1,325 @@
+.base-branch-workbench,
+.base-branch-workbench #baseBranchEditing,
+.base-branch-workbench #baseBranchShapeEditor {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+}
+
+.base-branch-workbench[hidden],
+.base-branch-workbench #baseBranchEditing[hidden],
+.base-branch-workbench #baseBranchShapeEditor[hidden],
+.base-branch-workbench #baseBranchShapeControls[hidden],
+.base-branch-workbench[data-shaping] > :not(#baseBranchShapeEditor),
+#branchUnitAssemblyPanel:has(> [data-shaping]) > :not(.base-branch-workbench),
+#proceduralUnitAssemblyControls[hidden] {
+  display: none;
+}
+
+body[data-base-branch-shaping] :is(.viewport-tool-rail, .shaping-viewport-tools, .quick-shaping-tools, #branchEditScopeBar, #editContext,
+  #sizeReferenceReadout, .viewport-toolbar .view-mode, .variant-tray, .inspector-panel) {
+  display: none;
+}
+
+body[data-base-branch-assembly] :is(.viewport-tool-rail, .quick-shaping-tools, #branchWorkflowDrawing, .branch-outliner-section,
+  #currentBranchPanel, #unitEditorPanel, #unitRulesPanel, #branchQuickPanel, #bundleTransformOptions) {
+  display: none;
+}
+
+[data-base-branch-rail] {
+  display: none;
+  position: absolute;
+  z-index: 5;
+  top: 58px;
+  left: 10px;
+  width: 72px;
+  max-height: calc(100% - 145px);
+  overflow: auto;
+  scrollbar-width: thin;
+  padding: 4px;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+body[data-base-branch-assembly]:not([data-base-branch-shaping]):not(.wind-preview-open) [data-base-branch-rail] {
+  display: grid;
+}
+
+[data-base-branch-rail] button {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  padding: 4px 0;
+  background: transparent;
+  border-color: transparent;
+  color: var(--text);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+[data-base-branch-rail] button:hover:not(:disabled) { background: var(--surface-2); }
+[data-base-branch-rail] button[aria-pressed="true"] { background: var(--brand-soft); border-color: #9e853c; color: var(--yellow); }
+[data-base-branch-rail] svg { width: 15px; height: 15px; }
+.base-branch-rail-separator { border-top: 1px solid var(--line); margin: 3px 0; }
+
+@media (min-width: 761px) {
+  body[data-base-branch-shaping] .workspace {
+    grid-template-columns: minmax(260px, var(--panel-left, 326px)) minmax(0, 1fr);
+  }
+}
+
+body[data-base-branch-shaping] .viewport-area svg.trunk-guide-lines {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+}
+
+body[data-base-branch-shaping] .viewport-area .trunk-guide-controls button.locked {
+  cursor: default;
+}
+
+body[data-base-branch-shaping] .viewport-area .trunk-guide-controls button.locked i {
+  border-radius: 2px;
+}
+
+#baseBranchShapeName {
+  margin: 0;
+  color: var(--accent, #ffdb76);
+}
+
+.base-branch-workbench #baseBranchBrushLeaves[aria-pressed="true"] {
+  color: var(--accent, #ffdb76);
+  border-color: var(--accent, #ffdb76);
+  background: var(--brand-soft, #403c25);
+}
+
+#baseBranchBrushBar {
+  position: absolute;
+  z-index: 7;
+  top: 68px;
+  left: 50%;
+  width: min(420px, calc(100% - 24px));
+  transform: translateX(-50%);
+  padding: 10px 12px;
+  color: #f1f2eb;
+  background: #222a25f5;
+  border: 1px solid #84784d;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px #0005;
+}
+
+#baseBranchBrushBar[hidden], #baseBranchBrushCursor[hidden] { display: none; }
+.base-branch-leaf-brushing :is(#editContext, #branchEditScopeBar) { display: none; }
+
+.leaf-brush-heading, .leaf-brush-spacing { display: flex; align-items: center; gap: 8px; }
+.leaf-brush-heading strong { color: #ffe08b; white-space: nowrap; }
+#baseBranchBrushUnit { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d3dccf; }
+#baseBranchBrushExit { white-space: nowrap; color: #ffe4a0; }
+#baseBranchBrushExit kbd { font: inherit; font-size: 10px; padding: 1px 3px; border: 1px solid #7b775e; border-radius: 3px; }
+.leaf-brush-spacing { margin-top: 8px; }
+.leaf-brush-spacing label, .leaf-brush-spacing > span { color: #c4d0c4; white-space: nowrap; }
+.leaf-brush-spacing button { width: 28px; min-width: 28px; padding: 3px; }
+#baseBranchBrushSpacing { width: 62px; text-align: center; }
+#baseBranchBrushSpacingSlider { flex: 1; min-width: 40px; accent-color: #ead481; }
+#baseBranchBrushReadout { min-height: 1.3em; margin: 8px 0 0; color: #cbd6cd; font-size: 11px; }
+#baseBranchBrushBar[data-state="painting"] #baseBranchBrushReadout { color: #ffe08b; }
+#baseBranchBrushBar[data-state="invalid"] #baseBranchBrushReadout { color: #ffc3a8; }
+
+#baseBranchBrushCursor {
+  --brush-marker-color: #dbef9d;
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  color: var(--brush-marker-color);
+}
+#baseBranchBrushCursor[data-state="painting"] { --brush-marker-color: #ffe08b; }
+#baseBranchBrushCursor[data-state="blocked"] { --brush-marker-color: #f2bbaa; }
+#baseBranchBrushCursor::before, #baseBranchBrushCursor::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+}
+#baseBranchBrushCursor::before {
+  width: var(--brush-marker-size, 16px);
+  height: var(--brush-marker-size, 16px);
+  border: 1px dashed currentColor;
+  box-shadow: 0 0 0 1px #1320188c;
+}
+#baseBranchBrushCursor::after { width: 6px; height: 6px; background: currentColor; border: 1px solid #1e2b20; }
+#baseBranchBrushCursor span {
+  position: absolute;
+  left: 12px;
+  top: 10px;
+  padding: 3px 6px;
+  white-space: nowrap;
+  background: #202924ed;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.base-branch-workbench .base-branch-shape-transforms {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.base-branch-workbench fieldset {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 8px;
+  min-width: 0;
+  border: 1px solid var(--line, #3c4944);
+  border-radius: 6px;
+}
+
+.base-branch-workbench legend {
+  padding: 0 4px;
+  font-weight: 650;
+}
+
+.base-branch-workbench h4 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.base-branch-workbench .base-branch-card {
+  width: 100%;
+  padding: 5px;
+  gap: 4px;
+  align-items: stretch;
+  cursor: pointer;
+  text-align: left;
+}
+
+.base-branch-workbench .base-branch-card[draggable="true"] {
+  cursor: grab;
+}
+
+.base-branch-workbench .base-branch-card[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.base-branch-workbench .base-branch-card[aria-pressed="true"] {
+  border-color: var(--accent, #f1c768);
+  background: #373124;
+}
+
+.base-branch-workbench .base-branch-card strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.base-branch-workbench .base-branch-card small {
+  color: #b9c5be;
+}
+
+.base-branch-workbench .base-branch-cards[hidden] {
+  display: none;
+}
+
+.base-branch-drop-hint {
+  position: fixed;
+  z-index: 100;
+  pointer-events: none;
+  max-width: 190px;
+  padding: 6px 10px;
+  border: 1px solid #aabf83;
+  border-radius: 5px;
+  background: #18251e;
+  color: #e5efce;
+  font-size: 12px;
+}
+
+.base-branch-workbench .base-branch-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.base-branch-workbench .base-branch-check[hidden] {
+  display: none;
+}
+
+#baseBranchInspector:not([hidden]) {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--line, #3c4944);
+}
+
+#baseBranchInspector > h3,
+#baseBranchInspector > p {
+  margin: 0;
+}
+
+#baseBranchInspector .field-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+#baseBranchInspector details > :not(summary) {
+  margin-top: 8px;
+}
+
+#baseBranchIssues:not(:empty) {
+  display: grid;
+  gap: 5px;
+  max-height: 180px;
+  overflow: auto;
+}
+
+body[data-base-branch-selection]:not([data-base-branch-selection="0"]) :is(#unitEditorPanel, #currentBranchPanel) {
+  display: none;
+}
+
+body[data-base-branch-selection]:not([data-base-branch-selection="0"]) .inspector-panel {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.base-branch-workbench .base-branch-check input[type="checkbox"] {
+  flex: 0 0 14px;
+  width: 14px;
+  min-width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
+.base-branch-workbench summary {
+  cursor: pointer;
+  margin-bottom: 6px;
+}
+
+.base-branch-workbench .base-branch-guide-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  margin: 6px 0;
+}
+
+.base-branch-workbench .base-branch-guide-fields input {
+  width: 100%;
+  min-width: 0;
+}
+
+.base-branch-workbench button[aria-pressed="true"] {
+  color: var(--accent, #f1c768);
+  border-color: currentColor;
+}
+
+#proceduralUnitAssemblyControls > #unitAssemblyApply {
+  width: 100%;
+  margin-top: 6px;
+}
+
+.base-branch-surface-pick {
+  cursor: crosshair !important;
+}

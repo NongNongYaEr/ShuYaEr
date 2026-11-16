@@ -1,3 +1,4 @@
+import {TREE_LIGHT_GROUP} from './tree-light-mesh.js';
 import * as THREE from 'three';
 import { GLTFExporter } from './vendor/GLTFExporter.js';
 import { normalizeLeafMaterial } from './leaf-material-data.js';
@@ -5,6 +6,7 @@ import { pveGlbMatrix } from './pve-export.js';
 import { mergeGeometries } from './vendor/surface/utils/BufferGeometryUtils.js';
 import {createSkinnedGlbScene} from './glb-skinned-scene.js';
 import {originalPotImages} from './bonsai-pot-images.js';
+import { createBaseBranchAtlasMaterials } from './base-branch-export-materials.js';
 
 // Export textures own their images; never reuse an incompletely loaded preview map.
 export async function bindGlbTextures(material, raw, cache = null) {
@@ -59,7 +61,7 @@ function prepareSceneMaterials(scene,rasterizeBarkTextures) {
   const exportMaterials = new Map();
   const exportTextures = new Map();
   function exportMaterial(material) {
-    if (!material?.userData?.bark_material) return material;
+    if (!material?.userData?.bark_material && !material?.userData?.whole_tree_shared_bark) return material;
     if (!exportMaterials.has(material)) {
       const copy = material.clone();
       delete copy.userData.bark_material;
@@ -81,22 +83,43 @@ function prepareSceneMaterials(scene,rasterizeBarkTextures) {
   });
   return ()=>{exportMaterials.forEach(material=>material.dispose());exportTextures.forEach(texture=>texture.dispose());};
 }
-export function createGlbExportScene(root, { connector = null, singleMesh = false, rasterizeBarkTextures = false } = {}) {
+
+function separateDisplayColors(geometry, isDisplay) {
+  const original = geometry.getAttribute('color'), count = geometry.getAttribute('position').count;
+  const display = new Float32Array(count * 4).fill(1), wind = new Float32Array(count * 4);
+  if (original) {
+    const target = isDisplay ? display : wind;
+    for (let i = 0; i < count; i++) target.set([
+      original.getX(i), original.getY(i), original.getZ(i), original.itemSize === 4 ? original.getW(i) : 1,
+    ], i * 4);
+  }
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(display, 4));
+  geometry.setAttribute('_BRANCH_WIND', new THREE.Float32BufferAttribute(wind, 4));
+}
+
+export function createGlbExportScene(root, { connector = null, singleMesh = false, rasterizeBarkTextures = false, mergeUnitMaterials = true } = {}) {
   const scene = new THREE.Scene();
   scene.name = root.name;
   const geometries = [];
-  if (connector || singleMesh) {
+  const atlasMaterials = createBaseBranchAtlasMaterials({ mergeUnitMaterials });
+  if (!root.getObjectByName(TREE_LIGHT_GROUP) && (connector || singleMesh)) {
     const frame = connector ? pveGlbMatrix(connector) : new THREE.Matrix4().makeRotationX(-Math.PI / 2);
     const materials = [], groups = [];
     let indexOffset = 0;
+    let displayColor = false;
     root.updateWorldMatrix(true, true);
+    root.traverseVisible(object => {
+      if (object.isMesh && object.userData.branchforge_color_is_display) displayColor = true;
+    });
     root.traverseVisible((object) => {
       if (!object.isMesh) return;
       const geometry = object.geometry.clone();
       geometries.push(geometry);
       geometry.applyMatrix4(new THREE.Matrix4().multiplyMatrices(frame, object.matrixWorld));
+      if (displayColor) separateDisplayColors(geometry, object.userData.branchforge_color_is_display);
       const slots = Array.isArray(object.material) ? object.material : [object.material];
-      const slotIndices = slots.map((material) => {
+      const slotIndices = slots.map((source) => {
+        const material = atlasMaterials.forMesh(object, source);
         if (!materials.includes(material)) materials.push(material);
         return materials.indexOf(material);
       });
@@ -108,6 +131,7 @@ export function createGlbExportScene(root, { connector = null, singleMesh = fals
     const merged = geometries.length ? mergeGeometries(geometries, false) : null;
     if (!merged) {
       geometries.forEach((geometry) => geometry.dispose());
+      atlasMaterials.dispose();
       throw new Error('无法合并完整模型，请检查网格属性');
     }
     geometries.push(merged);
@@ -115,6 +139,7 @@ export function createGlbExportScene(root, { connector = null, singleMesh = fals
     // One mesh, multiple material slots. No parent rotations for the importer to lose.
     const mesh = new THREE.Mesh(merged, materials);
     mesh.name = root.name;
+    if (displayColor) mesh.userData.branchforge_color_is_display = true;
     if (Number.isInteger(root.userData.lod)) mesh.userData.lod = root.userData.lod;
     scene.add(mesh);
     if (connector) scene.userData = { pve_target: 'UE 5.8', ue_growth_axis: '+Z', ue_face_axis: '+Y', pivot: 'connector_at_origin' };
@@ -123,7 +148,11 @@ export function createGlbExportScene(root, { connector = null, singleMesh = fals
     // The generator uses Z-up metres; glTF uses Y-up metres.
     const axis = new THREE.Group();
     axis.name = 'BranchForge_Z_to_Y';
-    axis.rotation.x = -Math.PI / 2;
+    if(connector){
+      axis.matrixAutoUpdate=false;
+      axis.matrix.copy(pveGlbMatrix(connector));
+      scene.userData={pve_target:'UE 5.8',ue_growth_axis:'+Z',ue_face_axis:'+Y',pivot:'connector_at_origin'};
+    }else axis.rotation.x=-Math.PI/2;
     axis.add(copy);
     scene.add(axis);
     copy.traverse((object) => {
@@ -131,11 +160,14 @@ export function createGlbExportScene(root, { connector = null, singleMesh = fals
       const geometry = object.geometry.clone();
       geometries.push(geometry);
       object.geometry = geometry;
+      object.material = Array.isArray(object.material)
+        ? object.material.map(material => atlasMaterials.forMesh(object, material))
+        : atlasMaterials.forMesh(object, object.material);
     });
   }
   const disposeMaterials=prepareSceneMaterials(scene,rasterizeBarkTextures);
   scene.updateMatrixWorld(true);
-  return { scene, dispose: () => { geometries.forEach(geometry => geometry.dispose());disposeMaterials(); } };
+  return { scene, dispose: () => { geometries.forEach(geometry => geometry.dispose());disposeMaterials();atlasMaterials.dispose(); } };
 }
 
 export async function exportGlb(root, options = {}) {

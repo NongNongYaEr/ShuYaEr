@@ -22,7 +22,8 @@ function blur(source,width,height,radius){
 // Raw row order and OpenGL normal convention match existing bark DataTextures.
 export function generateBarkCompanionMaps(image,options={}){
   const {width,height,data}=image||{};
-  if(!Number.isInteger(width)||!Number.isInteger(height)||width<1||height<1||width>1024||height>1024||!(data instanceof Uint8Array||data instanceof Uint8ClampedArray)||data.length!==width*height*4)throw Error('颜色贴图像素无效（最大 1024 × 1024）');
+  const maxSize=options.exportResolution===true?2048:1024;
+  if(!Number.isInteger(width)||!Number.isInteger(height)||width<1||height<1||width>maxSize||height>maxSize||!(data instanceof Uint8Array||data instanceof Uint8ClampedArray)||data.length!==width*height*4)throw Error(`颜色贴图像素无效（最大 ${maxSize} × ${maxSize}）`);
   const depth=option(options.depth,0,3,1),smoothing=Math.round(option(options.smoothing,0,6,1)),variation=option(options.variation,0,1,.4),invert=options.invert===true;
   const luminance=new Float32Array(width*height),linear=Float32Array.from({length:256},(_,i)=>{const c=i/255;return c<=.04045?c/12.92:((c+.055)/1.055)**2.4;});
   for(let i=0;i<luminance.length;i++){const j=i*4,alpha=data[j+3]/255;luminance[i]=(.2126*linear[data[j]]+.7152*linear[data[j+1]]+.0722*linear[data[j+2]])*alpha+.5*(1-alpha);}

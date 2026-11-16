@@ -4,6 +4,7 @@ import { retractAlongPath } from './branch-retraction.js';
 import { combCurve } from './branch-combing.js';
 import { createGpuMeshPreview } from './gpu-edit-preview.js';
 import {transformLegacyRigidGeometry} from './legacy-unit-placement.js';
+import {treeLightCarrierId,treeLightRingCenter} from './tree-light-carriers.js';
 
 export const SCULPT_TOOLS = new Set(['GRAB', 'COMB', 'BEND_BRUSH', 'PUSH_PULL', 'SMOOTH_BRUSH', 'SPREAD', 'TWIST_BRUSH', 'GUIDE', 'PROTECT', 'RETRACT']);
 const clamp = THREE.MathUtils.clamp;
@@ -300,12 +301,17 @@ export function createCpuMeshPreview(asset, snapshot) {
   asset.group.updateMatrixWorld(true);
   asset.group.traverse((mesh) => {
     if (!mesh.isMesh) return;
+    const light=mesh.userData.category==='tree_light';
+    const branchHint=byStableId.get(light ? treeLightCarrierId(asset.authoring,mesh.userData.treeLightStrip?.guide)
+      : mesh.userData.stable_id||mesh.userData.branch_id);
+    if(light&&!branchHint)return;
+    const ringSize=light?mesh.userData.treeLightStrip.ringSize:0;
     const originalGeometry = mesh.geometry;
     if (mesh.userData.category === 'marker') mesh.geometry = originalGeometry.clone();
     const geometry = mesh.geometry;
     const position = geometry.getAttribute('position');
     const normal = geometry.getAttribute('normal');
-    const uv = geometry.getAttribute('uv1');
+    const uv = light ? null : geometry.getAttribute('uv1');
     const local = mesh.matrix.clone();
     const inverse = local.clone().invert();
     const normalMatrix = new THREE.Matrix3().getNormalMatrix(local);
@@ -313,7 +319,7 @@ export function createCpuMeshPreview(asset, snapshot) {
     const source = [];
     const normals = [];
     const bindings = [];
-    const branchHint = byStableId.get(mesh.userData.stable_id || mesh.userData.branch_id);
+    const ringCenter = ringSize ? new THREE.Vector3() : null;
     let markerBinding = null;
     if (!uv && !branchHint) {
       const center = new THREE.Vector3().setFromMatrixPosition(local);
@@ -328,6 +334,11 @@ export function createCpuMeshPreview(asset, snapshot) {
       const point = new THREE.Vector3().fromBufferAttribute(position, i).applyMatrix4(local);
       source.push(point);
       normals.push(normal ? new THREE.Vector3().fromBufferAttribute(normal, i).applyMatrix3(normalMatrix).normalize() : null);
+      if(ringSize){
+        if(i%ringSize)bindings.push(bindings[i-1]);
+        else bindings.push({id:branchHint.id,t:nearestParameter(branchHint.points,treeLightRingCenter(position,i,ringSize,ringCenter).applyMatrix4(local))});
+        continue;
+      }
       const elementIndex = uv ? Math.floor(uv.getY(i) * asset.lookupTexture.height) * asset.lookupTexture.width + Math.floor(uv.getX(i) * asset.lookupTexture.width) : -1;
       const binding = branchHint ? { branch: branchHint, t: null } : elementBindings[elementIndex] || markerBinding;
       bindings.push(binding?.branch ? { id: binding.branch.id, t: binding.t ?? nearestParameter(binding.branch.points, point) } : null);

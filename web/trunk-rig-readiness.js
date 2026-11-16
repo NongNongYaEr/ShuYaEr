@@ -5,7 +5,7 @@ import {digest} from './trunk-material-workflow.js';
 // tested. A legacy confirmation boolean alone cannot certify later edits.
 export async function checkTrunkRig(model,{check,current=()=>model,automatic=false}={}){
  validateTrunkReady(model);
- const input=JSON.stringify({geometry:model.material_workflow?.geometryKey||model.source.sha256,calibration:model.calibration,guides:model.guides,binding:model.binding||{},sculpt:model.sculpt||null});
+ const input=JSON.stringify({geometry:model.material_workflow?.geometryKey||model.source.sha256,cleanup:model.geometry_cleanup?.id,calibration:model.calibration,guides:model.guides,binding:model.binding||{},sculpt:model.sculpt||null});
  const key=await digest(new TextEncoder().encode(input));
  const assertCurrent=()=>{if(current()!==model)throw Error('树干已变化，请重新检查当前骨架。');};
  assertCurrent();

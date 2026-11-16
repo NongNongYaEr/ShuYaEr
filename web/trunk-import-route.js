@@ -2,10 +2,11 @@ export const TRUNK_IMPORT_ROUTES=Object.freeze([
  {id:'rig',title:'直接绑定骨骼',summary:'模型、UV 和材质都已准备好',flow:'保留原模型与材质 → 自动骨架与绑定',action:'开始自动骨架与绑定 →'},
  {id:'overlay',title:'保留原材质 · 叠加效果',summary:'模型已有树皮等贴图，只想加积雪、苔藓',flow:'原材质作为底层 → 添加效果 → 检查与绑定',action:'打开原材质效果 →'},
  {id:'material',title:'保留模型，只制作材质',summary:'面数和 UV 已合适，需要新的树皮材质',flow:'保留面数与 UV → 走势分析 → 制作材质 → 骨架',action:'分析模型并制作材质 →'},
- {id:'full',title:'高模完整处理',summary:'从高面数模型生成中低模和材质',flow:'按需减面 → 树结构 UV → 走势与材质 → 骨架',action:'一键准备并制作材质 →'}
+ {id:'full',title:'高模完整处理',summary:'从高面数模型生成中低模和材质',flow:'按需减面 → 树结构 UV → 走势与材质 → 骨架',action:'一键准备并制作材质 →'},
+ {id:'staged',title:'高模分步处理',summary:'拓扑、UV 和材质可分别导出 GLB',flow:'拓扑减面 → 按需自动拆排 UV → 制作材质',action:'开始拓扑减面 →'}
 ]);
 export function normalizeTrunkRoute(value){return value==='keep'?'rig':value==='new'||value==null?'full':TRUNK_IMPORT_ROUTES.some(r=>r.id===value)?value:(()=>{throw Error('请选择有效的树干处理方式。');})();}
-export function trunkRoutePlan(value){const id=normalizeTrunkRoute(value),route=TRUNK_IMPORT_ROUTES.find(r=>r.id===id);return {...route,material:id!=='rig',optimize:id==='full',unwrap:id==='full'};}
+export function trunkRoutePlan(value){const id=normalizeTrunkRoute(value),route=TRUNK_IMPORT_ROUTES.find(r=>r.id===id);return {...route,material:id!=='rig',optimize:id==='full'||id==='staged',unwrap:id==='full'};}
 export function createTrunkRouteChoice(parent,{value='full',change=()=>{}}={}){
  const group=document.createElement('fieldset');group.className='trunk-route-choice';group.innerHTML='<legend>这棵树需要哪些处理？</legend>';
  const name='trunk-route-'+crypto.randomUUID();

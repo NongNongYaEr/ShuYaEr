@@ -1,12 +1,43 @@
 import { skeletonBranches } from './skeleton-thickness.js';
 import { findAssemblyGaps } from './assembly-coverage.js';
-import { protectedAssemblyInstances, isAutomaticPlacement, isPreservedAssemblyGap } from './assembly-distribution.js';
+import { protectedAssemblyInstances, isAutomaticPlacement } from './assembly-distribution.js';
 
 export const ASSEMBLY_ZONES = [
   { role: 'MATURE', label: '偏内部 · 深绿' },
   { role: 'MIXED', label: '中间 · 混合' },
   { role: 'YOUNG', label: '末端 · 嫩绿' },
 ];
+const standardStations = [.36, .5, .64, .78, .82, .9];
+
+function openAssemblySpans(gaps) {
+  const blocked = gaps.map(gap => [Math.max(0, Number(gap.start)), Math.min(1, Number(gap.end))])
+    .filter(([start, end]) => start <= end).sort((a, b) => a[0] - b[0]);
+  const open = [];
+  let left = 0;
+  for (const [start, end] of blocked) {
+    if (start > left) open.push([left, start]);
+    left = Math.max(left, end);
+  }
+  if (left < 1) open.push([left, 1]);
+  return open.filter(([start, end]) => {
+    const center = start + (end - start) / 2;
+    return center > start && center < end;
+  });
+}
+
+function fallbackStation(spans, occupied) {
+  const sorted = occupied.slice().sort((a, b) => a - b);
+  let best = null, widest = 0;
+  for (const [start, end] of spans) {
+    const edges = [start, ...sorted.filter(t => t > start && t < end), end];
+    for (let n = 1; n < edges.length; n++) {
+      const left = edges[n - 1], right = edges[n];
+      const width = right - left, center = left + width / 2;
+      if (width > widest && center > left && center < right) { best = center; widest = width; }
+    }
+  }
+  return best ?? spans[0][0] + (spans[0][1] - spans[0][0]) / 2;
+}
 
 export function normalizeAssemblySlots(raw, library = []) {
   const valid = new Set(library.map((asset) => asset.id));
@@ -101,22 +132,44 @@ export function resizeAssemblyInstances(instances, slots, library, requested, br
   }).sort((a, b) => a.exposure - b.exposure);
   parents.forEach((parent, index) => { const fraction = (index + 0.5) / parents.length;
     parent.role = fraction < 0.4 ? 'MATURE' : fraction < 0.9 ? 'MIXED' : 'YOUNG'; });
+  const gapsByParent = new Map(), poolsByRole = new Map();
+  for (const gap of authoring?.workbench?.assembly_voids || []) {
+    for (const id of gap.parents || []) {
+      if (!gapsByParent.has(id)) gapsByParent.set(id, []);
+      gapsByParent.get(id).push(gap);
+    }
+  }
+  function placementPool(role) {
+    if (poolsByRole.has(role)) return poolsByRole.get(role);
+    const preferred = [], alternatives = [];
+    for (const parent of parents) {
+      const gaps = (gapsByParent.get(parent.branch.stableId) || []).filter(gap => gap.role === 'ANY' || gap.role === role);
+      const stations = standardStations.filter(t => !gaps.some(gap => t >= gap.start && t <= gap.end));
+      const spans = gaps.length ? openAssemblySpans(gaps) : [];
+      if (!stations.length && !spans.length) continue;
+      const pool = parent.role === role || !activeRoles.includes(parent.role) ? preferred : alternatives;
+      pool.push({ parent, stations, spans });
+    }
+    const pool = preferred.length ? preferred : alternatives;
+    poolsByRole.set(role, pool);
+    return pool;
+  }
   const usedIds = new Set(instances.map((instance) => instance.id));
   const added = []; let serial = 1;
   for (let index = managed.length; index < target; index++) {
     const {role,asset}=sequence.next();
-    const roleParents = parents.filter((parent) => parent.role === role || !activeRoles.includes(parent.role));
-    const pool = (roleParents.length ? roleParents : parents).filter(parent=>[.36,.5,.64,.78,.82,.9].some(t=>!isPreservedAssemblyGap(authoring,parent.branch.stableId,t,role)));
-    if (!pool.length) throw Error('可用挂点均被保留空隙覆盖，请调整空隙范围');
-    const emptyTips = pool.filter(p => !p.attaches.length && gapOrder.has(p.branch.stableId));
-    const parent = emptyTips.length ? emptyTips.sort((a, b) => gapOrder.get(a.branch.stableId) - gapOrder.get(b.branch.stableId))[0]
-      : pool.reduce((best, current) => current.attaches.length < best.attaches.length
-      || current.attaches.length === best.attaches.length && current.index < best.index ? current : best);
-    const attachOptions = [0.36, 0.5, 0.64, 0.78, 0.82, 0.9].filter(t=>!isPreservedAssemblyGap(authoring,parent.branch.stableId,t,role));
-    const attach = emptyTips.length && attachOptions.includes(.82) ? .82 : attachOptions.reduce((best, current) => {
-      const clearance = (value) => Math.min(1, ...parent.attaches.map((other) => Math.abs(value - other)));
-      return clearance(current) > clearance(best) ? current : best;
-    });
+    const pool = placementPool(role);
+    if (!pool.length) throw Error('当前分区的可用挂点均被保留空隙覆盖，请点「查看保留空隙」检查范围');
+    const emptyTips = pool.filter(({ parent }) => !parent.attaches.length && gapOrder.has(parent.branch.stableId));
+    const { parent, stations, spans } = emptyTips.length
+      ? emptyTips.sort((a, b) => gapOrder.get(a.parent.branch.stableId) - gapOrder.get(b.parent.branch.stableId))[0]
+      : pool.reduce((best, current) => current.parent.attaches.length < best.parent.attaches.length
+      || current.parent.attaches.length === best.parent.attaches.length && current.parent.index < best.parent.index ? current : best);
+    let attach;
+    const clearance = value => Math.min(1, ...parent.attaches.map(other => Math.abs(value - other)));
+    if (spans.length && !stations.some(t => clearance(t) > 1e-8)) attach = fallbackStation(spans, parent.attaches);
+    else if (emptyTips.length && stations.includes(.82)) attach = .82;
+    else attach = stations.reduce((best, current) => clearance(current) > clearance(best) ? current : best);
     parent.attaches.push(attach);
     let id; do { id = `ASSEMBLY_DENSITY_${String(serial++).padStart(4, '0')}`; } while (usedIds.has(id));
     usedIds.add(id);

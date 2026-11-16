@@ -14,10 +14,19 @@ export function createPveCompleteExporter({ api, save, ready, status, button, pr
   dialog.addEventListener('keydown', e => e.stopPropagation());
   $('pveOpen').onclick = async () => { try { await api('/api/open-pve-output', { job_id: job.job_id }); } catch (e) { $('pveDetail').textContent = e.message; } };
   $('pveCopy').onclick = async () => { try { await navigator.clipboard.writeText(job.skeleton_path); $('pveDetail').textContent = '已复制 UE 入口：' + job.skeleton_path; } catch (e) { $('pveDetail').textContent = '请复制此路径：' + job.skeleton_path; } };
-  $('pveRetry').onclick = () => { sessionStorage.removeItem('pveExportJob'); dialog.close(); run(); };
-  async function run() {
+  $('pveRetry').onclick = () => {
+    if (running) return;
+    const cleanup = job?.geometry_cleanup_required;
+    const retry = cleanup ? { path: cleanup.project_path, keepHistory: job.keep_history,
+      expectedSourceSha256: cleanup.source_sha256 } : null;
+    sessionStorage.removeItem('pveExportJob');
+    dialog.close();
+    void run(retry);
+  };
+  async function run(retry = null) {
     if (running) return;
     running = true; button.disabled = true; $('pveClose').disabled = true;
+    $('pveClose').textContent = '关闭';
     for (const id of ['pveResult','pveOpen','pveCopy','pveRetry']) $(id).hidden = true;
     $('pveLog').textContent = ''; $('pveDetail').textContent = ''; $('pveElapsed').textContent = '';
     let started = Date.now();
@@ -25,13 +34,18 @@ export function createPveCompleteExporter({ api, save, ready, status, button, pr
       const pending = sessionStorage.getItem('pveExportJob');
       if (!pending) {
         job = null;
-        ready(); status('保存软件工程 · 尚未生成 UE 完整包', 'busy');
-        const prepared = await prepare?.();
-        if (prepared === false) { status('已取消完整单元枝包导出', 'ready'); return; }
-        const saved = await save(prepared); if (!saved) { status('已取消完整单元枝包导出', 'ready'); return; }
+        let prepared, saved = retry;
+        if (!saved) {
+          ready(); status('保存软件工程 · 尚未生成 UE 完整包', 'busy');
+          prepared = await prepare?.();
+          if (prepared === false) { status('已取消完整单元枝包导出', 'ready'); return; }
+          saved = await save(prepared); if (!saved) { status('已取消完整单元枝包导出', 'ready'); return; }
+        }
         const project = typeof saved === 'string' ? saved : saved.path;
         dialog.showModal(); $('pveStage').textContent = '生成骨架与单元枝模型 · 正在启动';
-        job = await api('/api/export-pve-complete', { project_path: project, output_dir: project.replace(/\.branch\.json$/i, '_PVE_Complete'), keep_history: saved.keepHistory === true });
+        job = await api('/api/export-pve-complete', { project_path: project, output_dir: project.replace(/\.branch\.json$/i, '_PVE_Complete'),
+          keep_history: saved.keepHistory === true, allow_geometry_cleanup: Boolean(retry || prepared?.allowGeometryCleanup),
+          ...(retry ? { expected_source_sha256: retry.expectedSourceSha256 } : {}) });
         sessionStorage.setItem('pveExportJob', job.job_id);
       } else { dialog.showModal(); job = { job_id: pending }; }
       timer = setInterval(() => { $('pveElapsed').textContent = `已运行 ${Math.floor((Date.now() - started) / 1000)} 秒 · 正在后台处理，请保留本软件运行`; }, 1000);
@@ -58,9 +72,13 @@ export function createPveCompleteExporter({ api, save, ready, status, button, pr
       if (job.validation.quality_warnings?.length) {
         $('pveDetail').textContent = '完整包校验通过。以下为造型质量提示，已保留原样导出：\n' + job.validation.quality_warnings.join('\n');
       }
+      const cleanup = job.validation.geometry_cleanup;
+      if (cleanup) {
+        $('pveDetail').textContent += `\n导出副本已清理 ${cleanup.removed_faces.toLocaleString()} 个零面积三角面，已保存的工程和源模型保持原样。`;
+      }
       if (job.maintenance_warnings?.length) $('pveDetail').textContent += '\n' + job.maintenance_warnings.join('\n');
       if (models?.historical_complete_models) $('pveDetail').textContent += '\n历史完整模型用于保留旧副本的枝叶造型；枝叶整体一致的副本经校验后复用模型，不会拆成独立叶花果。';
-      if (job.resolved_assembly?.imported_trunk) $('pveDetail').textContent += '\n雕刻 / AI 树干已包含原网格、材质和控制点权重。请打开输出文件夹，按《树干UE导出说明.txt》生成 UE 静态 / 风动骨骼资产；后台导出脚本为 export_imported_trunk_assets.ps1。';
+      if (job.resolved_assembly?.imported_trunk) $('pveDetail').textContent += '\n完整包已包含树干或灯带的显式蒙皮。请按《树干UE导出说明.txt》生成 UE 静态与风动骨骼资产。';
       if (job.package_kind === 'vine') $('pveDetail').textContent += '\n藤干、叶层和连接细茎已合为完整藤蔓装配。承载模型不导出，无需单独绑定叶片。';
       $('pveDirectory').textContent = '输出目录：' + job.output_dir;
       if (job.keep_history && job.previous_dir) $('pveDirectory').textContent += '\n历史备份：' + job.previous_dir;
@@ -68,12 +86,21 @@ export function createPveCompleteExporter({ api, save, ready, status, button, pr
       status('UE/PVE 完整单元枝包已生成并通过校验', 'ready');
     } catch (e) {
       if (!dialog.open) dialog.showModal();
-      $('pveStage').textContent = `导出失败 · ${job?.stage || '保存工程 / 启动任务'}`;
-      $('pveDetail').textContent = e.message; status('完整单元枝包导出失败', 'error');
+      const needsCleanup = Boolean(job?.geometry_cleanup_required);
+      $('pveStage').textContent = needsCleanup ? '等待确认导出副本清理' : `导出失败 · ${job?.stage || '保存工程 / 启动任务'}`;
+      $('pveDetail').textContent = needsCleanup
+        ? e.message + '\n清理只应用于本次导出的网格。有效三角面的 UV、材质和绑定保留。'
+        : e.message;
+      status(needsCleanup ? '等待确认导出副本清理' : '完整单元枝包导出失败', needsCleanup ? 'ready' : 'error');
       if (!$('pveLog').textContent) $('pveLog').textContent = '服务端日志：软件目录下 .runtime/server.log';
     } finally {
       clearInterval(timer); $('pveElapsed').textContent = dialog.open ? `本次处理 ${Math.max(0, Math.floor((Date.now() - started) / 1000))} 秒` : '';
       running = false; button.disabled = false; $('pveClose').disabled = false; $('pveRetry').hidden = false;
+      if (job?.geometry_cleanup_required) {
+        $('pveRetry').textContent = '清理副本并导出';
+        $('pveClose').textContent = '取消导出';
+        $('pveClose').focus();
+      } else $('pveRetry').textContent = '重新保存并导出';
     }
   }
   return { run };

@@ -233,7 +233,9 @@ export function createParameterWorkspace({ begin, preview, commit, cancel, defau
     selectionChanged(count, key) {
       if (key !== selectionKey) { if (count) showContext(true); selectionKey = key; }
       $('contextCount').dataset.branchCount = String(count);
-      if (document.body.dataset.unitEditing !== 'on') $('contextCount').textContent = String(count);
+      if (document.body.dataset.unitEditing !== 'on') {
+        $('contextCount').textContent = String(Number(document.body.dataset.baseBranchSelection) || count);
+      }
     },
   };
 }

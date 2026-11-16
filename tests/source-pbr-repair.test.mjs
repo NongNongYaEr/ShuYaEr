@@ -3,6 +3,9 @@ import test from 'node:test';
 import {inspectGeometry} from '../material/web/geometry-repair.js';
 import {parseSourcePbrGLB} from '../material/web/source-pbr.js';
 import {repairSourcePbrGLB} from '../material/web/source-pbr-repair.js';
+import {prepareRepairedUVSource,rebindRepairedMaterialProject,survivingFaceMap} from '../material/web/geometry-repair-workspace.js';
+import {restoreWorkingMesh} from '../material/web/working-mesh.js';
+import {createDocument} from '../material/web/project-state.js';
 
 function fixture({allDegenerate=false,unindexed=false}={}){
  const chunks=[],bufferViews=[],accessors=[];
@@ -77,4 +80,21 @@ for(const unindexed of [false,true])test('原材质修复保留贴图和材质�
 test('所有三角面退化时明确拒绝',async()=>{
  const bytes=fixture({allDegenerate:true}),source=await parseSourcePbrGLB(bytes,'全部退化.glb');
  assert.throws(()=>repairSourcePbrGLB(bytes,source),/所有三角面均已退化/);
+});
+
+test('旧原材质工程删除整段退化网格后，仍保留有效材质槽和工作 UV 面角',async()=>{
+ const source=await parseSourcePbrGLB(fixture(),'旧原材质.glb');
+ const working=await restoreWorkingMesh(source,{...source,uv:Float32Array.from(source.uv,x=>.2+.6*x),chartIds:new Int32Array(source.pos.length/3)},{mode:'unwrap',revision:1});
+ const report=inspectGeometry(source),removed=new Set(report.faces);
+ const keptCorners=(mesh,uv,filter=false)=>Array.from(mesh.indices)
+  .filter((_,corner)=>!filter||!removed.has(Math.floor(corner/3))).map(i=>[uv[i*2],uv[i*2+1]]);
+ const cleaned=await prepareRepairedUVSource(source,working,report,{mode:'unwrap',revision:1});
+ assert.deepEqual(keptCorners(cleaned.input,cleaned.input.uv),keptCorners(working,working.uv,true));
+ assert.deepEqual(keptCorners(cleaned.source,cleaned.source.extraAttributes.TEXCOORD_1.data),keptCorners(source,source.extraAttributes.TEXCOORD_1.data,true));
+ const document=createDocument({source:source.sourceSHA256,name:source.name,settings:{}});
+ document.materialBase={version:1,kind:'source-pbr',affectedSlots:[0,1]};
+ const repaired=rebindRepairedMaterialProject(document,cleaned.source,survivingFaceMap(report));
+ assert.deepEqual(repaired.materialBase.affectedSlots,[0]);
+ assert.deepEqual(document.materialBase.affectedSlots,[0,1]);
+ assert.deepEqual(cleaned.source.sourcePbr.doc.materials,source.sourcePbr.doc.materials);
 });

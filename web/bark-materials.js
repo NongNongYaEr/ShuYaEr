@@ -134,8 +134,8 @@ function rememberMaps(key,result){
   if(bytes<=16*1024*1024){while(textureMapCache.size>=8||textureMapCacheBytes+bytes>16*1024*1024){const first=textureMapCache.keys().next().value;textureMapCacheBytes-=textureMapCache.get(first).bytes;textureMapCache.delete(first);}textureMapCache.set(key,{maps:result,bytes});textureMapCacheBytes+=bytes;}
   return copyMaps(result);
 }
-export function generateBarkTextureMaps(raw, size = 256) {
-  const recipe = normalizeBarkMaterial(raw), width = Math.trunc(bounded(size, 16, 512, 256)), height = width;
+export function generateBarkTextureMaps(raw, size = 256, { exportResolution = false } = {}) {
+  const recipe = normalizeBarkMaterial(raw), width = Math.trunc(bounded(size, 16, exportResolution ? 2048 : 512, 256)), height = width;
   // Physical repeats belong to each material, while the expensive pixel maps
   // can be shared across branches. Bound both entry count and retained bytes.
   const key = JSON.stringify([width, recipe]), cached = textureMapCache.get(key);
@@ -146,12 +146,13 @@ export function generateBarkTextureMaps(raw, size = 256) {
   }
   const heights = new Float32Array(width * height), color = new Uint8Array(width * height * 4), normal = new Uint8Array(color.length), roughness = new Uint8Array(color.length);
   const rgb = [1, 3, 5].map(index => parseInt(recipe.color.slice(index, index + 2), 16));
+  const gradientScale = width > 512 ? 5 * width / 256 : 5;
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) heights[y * width + x] = heightAt(recipe, x / width, y / height);
   const h = (x, y) => heights[((y + height) % height) * width + (x + width) % width];
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
     const index = (y * width + x) * 4, value = h(x, y), shade = Math.max(.25, Math.min(1.2, .53 + value * .65));
     for (let c = 0; c < 3; c++) color[index + c] = Math.round(rgb[c] * shade);
-    const dx = (h(x - 1, y) - h(x + 1, y)) * 5, dy = (h(x, y - 1) - h(x, y + 1)) * 5, length = Math.hypot(dx, dy, 1);
+    const dx = (h(x - 1, y) - h(x + 1, y)) * gradientScale, dy = (h(x, y - 1) - h(x, y + 1)) * gradientScale, length = Math.hypot(dx, dy, 1);
     normal[index] = Math.round((dx / length * .5 + .5) * 255); normal[index + 1] = Math.round((dy / length * .5 + .5) * 255); normal[index + 2] = Math.round((1 / length * .5 + .5) * 255);
     const rough = Math.round((.72 + (1 - value) * .28) * 255); roughness.fill(rough, index, index + 3);
     color[index + 3] = normal[index + 3] = roughness[index + 3] = 255;

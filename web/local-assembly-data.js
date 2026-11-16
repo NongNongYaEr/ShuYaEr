@@ -41,6 +41,28 @@ export function localAssemblyState(authoring, targets, range = {}) {
 export function inAssemblyVoid(authoring, parent, attach, role) {
   return (authoring.workbench?.assembly_voids || []).some(r => r.parents.includes(parent) && attach >= r.start && attach <= r.end && (r.role === 'ANY' || r.role === role));
 }
+
+const voidRangeKey = ({start, end, role}) => JSON.stringify([start, end, role]);
+
+export function groupAssemblyVoids(rules) {
+  const groups = new Map();
+  for (const rule of rules) {
+    const key = voidRangeKey(rule);
+    if (!groups.has(key)) groups.set(key, {key, start:rule.start, end:rule.end, role:rule.role, parents:new Set(), count:0});
+    const group = groups.get(key);
+    for (const parent of rule.parents) group.parents.add(parent);
+    group.count++;
+  }
+  return [...groups.values()].sort((a, b) => a.start - b.start || a.end - b.end);
+}
+
+export function removeAssemblyVoids(authoring, key) {
+  const rules = authoring.workbench?.assembly_voids || [];
+  const remaining = key === null ? [] : rules.filter(rule => voidRangeKey(rule) !== key);
+  if (remaining.length < rules.length) authoring.workbench = {...authoring.workbench, assembly_voids:remaining};
+  return rules.length - remaining.length;
+}
+
 export function localAssemblyPlan(authoring, branches, targets, options = {}) {
   if (!targets.length) throw Error('请先选择承重枝干，或用刷选建立范围');
   const r = localAssemblyRange(options), state = localAssemblyState(authoring, targets, r);

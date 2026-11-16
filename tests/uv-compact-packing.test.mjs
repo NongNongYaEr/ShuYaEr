@@ -8,7 +8,7 @@ import {extendUvAlongFlow,sewUvFragments} from '../material/web/tree-uv-fragment
 import {verifySurfacePreserved} from '../material/web/mesh-codec.js';
 import {analyzeUV} from '../material/web/uv-analysis.js';
 import {measureUvClearance,clearanceAtResolution} from '../material/web/uv-clearance.js';
-import {prepareUvRevision} from '../material/web/uv-processing.js';
+import {prepareUvRevision,prepareUvWithFallback} from '../material/web/uv-processing.js';
 import {describePacking} from '../material/web/uv-packing-stats.js';
 import {uvLayoutOutput,preparationUvMode,assertUvIslandsPreserved} from '../material/web/uv-layout-policy.js';
 import {modelPreparationOptions} from '../material/web/model-preparation.js';
@@ -16,6 +16,39 @@ import {createDocument,validateDocument} from '../material/web/project-state.js'
 import {createDocument as serverDocument,validateDocument as serverValidate} from '../material/project-state.js';
 function rectangles(count=8,angle=Math.PI/4){const pos=[],normal=[],uv=[],indices=[];for(let c=0;c<count;c++){const start=pos.length/3,cos=Math.cos(angle),sin=Math.sin(angle);for(const [u,v]of [[0,0],[.48,0],[.48,.04],[0,.04]]){pos.push(c+u,v,0);normal.push(0,0,1);uv.push(.2+u*cos-v*sin,.2+u*sin+v*cos);}indices.push(start,start+1,start+2,start,start+2,start+3);}return{pos:Float32Array.from(pos),normal:Float32Array.from(normal),uv:Float32Array.from(uv),indices:Uint32Array.from(indices)};}
 const options={resolution:512,padding:3,quarterTurns:true,refinePacking:true};
+test('树结构候选在切线阶段发现零面积 UV 时，从同一拓扑重新展开',async()=>{
+ const input=rectangles(1,0),original=structuredClone(input),sourceIndices=Uint32Array.of(0,1,2,3),calls=[];
+ const packed={...input,uv:new Float32Array(input.uv.length),sourceIndices};
+ const result=await prepareUvWithFallback(input,{mode:'tree',revision:7,resolution:2048,padding:6},{
+  trees:()=>({prepare:async()=>({mesh:null}),pack:async()=>packed,dispose:()=>calls.push('dispose')}),
+  native:async(mesh,mode)=>{
+   calls.push(mode);
+   if(mode==='tangents'){
+    assert(analyzeUV(mesh).zeroUvFaces>0);
+    throw Error('UV input has zero-area triangles; use automatic unwrap');
+   }
+   assert.equal(mesh,input);
+   return {...mesh,sourceIndices};
+  }
+ },{isCurrent:()=>true,onFallback:()=>calls.push('fallback')});
+ assert.deepEqual(calls,['tangents','dispose','fallback','unwrap']);
+ assert.deepEqual(input,original);
+ assert.equal(result.uvMode,'unwrap');
+ assert.equal(result.uvRevision,7);
+ assert.equal(result.packing.resolution,2048);
+ assert.equal(result.packing.padding,6);
+ assert.equal(analyzeUV(result).zeroUvFaces,0);
+ verifySurfacePreserved(input,result);
+});
+test('树结构自动重展只处理零面积 UV，任务取消后不会继续',async()=>{
+ const zero=Error('UV input has zero-area triangles; use automatic unwrap'),other=Error('树结构规则不匹配');
+ for(const [failure,current,expected] of [[zero,false,{name:'AbortError'}],[other,true,{message:other.message}]]){
+  const trees=()=>({prepare:async()=>{throw failure;},dispose(){}});
+  await assert.rejects(prepareUvWithFallback(rectangles(1),{mode:'tree',revision:1},{trees,native:assert.fail},{
+   isCurrent:()=>current,onFallback:assert.fail
+  }),expected);
+ }
+});
 test('累计密度从首次优化前计算，切线顶点重编号后仍按面角匹配',()=>{
  const reference=rectangles(2,0),scaled=(mesh,factor)=>({...mesh,uv:Float32Array.from(mesh.uv,x=>x*factor)});
  const current=scaled(reference,1.22);

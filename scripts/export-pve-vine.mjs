@@ -4,10 +4,10 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { hash } from './pve-package.mjs';
 import { exportResolvedAssembly } from './export_branchforge_resolved_assembly.mjs';
-import { checkPveGeometry } from './pve-geometry-quality.mjs';
+import { preparePveExportGeometry, pveGeometryCleanup } from './pve-geometry-quality.mjs';
 import { writePveAtlas } from './pve-atlas.mjs';
 
-export async function exportVineComplete({ tool, input, document, sourceBytes, output, progress }) {
+export async function exportVineComplete({ tool, input, document, sourceBytes, output, progress, allowGeometryCleanup = true }) {
   const imp = file => import(pathToFileURL(path.join(tool, file)).href);
   const k = await imp('web/branch-kernel.js'), T = await imp('web/vendor/three.module.min.js');
   const { normalizeAuthoring } = await imp('web/authoring-state.js');
@@ -24,7 +24,8 @@ export async function exportVineComplete({ tool, input, document, sourceBytes, o
     progress('生成骨架与样本枝', '生成当前整片藤蔓的完整装配：藤干、叶片及连接细茎');
     asset = k.buildBranchAsset(document.settings, null, sources, 0, authoring, { resolveSources: true });
     if (!asset.masterBranches.length) throw Error('当前藤蔓还没有藤干，请先生成或绘制生长路线');
-    warnings.push(...checkPveGeometry(asset.report, '藤蔓实际装配'));
+    const quality = preparePveExportGeometry(asset, k, '藤蔓实际装配', allowGeometryCleanup);
+    warnings.push(...quality.warnings);
     const detail = createPVESkeleton(asset, sources);
     if (new Set(detail.foliage_sources.map(s => s.id)).size !== sources.length) throw Error('叶片素材稳定 ID 重复，请修正素材包');
     if (asset.masterPlacements.some(p => !Number.isInteger(p.source) || p.source < 0 || p.source >= sources.length))
@@ -62,7 +63,7 @@ export async function exportVineComplete({ tool, input, document, sourceBytes, o
     if (!hostTriangles || !unitTriangles || hostTriangles + unitTriangles !== asset.report.triangles)
       throw Error('完整藤蔓装配几何分配不完整，不能导出');
     progress('生成骨架与样本枝', `打包 1 个完整藤蔓单元（${asset.masterBranches.length} 段藤干，${detail.foliage.length} 片叶）`);
-    const glb = id + '.glb', bytes = Buffer.from(await exportGlb(group, { connector, singleMesh: true }));
+    const glb = id + '.glb', bytes = Buffer.from(await exportGlb(group, { connector, singleMesh: true, mergeUnitMaterials: false }));
     fs.writeFileSync(path.join(output, glb), bytes);
     writePveAtlas(authoring.leaf_material.color, path.join(output, 'leaf_atlas_color.png'));
     if (authoring.leaf_material.normal) writePveAtlas(authoring.leaf_material.normal, path.join(output, 'leaf_atlas_normal.png'));
@@ -86,9 +87,12 @@ export async function exportVineComplete({ tool, input, document, sourceBytes, o
     const resolved = await exportResolvedAssembly({ tool, document, skeleton, output, sourceSha256: hash(sourceBytes),
       asset, completeVineUnit: true, onQualityWarnings: items => warnings.push(...items) });
     manifest.resolved_assembly = skeleton.resolved_assembly = resolved;
+    const geometryCleanup = pveGeometryCleanup(quality.removedFaces);
+    if (geometryCleanup) manifest.geometry_cleanup = geometryCleanup;
     write('whole.pve-skeleton.json', skeleton); write('complete_units.manifest.json', manifest);
     write('validation.json', { ...validatePVESkeleton(skeleton), assembly: skeleton.complete_unit_assembly,
-      package_kind: 'vine', sources: 1, support_mesh_exported: false, quality_warnings: [...new Set(warnings)], resolved_assembly: resolved });
+      package_kind: 'vine', sources: 1, support_mesh_exported: false, quality_warnings: [...new Set(warnings)],
+      ...(geometryCleanup ? { geometry_cleanup: geometryCleanup } : {}), resolved_assembly: resolved });
     return { name: document.settings.object_name, package_kind: 'vine', branches: detail.branches.length,
       leaves: detail.foliage.length, leaf_sources: sources.length, units: 1, sources: 1,
       max_root_error_m: skeleton.complete_unit_assembly.max_unit_root_error_m, geometry: true, resolved_assembly: resolved };

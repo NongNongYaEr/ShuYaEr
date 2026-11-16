@@ -65,14 +65,53 @@ export class PixelMaskRasterizer{
     for(let f=0;f<n;f++){const t=this.triangles[f];if(!t)continue;for(const h of this.topology.neighbors[f]){const other=this.triangles[h.face];if(!h.opposed||!other)continue;this.crossings[f][h.edge]={...h};const same=[0,1].every(k=>Math.abs(t.uv[h.edge][k]-other.uv[(h.otherEdge+1)%3][k])<=1e-8&&Math.abs(t.uv[(h.edge+1)%3][k]-other.uv[h.otherEdge][k])<=1e-8);if(same)parent[find(f)]=find(h.face);}}
     this.faceCharts=Int32Array.from({length:n},(_,i)=>find(i));
   }
-  barycentric(t,p){const x=p[0]-t.p[0][0],y=p[1]-t.p[0][1],z=p[2]-t.p[0][2],b=x*t.gB[0]+y*t.gB[1]+z*t.gB[2],c=x*t.gC[0]+y*t.gC[1]+z*t.gC[2];return[1-b-c,b,c];}
-  traceSurface(face,start,displacement){
-    let target=[start[0]+displacement[0],start[1]+displacement[1],start[2]+displacement[2]];
+  // Each filter texel traces many rays. Keep intermediate coordinates in scalars
+  // and preserve the order of operations and edge ties for the same coverage.
+  traceSurface(face,start,displacement,result=null){
+    let sx=start[0],sy=start[1],sz=start[2],tx=sx+displacement[0],ty=sy+displacement[1],tz=sz+displacement[2];
     for(let step=0;step<48;step++){
-      const t=this.triangles[face];if(!t)return null;const bary=this.barycentric(t,target);if(bary.every(v=>v>=-1e-7)){const clamped=bary.map(v=>Math.max(0,v)),sum=clamped.reduce((s,v)=>s+v,0);return{face,bary:clamped.map(v=>v/sum)};}
-      const from=this.barycentric(t,start);let fraction=Infinity,opposite=-1;for(let k=0;k<3;k++)if(bary[k]<-1e-7){const q=Math.max(0,from[k])/(Math.max(0,from[k])-bary[k]);if(q<fraction){fraction=q;opposite=k;}}
-      if(opposite<0||fraction>1)return null;const edge=(opposite+1)%3,h=this.crossings[face][edge];if(!h)return null;const next=this.triangles[h.face],hit=start.map((v,k)=>v+(target[k]-v)*fraction),remaining=sub(target,hit),transport=h.transport||(h.transport=(()=>{const axis=unit(sub(t.p[(edge+1)%3],t.p[edge]));return{axis,cos:Math.max(-1,Math.min(1,dot(t.n,next.n))),sin:dot(axis,cross(t.n,next.n))};})()),{axis,cos,sin}=transport,turn=cross(axis,remaining),along=dot(axis,remaining),rotated=remaining.map((v,k)=>v*cos+turn[k]*sin+axis[k]*along*(1-cos));
-      start=hit;target=hit.map((v,k)=>v+rotated[k]);face=h.face;
+      const t=this.triangles[face];if(!t)return null;
+      const origin=t.p[0],{gB,gC}=t;
+      const dx=tx-origin[0],dy=ty-origin[1],dz=tz-origin[2];
+      const b=dx*gB[0]+dy*gB[1]+dz*gB[2],c=dx*gC[0]+dy*gC[1]+dz*gC[2],a=1-b-c;
+      if(a>=-1e-7&&b>=-1e-7&&c>=-1e-7){
+        const a0=Math.max(0,a),b0=Math.max(0,b),c0=Math.max(0,c),sum=((0+a0)+b0)+c0;
+        if(!result)return{face,bary:[a0/sum,b0/sum,c0/sum]};
+        result.face=face;
+        result.bary[0]=a0/sum;
+        result.bary[1]=b0/sum;
+        result.bary[2]=c0/sum;
+        return result;
+      }
+      const x=sx-origin[0],y=sy-origin[1],z=sz-origin[2];
+      const fromB=x*gB[0]+y*gB[1]+z*gB[2],fromC=x*gC[0]+y*gC[1]+z*gC[2];
+      let fraction=Infinity,opposite=-1;
+      if(a<-1e-7){
+        const startA=Math.max(0,1-fromB-fromC),q=startA/(startA-a);
+        if(q<fraction){fraction=q;opposite=0;}
+      }
+      if(b<-1e-7){
+        const startB=Math.max(0,fromB),q=startB/(startB-b);
+        if(q<fraction){fraction=q;opposite=1;}
+      }
+      if(c<-1e-7){
+        const startC=Math.max(0,fromC),q=startC/(startC-c);
+        if(q<fraction){fraction=q;opposite=2;}
+      }
+      if(opposite<0||fraction>1)return null;
+      const edge=(opposite+1)%3,h=this.crossings[face][edge];if(!h)return null;
+      if(!h.transport){
+        const next=this.triangles[h.face],axis=unit(sub(t.p[(edge+1)%3],t.p[edge]));
+        h.transport={axis,cos:Math.max(-1,Math.min(1,dot(t.n,next.n))),sin:dot(axis,cross(t.n,next.n))};
+      }
+      const {axis,cos,sin}=h.transport;
+      sx+=(tx-sx)*fraction;sy+=(ty-sy)*fraction;sz+=(tz-sz)*fraction;
+      const rx=tx-sx,ry=ty-sy,rz=tz-sz,ax=axis[0],ay=axis[1],az=axis[2];
+      const along=ax*rx+ay*ry+az*rz;
+      tx=sx+(rx*cos+(ay*rz-az*ry)*sin+ax*along*(1-cos));
+      ty=sy+(ry*cos+(az*rx-ax*rz)*sin+ay*along*(1-cos));
+      tz=sz+(rz*cos+(ax*ry-ay*rx)*sin+az*along*(1-cos));
+      face=h.face;
     }
     return null;
   }

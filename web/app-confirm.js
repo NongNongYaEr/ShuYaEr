@@ -33,7 +33,9 @@ export function createAppConfirm(id) {
     dialog.querySelector('[data-confirm-detail]').textContent = detail;
     dialog.querySelector('p').textContent = message;
     dialog.querySelector('[data-confirm-accept]').textContent = accept;
-    dialog.querySelector('[data-confirm-save]').hidden=!save;
+    const saveButton=dialog.querySelector('[data-confirm-save]');
+    saveButton.hidden=!save;
+    saveButton.textContent=typeof save==='string'?save:'保存后打开';
     dialog.querySelector('.app-confirm-input').hidden=input===null;
     dialog.querySelector('input').value=input||'';dialog.querySelector('input').required=input!==null;
     dialog.classList.toggle('app-confirm-danger', danger);

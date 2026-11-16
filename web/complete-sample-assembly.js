@@ -193,7 +193,7 @@ export function* compileSampleAssemblySteps(settings, authoring, sources, lod, m
     built.ownsMaterials=false;palette.refs++;
     try{
     const meshes=prototypeMeshes(built);
-    if(!custom)for(const mesh of meshes){const branch=built.branches.find(b=>b.stableId===mesh.userData.stable_id);if(branch&&mesh.userData.category==='branch')prepareRadialGeometry(mesh.geometry,branch.points);}
+    if(!custom)for(const mesh of meshes){const branch=built.branches.find(b=>b.stableId===mesh.userData.stable_id);if(branch&&mesh.userData.category==='branch'&&!mesh.userData.base_branch_mesh)prepareRadialGeometry(mesh.geometry,branch.points);}
     const materials=[...new Set([...Object.values(built.materials),...meshes.flatMap(m=>[m.material].flat())])];
     const result={key,built,meshes,item,custom,globalLeafIds,sourceMap:localSources.map(s=>sourceMap.has(s.id)?[...sourceMap.keys()].indexOf(s.id):-1),organMap:built.authoring.tree_organs.units.map(u=>organMap.get(u.id)),refs:1,palette,materials,materialStates:materials.map(materialState),geometryStates:[...new Set(meshes.map(m=>m.geometry))].map(geometryState),meshStates:meshes.map(mesh=>({mesh,geometry:mesh.geometry,material:mesh.material,pose:[...mesh.position.toArray(),...mesh.quaternion.toArray(),...mesh.scale.toArray(),mesh.matrixAutoUpdate,...mesh.matrix.elements,...mesh.matrixWorld.elements]})),localKey,context:sourceContext,extras,needsMaterialSeal:true};
     ownCompiledGeometry(result);cacheStats.built++;return attachPrototype(result,false);
@@ -257,6 +257,7 @@ export function* compileSampleAssemblySteps(settings, authoring, sources, lod, m
     const assemblies=new THREE.Group();assemblies.name='06_完整次枝实例';base.group.add(assemblies);
     function mappedData(mesh,entry) {
       const data={...mesh.userData};
+      if(data.base_branch_host)data.base_branch_host=entry.i.id+'.'+data.base_branch_host;
       if(data.stable_id)data.stable_id=entry.i.id+'.'+data.stable_id;
       if(typeof data.branch_id==='number')data.branch_id=entry.branchIds.get(data.branch_id);
       if(typeof data.parent_id==='number')data.parent_id=entry.branchIds.get(data.parent_id)??byStable.get(entry.i.parent)?.id??-1;
@@ -329,7 +330,9 @@ export function* compileSampleAssemblySteps(settings, authoring, sources, lod, m
     base.materialize=()=>{
       if(!base.isInstancedAssembly&&expanded.length)return;
       assemblies.clear();previewBatches.clear();for(const {batch,mesh} of batches){batch.dispose();if(batch.geometry!==mesh.geometry&&!base.compiledSampleGeometries.has(batch.geometry))batch.geometry.dispose();}batches.length=0;
-      const records=baseMeshes.map(mesh=>({geometry:mesh.geometry,elementIndices:vertexElements(mesh)}));
+      // Lamps already use UV1 for flow, independently of the branch lookup texture.
+      const records=baseMeshes.filter(mesh=>mesh.userData.category!=='tree_light')
+        .map(mesh=>({geometry:mesh.geometry,elementIndices:vertexElements(mesh)}));
       for(const entry of entries)for(const mesh of entry.p.meshes){
         const geometry=applyRadialGeometry(mesh.geometry.clone(),entry.i.radius_scale).applyMatrix4(entry.matrix.clone().multiply(mesh.matrixWorld));
         // Preview-only attributes must not enter GLB/FBX merge or export schemas.

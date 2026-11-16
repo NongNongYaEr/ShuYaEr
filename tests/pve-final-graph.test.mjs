@@ -30,10 +30,12 @@ function auditVariantPayload(result) {
         + index * (view.byteStride || components * size) + component * size);
     };
     return json.meshes.flatMap(mesh => mesh.primitives.map(primitive => ({
+      material: json.materials[primitive.material],
       count: json.accessors[primitive.indices].count, index: accessor(primitive.indices),
       position: accessor(primitive.attributes.POSITION), normal: accessor(primitive.attributes.NORMAL),
       uv: accessor(primitive.attributes.TEXCOORD_0) })));
   };
+  const sharedBarkId = result.resolved.shared_tree_bark?.material_id;
   for (const [instance, mount] of result.skeleton.foliage.entries()) {
     const source = result.manifest.units[mount.source_index];
     if (!source.variant_kind) continue;
@@ -42,21 +44,32 @@ function auditVariantPayload(result) {
     const transform = new T.Matrix4().makeBasis(across, up, face).scale(new T.Vector3().setScalar(mount.scale_m));
     transform.setPosition(...mount.position_m);
     const normals = new T.Matrix3().getNormalMatrix(transform);
-    const triangles = readGlb(source.glb).flatMap(primitive => Array.from({length: primitive.count}, (_, index) => {
-      const vertex = primitive.index(index), position = new T.Vector3(...[0,1,2].map(c => primitive.position(vertex,c))).applyMatrix4(transform);
-      const normal = new T.Vector3(...[0,1,2].map(c => primitive.normal(vertex,c))).applyMatrix3(normals).normalize();
-      return [position.x*100, -position.y*100, position.z*100, normal.x, -normal.y, normal.z,
-        primitive.uv(vertex,0), 1-primitive.uv(vertex,1)];
-    }));
-    const actual = result.resolved.chunks.filter(chunk => chunk.instance_index === instance).flatMap(chunk =>
-      Array.from({length:chunk.index_count}, (_, index) => {
-        const vertex = bin.readUInt32LE(chunk.index_offset + index*4);
-        return Array.from({length:8}, (_, c) => bin.readFloatLE(chunk.vertex_offset + vertex*48 + c*4));
-      }));
-    assert.equal(triangles.length, actual.length, 'variant contains every owned triangle once');
-    for (let vertex = 0; vertex < actual.length; vertex++) for (let c = 0; c < 8; c++)
-      assert.ok(Math.abs(triangles[vertex][c]-actual[vertex][c]) < (c < 3 ? .001 : c < 6 ? .0006 : 1e-6),
-        `${mount.id} GLB/actual vertex ${vertex} component ${c}`);
+    const primitives = readGlb(source.glb);
+    const chunks = result.resolved.chunks.filter(chunk => chunk.instance_index === instance);
+    assert.equal(primitives.length, chunks.length, 'variant contains every owned mesh');
+    for (const [index, primitive] of primitives.entries()) {
+      const chunk = chunks[index];
+      assert.equal(primitive.count, chunk.index_count, 'variant contains every owned triangle once');
+      // Shared procedural bark is already in the exported material's UV space.
+      // The raw foliage atlas V in the fallback GLB is flipped by its UE material.
+      const sharedBark = !!sharedBarkId && chunk.imported_trunk_material?.material_id === sharedBarkId;
+      if (sharedBark) {
+        assert.equal(chunk.material_role, 'bark');
+        assert.equal(primitive.material.name, 'M_Bark');
+      }
+      for (let corner = 0; corner < primitive.count; corner++) {
+        const vertex = primitive.index(corner);
+        const position = new T.Vector3(...[0,1,2].map(c => primitive.position(vertex,c))).applyMatrix4(transform);
+        const normal = new T.Vector3(...[0,1,2].map(c => primitive.normal(vertex,c))).applyMatrix3(normals).normalize();
+        const u = primitive.uv(vertex,0), v = primitive.uv(vertex,1);
+        const expected = [position.x*100, -position.y*100, position.z*100, normal.x, -normal.y, normal.z,
+          u, sharedBark ? v : 1-v];
+        const actual = bin.readUInt32LE(chunk.index_offset + corner*4);
+        for (let c = 0; c < expected.length; c++)
+          assert.ok(Math.abs(expected[c]-bin.readFloatLE(chunk.vertex_offset + actual*48 + c*4)) < (c < 3 ? .001 : c < 6 ? .0006 : 1e-6),
+            `${mount.id} GLB/actual primitive ${index} (${primitive.material.name}), corner ${corner} component ${c}`);
+      }
+    }
   }
 }
 

@@ -34,7 +34,7 @@ export function arrangeCompanionPanels() {
   const pointBlock = $('pointLabel').closest('.subtool-block'); pointBlock.id = 'pointCompanion'; pointBlock.hidden = true;
   primaryActions.after(pointBlock);
   const pointHint = pointBlock.querySelector('.hint');
-  pointHint.textContent = '拖空白框选点，Shift 加选、Ctrl 点选切换；Ctrl 在线上单击加点。Delete 只删选点，端点和固定点保留；中键观察。';
+  pointHint.textContent = '拖空白框选点，Shift 加选、Ctrl 点选切换；Ctrl 在线上单击加点。Delete 只删选点，端点和固定点保留。';
   const pointExtra = details('pointNumericAdvanced', '精确坐标、点数与修剪', editor);
   const pointExtraGrid = grid(pointExtra);
   moveFields(['pointX','pointY','pointZ','tangentMode','tangentLength','curveKnotCount','curveSmoothStrength'], pointExtraGrid);
@@ -101,10 +101,14 @@ export function arrangeCompanionPanels() {
     else if (wasOpen !== null) { advanced.open = wasOpen; wasOpen = null; }
   });
   let previousUnitMode = document.body.dataset.unitEditing;
+  let previousBaseCount = 0;
   new MutationObserver(() => {
     const mode = document.body.dataset.unitEditing;
-    if (mode !== previousUnitMode && mode === 'on') { $('contextTab').click(); units.open = true; document.querySelector('.inspector-scroll').scrollTop = 0; }
-    if (mode !== 'on') $('contextCount').textContent = $('contextCount').dataset.branchCount || '0';
+    const baseCount = Number(document.body.dataset.baseBranchSelection) || 0;
+    if (baseCount && !previousBaseCount) { $('contextTab').click(); document.querySelector('.inspector-scroll').scrollTop = 0; }
+    if (!baseCount && mode !== previousUnitMode && mode === 'on') { $('contextTab').click(); units.open = true; document.querySelector('.inspector-scroll').scrollTop = 0; }
+    if (baseCount || mode !== 'on') $('contextCount').textContent = String(baseCount || $('contextCount').dataset.branchCount || '0');
     previousUnitMode = mode;
-  }).observe(document.body, {attributes:true, attributeFilter:['data-unit-editing']});
+    previousBaseCount = baseCount;
+  }).observe(document.body, {attributes:true, attributeFilter:['data-unit-editing','data-base-branch-selection']});
 }

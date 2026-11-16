@@ -50,6 +50,7 @@ namespace BranchGeneratorFBXTool
         private readonly Timer nativeTimer;
         private readonly JavaScriptSerializer nativeJson = new JavaScriptSerializer();
         private CoreWebView2Environment webEnvironment;
+        private HelpReaderWindow helpReader;
         private CoreWebView2SharedBuffer sharedBuffer;
         private IntPtr nativeView;
         private bool nativeVisible;
@@ -177,6 +178,7 @@ namespace BranchGeneratorFBXTool
                 InstallIntegration();
                 webView.CoreWebView2.WebMessageReceived += OnStartupMessage;
                 webView.CoreWebView2.WebMessageReceived += OnNativeMessage;
+                webView.CoreWebView2.NewWindowRequested += OnHelpReaderRequested;
                 webView.CoreWebView2.NavigationCompleted += delegate(object sender, CoreWebView2NavigationCompletedEventArgs args)
                 {
                     if (!args.IsSuccess && !closing) ShowFatal("界面加载失败，错误代码：" + args.WebErrorStatus);
@@ -197,6 +199,47 @@ namespace BranchGeneratorFBXTool
         }
 
         protected override bool ShowWithoutActivation { get { return !string.IsNullOrEmpty(testDirectory); } }
+
+        private async void OnHelpReaderRequested(object sender, CoreWebView2NewWindowRequestedEventArgs args)
+        {
+            var appUri = new Uri(serverUrl);
+            var readerUri = new Uri(appUri, "help-wiki-reader.html");
+            if (!HelpReaderWindow.MatchesPage(readerUri, args.Uri, false)) return;
+            args.Handled = true;
+            if (!args.IsUserInitiated || !HelpReaderWindow.MatchesPage(appUri, webView.CoreWebView2.Source)) return;
+
+            await Task.Yield();
+            if (closing || IsDisposed) return;
+            var owner = TopLevel ? this : (Parent == null ? null : Parent.FindForm());
+            if (owner == null || owner.IsDisposed) return;
+            if (helpReader != null && !helpReader.IsDisposed)
+            {
+                helpReader.Reveal();
+                return;
+            }
+
+            bool offscreen = !string.IsNullOrEmpty(testDirectory);
+            try
+            {
+                helpReader = new HelpReaderWindow(owner, readerUri, offscreen);
+                helpReader.Reveal();
+                await helpReader.InitializeAsync(webEnvironment);
+            }
+            catch (Exception ex)
+            {
+                if (closing || IsDisposed) return;
+                CloseHelpReader();
+                Trace.TraceError("Could not open the help reader: " + ex);
+                if (!offscreen) MessageBox.Show(owner, "使用手册暂时无法打开，请重试。", "使用手册", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void CloseHelpReader()
+        {
+            var reader = helpReader;
+            helpReader = null;
+            if (reader != null) reader.Dispose();
+        }
 
         private bool TrustedMessage(CoreWebView2WebMessageReceivedEventArgs args) {
             Uri source;return Uri.TryCreate(args.Source,UriKind.Absolute,out source)&&source.GetLeftPart(UriPartial.Authority)==new Uri(serverUrl).GetLeftPart(UriPartial.Authority)&&source.AbsolutePath=="/";
@@ -462,6 +505,7 @@ namespace BranchGeneratorFBXTool
         {
             if(closing)return;
             closing = true;
+            CloseHelpReader();
             nativeTimer.Stop();
             if(nativeView!=IntPtr.Zero){BFViewportDestroy(nativeView);nativeView=IntPtr.Zero;}
             if(sharedBuffer!=null){sharedBuffer.Dispose();sharedBuffer=null;}
@@ -492,6 +536,82 @@ namespace BranchGeneratorFBXTool
             }
             catch { }
             finally { process.Dispose(); }
+        }
+    }
+
+    internal sealed class HelpReaderWindow : Form
+    {
+        private readonly Form owner;
+        private readonly Uri page;
+        private readonly bool offscreen;
+        private readonly WebView2 view;
+
+        internal HelpReaderWindow(Form owner, Uri page, bool offscreen)
+        {
+            this.owner = owner;
+            this.page = page;
+            this.offscreen = offscreen;
+            Text = "使用手册 · 树鸭儿";
+            Icon = owner.Icon;
+            ShowInTaskbar = false;
+            StartPosition = FormStartPosition.Manual;
+            MinimumSize = new Size(360, 360);
+            BackColor = Color.FromArgb(29, 36, 33);
+            view = new WebView2 { Dock = DockStyle.Fill, DefaultBackgroundColor = BackColor };
+            Controls.Add(view);
+
+            Rectangle workArea = Screen.FromControl(owner).WorkingArea;
+            var size = new Size(Math.Min(540, workArea.Width), Math.Min(820, Math.Max(MinimumSize.Height, workArea.Height - 56)));
+            Bounds = offscreen
+                ? new Rectangle(owner.Left + 1000, owner.Top + 40, size.Width, size.Height)
+                : new Rectangle(Math.Max(workArea.Left, workArea.Right - size.Width - 20), workArea.Top + 24, size.Width, size.Height);
+        }
+
+        protected override bool ShowWithoutActivation { get { return offscreen; } }
+
+        internal void Reveal()
+        {
+            if (!Visible) Show(owner);
+            if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+            if (!offscreen) Activate();
+        }
+
+        internal async Task InitializeAsync(CoreWebView2Environment environment)
+        {
+            await view.EnsureCoreWebView2Async(environment);
+            if (IsDisposed) return;
+            var reader = view.CoreWebView2;
+            reader.Settings.AreDevToolsEnabled = false;
+            reader.Settings.AreDefaultContextMenusEnabled = false;
+            reader.Settings.AreBrowserAcceleratorKeysEnabled = false;
+            reader.Settings.IsStatusBarEnabled = false;
+            reader.NavigationStarting += (sender, args) => { if (!MatchesPage(page, args.Uri)) args.Cancel = true; };
+            reader.NewWindowRequested += (sender, args) => args.Handled = true;
+            reader.WindowCloseRequested += (sender, args) => Hide();
+            reader.WebMessageReceived += (sender, args) => {
+                if (MatchesPage(page, args.Source) && args.WebMessageAsJson == "\"shuyaer-help:close\"") Hide();
+            };
+            await reader.AddScriptToExecuteOnDocumentCreatedAsync("window.__shuyaerHelpReaderHost = true;");
+            if (!IsDisposed) reader.Navigate(page.AbsoluteUri);
+        }
+
+        internal static bool MatchesPage(Uri expected, string address, bool allowFragment = true)
+        {
+            Uri uri;
+            return Uri.TryCreate(address, UriKind.Absolute, out uri) &&
+                uri.UserInfo.Length == 0 && uri.Query.Length == 0 &&
+                uri.GetLeftPart(UriPartial.Authority) == expected.GetLeftPart(UriPartial.Authority) &&
+                uri.AbsolutePath == expected.AbsolutePath && (allowFragment || uri.Fragment.Length == 0);
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            if (e.CloseReason == CloseReason.UserClosing)
+            {
+                e.Cancel = true;
+                Hide();
+            }
+            base.OnFormClosing(e);
         }
     }
 

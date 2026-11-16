@@ -2,6 +2,7 @@ import * as T from './vendor/three.module.min.js';
 import {guidePointKey,guidePointsInRectangle} from './trunk-guide-selection.js';
 
 export function createTrunkGuideControls({host,camera,controls,getState,select,selectMany,selectTargets,pickAttachment,isVisible,setSelectionMode,begin,refreshView,onError,canBox=()=>true}){
+ const keyTarget=host.closest('dialog')||host;
  const layer=document.createElement('div');layer.className='trunk-guide-controls';layer.setAttribute('aria-label','控制骨架点');host.append(layer);
  const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');svg.classList.add('trunk-guide-lines');svg.setAttribute('aria-hidden','true');layer.append(svg);
  const rectangle=document.createElement('div');rectangle.className='trunk-guide-rectangle';rectangle.hidden=true;rectangle.innerHTML='<span></span>';layer.append(rectangle);
@@ -96,9 +97,21 @@ export function createTrunkGuideControls({host,camera,controls,getState,select,s
     const title=(guide.parent?'控制枝 '+guide.id:'主控制枝')+' · '+(index===0?'根点':index===guide.points.length-1?'端点':'控制点 '+index);
     const primary=state.selected?.guide===guide.id&&state.selected.index===index;
     const current=keys.has(key)||state.joints===true&&primary;
+    const locked=state.isPointLocked?.(guide.id,index);
+    const lockHint=locked&&(state.lockedPointHint?.(guide.id,index)||'固定点');
     // Inspection picks projected joints on the canvas, after the rotation rings.
     button.disabled=!!state.joints;
-    attribute(button,'aria-label',title+(state.joints?'，试转关节':'，拖动移动'));attribute(button,'aria-pressed',String(current));button.title=title+(state.joints?' · 点选后按 R 试转':' · Shift 补选 / Ctrl 减选 · 拖动选区');const caption=(index===0?'根点':index===guide.points.length-1?'端点':'点 '+index)+(current?' · 已选中':'');if(button.querySelector('span').textContent!==caption)button.querySelector('span').textContent=caption;button.classList.toggle('active-guide',guide.id===state.selected?.guide);button.classList.toggle('selected',current);button.classList.toggle('primary',primary);button.classList.toggle('endpoint',index===0||index===guide.points.length-1);
+    attribute(button,'aria-label',title+'，'+(state.joints?'试转关节':lockHint||'拖动移动'));
+    attribute(button,'aria-pressed',String(current));
+    button.title=title+' · '+(state.joints?'点选后按 R 试转':lockHint||'Shift 补选 / Ctrl 减选 · 拖动选区');
+    const pointName=index===0?'根点':index===guide.points.length-1?'端点':'点 '+index;
+    const caption=pointName+(locked?' · '+(lockHint==='固定点'?'固定':lockHint):'')+(current?' · 已选中':'');
+    if(button.querySelector('span').textContent!==caption)button.querySelector('span').textContent=caption;
+    button.classList.toggle('active-guide',guide.id===state.selected?.guide);
+    button.classList.toggle('selected',current);
+    button.classList.toggle('primary',primary);
+    button.classList.toggle('endpoint',index===0||index===guide.points.length-1);
+    button.classList.toggle('locked',!!locked);
     const p=screen[index];button.hidden=state.target!=='point'&&state.interactive&&!state.joints||!p.visible||p.x<0||p.x>r.width||p.y<0||p.y>r.height;button.style.left=p.x+'px';button.style.top=p.y+'px';
     if(!button.hidden)projectedPoints.push({...p,guide:guide.id,index,position:guide.points[index]});
    }
@@ -183,6 +196,6 @@ export function createTrunkGuideControls({host,camera,controls,getState,select,s
   if(active.id!==e.pointerId)return;
   consume(e);active.pointer={x:e.clientX,y:e.clientY};if(!frame)frame=requestAnimationFrame(render);
  },up=e=>{if(swallow===e.pointerId){swallow=null;return consume(e);}if(active?.id===e.pointerId&&e.button===0){consume(e);active.pointer={x:e.clientX,y:e.clientY};finish(true);}},cancel=()=>finish(false),key=e=>{if(!active)return;if(e.key==='Escape'){consume(e);finish(false);}else if(e.key==='Enter'){consume(e);finish(true);}},right=e=>{if(active&&e.button===2){consume(e);swallow=e.pointerId;blockContext=true;finish(false);}},context=e=>{if(active||blockContext){consume(e);blockContext=false;finish(false);}};
- layer.addEventListener('pointerdown',down);host.addEventListener('pointerdown',boxDown,true);window.addEventListener('pointermove',move,true);window.addEventListener('pointerup',up,true);window.addEventListener('pointerdown',right,true);window.addEventListener('pointercancel',cancel);window.addEventListener('blur',cancel);window.addEventListener('resize',cancel);host.addEventListener('contextmenu',context,true);host.closest('dialog').addEventListener('keydown',key,true);
- return {refresh,cancel,get active(){return !!active;},dispose(){cancel();disposed=true;cancelAnimationFrame(frame);layer.removeEventListener('pointerdown',down);host.removeEventListener('pointerdown',boxDown,true);window.removeEventListener('pointermove',move,true);window.removeEventListener('pointerup',up,true);window.removeEventListener('pointerdown',right,true);window.removeEventListener('pointercancel',cancel);window.removeEventListener('blur',cancel);window.removeEventListener('resize',cancel);host.removeEventListener('contextmenu',context,true);host.closest('dialog').removeEventListener('keydown',key,true);host.classList.remove('trunk-box-selecting');layer.remove();}};
+ layer.addEventListener('pointerdown',down);host.addEventListener('pointerdown',boxDown,true);window.addEventListener('pointermove',move,true);window.addEventListener('pointerup',up,true);window.addEventListener('pointerdown',right,true);window.addEventListener('pointercancel',cancel);window.addEventListener('blur',cancel);window.addEventListener('resize',cancel);host.addEventListener('contextmenu',context,true);keyTarget.addEventListener('keydown',key,true);
+ return {refresh,cancel,get active(){return !!active;},dispose(){cancel();disposed=true;cancelAnimationFrame(frame);layer.removeEventListener('pointerdown',down);host.removeEventListener('pointerdown',boxDown,true);window.removeEventListener('pointermove',move,true);window.removeEventListener('pointerup',up,true);window.removeEventListener('pointerdown',right,true);window.removeEventListener('pointercancel',cancel);window.removeEventListener('blur',cancel);window.removeEventListener('resize',cancel);host.removeEventListener('contextmenu',context,true);keyTarget.removeEventListener('keydown',key,true);host.classList.remove('trunk-box-selecting');layer.remove();}};
 }

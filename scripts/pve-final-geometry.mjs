@@ -1,7 +1,20 @@
 import * as THREE from 'three';
 import { createHash } from 'node:crypto';
 import { snapshotPveBarkBinding } from './pve-bark-materials.mjs';
+import { baseBranchAtlasRole, markBaseBranchAtlasMaterial } from '../web/base-branch-export-materials.js';
 const sampleGeometryHashes = new WeakMap();
+const atlasMaterialHashes = new WeakMap();
+
+function baseBranchAtlasHash(material) {
+  if (material.userData.base_branch_atlas_role !== 'bark') return '';
+  const atlas = material.sampleLeafMaterial;
+  if (!atlas) return '';
+  if (!atlasMaterialHashes.has(atlas)) {
+    const hash = createHash('sha256').update(atlas.color || '').update(atlas.normal || '');
+    atlasMaterialHashes.set(atlas, hash.digest('hex'));
+  }
+  return atlasMaterialHashes.get(atlas);
+}
 
 // Compact meshes owned by a complete unit, with the same lookup association
 // used by the resolved assembly. No whole-tree clone or geometry regeneration.
@@ -19,6 +32,10 @@ export function extractPveUnitGeometry(asset, plan, atlas) {
   asset.group.updateWorldMatrix(true, true);
   asset.group.traverseVisible(mesh => {
     if (!mesh.isMesh) return;
+    if(mesh.userData.category==='tree_light'){
+      triangles+=(mesh.geometry.index?.count??mesh.geometry.attributes.position.count)/3;
+      return;
+    }
     const geometry = mesh.geometry, lookup = geometry.getAttribute('uv1');
     const position = geometry.getAttribute('position');
     if (!position || Array.isArray(mesh.material)) throw Error('不支持的完整枝几何: ' + mesh.name);
@@ -67,7 +84,9 @@ export function extractPveUnitGeometry(asset, plan, atlas) {
       const material = mesh.material.clone();
       material.name = mesh.material.name;
       material.sampleLeafMaterial = mesh.material.sampleLeafMaterial;
-      const foliage = material.name === 'M_Leaf' || material.sampleLeafMaterial;
+      const atlasRole = baseBranchAtlasRole(mesh);
+      if (atlasRole) markBaseBranchAtlasMaterial(material, atlasRole);
+      const foliage = atlasRole !== 'bark' && (material.name === 'M_Leaf' || material.sampleLeafMaterial);
       if (foliage) {
         const texture = material.sampleLeafMaterial || asset.authoring.leaf_material;
         if (texture?.color) material.color.set(mesh.material.vegetationTint || '#ffffff');
@@ -127,6 +146,7 @@ export function hashPveUnitGeometry(group, asset = null, unit = null) {
     if (!mesh.isMesh) return;
     hash.update(JSON.stringify([mesh.material.name, mesh.material.color.toArray(),
       mesh.material.alphaTest, mesh.material.roughness]));
+    hash.update(baseBranchAtlasHash(mesh.material));
     if (mesh.material.userData?.bark_material) hash.update(JSON.stringify([mesh.material.userData.bark_material,
       mesh.material.userData.bark_pve_binding?.texture_transforms]));
     // Quantization eliminates inverse-frame floating point noise while retaining
@@ -149,7 +169,8 @@ export function equalPveUnitGeometry(left, right, { derivedTangents = false } = 
   if (left.children.length !== right.children.length) return false;
   for (let i = 0; i < left.children.length; i++) {
     const a = left.children[i], b = right.children[i];
-    if (a.material.name !== b.material.name || !a.material.color.equals(b.material.color)) return false;
+    if (a.material.name !== b.material.name || !a.material.color.equals(b.material.color)
+      || baseBranchAtlasHash(a.material) !== baseBranchAtlasHash(b.material)) return false;
     for (const key of ['alphaTest','roughness','metalness','opacity','transparent','side','depthWrite'])
       if (a.material[key] !== b.material[key]) return false;
     if ((a.material.userData?.bark_material || b.material.userData?.bark_material) &&
@@ -179,19 +200,26 @@ export function equalPveUnitGeometry(left, right, { derivedTangents = false } = 
 // axes. Keep degenerate UV triangles finite with a deterministic local frame.
 export function rebuildPveUnitTangents(group) {
   group.traverse(mesh => {
-    if (!mesh.isMesh) return;
-    const geometry=mesh.geometry,normal=geometry.getAttribute('normal');
-    if (!normal || !geometry.index || !geometry.getAttribute('uv')) return;
-    geometry.deleteAttribute('tangent');geometry.computeTangents();
-    const tangent=geometry.getAttribute('tangent'),n=new THREE.Vector3(),t=new THREE.Vector3(),axis=new THREE.Vector3();
-    for(let i=0;i<tangent.count;i++) {
-      t.fromBufferAttribute(tangent,i);
-      if(Number.isFinite(t.lengthSq())&&t.lengthSq()>.25)continue;
-      n.fromBufferAttribute(normal,i).normalize();
-      axis.set(Math.abs(n.z)<.9?0:1,0,Math.abs(n.z)<.9?1:0);
-      t.crossVectors(axis,n).normalize();tangent.setXYZW(i,t.x,t.y,t.z,1);
-    }
+    if (mesh.isMesh) rebuildPveGeometryTangents(mesh.geometry);
   });
+}
+
+export function rebuildPveGeometryTangents(geometry) {
+  const normal = geometry.getAttribute('normal');
+  if (!normal || !geometry.index || !geometry.getAttribute('uv')) return;
+  geometry.deleteAttribute('tangent');
+  geometry.computeTangents();
+  const tangent = geometry.getAttribute('tangent');
+  const n = new THREE.Vector3(), t = new THREE.Vector3(), axis = new THREE.Vector3();
+  for (let i = 0; i < tangent.count; i++) {
+    t.fromBufferAttribute(tangent, i);
+    if (Number.isFinite(t.lengthSq()) && t.lengthSq() > .25) continue;
+    n.fromBufferAttribute(normal, i).normalize();
+    const useZ = Math.abs(n.z) < .9;
+    axis.set(useZ ? 0 : 1, 0, useZ ? 1 : 0);
+    t.crossVectors(axis, n).normalize();
+    tangent.setXYZW(i, t.x, t.y, t.z, 1);
+  }
 }
 
 export function disposePveUnitGeometry(group) {

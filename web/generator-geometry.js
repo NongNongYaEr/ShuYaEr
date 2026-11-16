@@ -73,7 +73,7 @@ export function* applySculptLayerSteps(branches, layers, overrides = {}, suppres
         if (layer.operation.protect_units === true) b.mountFrameBinding = updated[i].mountFrameBinding;
         if (updated[i].collarQuaternion) b.collarQuaternion = updated[i].collarQuaternion;
         if (updated[i].legacyRigidGeometry) b.legacyRigidGeometry = updated[i].legacyRigidGeometry;
-        if(layer.operation.type==='CONTROL_CURVE'){b.controlDriven=updated[i].controlDriven;b.legacyRigidGeometry=updated[i].legacyRigidGeometry;}
+        if(layer.operation.type==='CONTROL_CURVE'){b.controlDriven=updated[i].controlDriven;b.compactControlCurve=updated[i].compactControlCurve;b.legacyRigidGeometry=updated[i].legacyRigidGeometry;}
       });
       if (layer.operation.type === 'MOUNT') branches.forEach((b,i) => {
         b.trunkCarrierAnchor=updated[i].trunkCarrierAnchor;b.trunkCarrierApplied=updated[i].trunkCarrierApplied;

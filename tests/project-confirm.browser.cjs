@@ -1,4 +1,4 @@
-const {chromium}=require('playwright');
+const {chromium}=require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
 (async()=>{
  const out=path.resolve('.runtime/project-confirm');fs.mkdirSync(out,{recursive:true});

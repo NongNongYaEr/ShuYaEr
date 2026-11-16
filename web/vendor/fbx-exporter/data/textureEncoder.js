@@ -69,14 +69,20 @@ function concat(buffers) {
  * 2D context and three.js `DataTexture.image.data` when `flipY === false`).
  */
 export function encodeRGBA8PNG(rgba, width, height) {
-    if (rgba.length !== width * height * 4) {
-        throw new Error(`PNG: expected ${width * height * 4} RGBA bytes, got ${rgba.length}`);
+    return encodeColorPNG(rgba, width, height, 4);
+}
+export function encodeRGB8PNG(rgb, width, height) {
+    return encodeColorPNG(rgb, width, height, 3);
+}
+function encodeColorPNG(pixels, width, height, channels) {
+    if (pixels.length !== width * height * channels) {
+        throw new Error('PNG pixel buffer size does not match the image dimensions');
     }
-    const stride = width * 4;
+    const stride = width * channels;
     const raw = new Uint8Array(height * (1 + stride));
     for (let y = 0; y < height; y++) {
         raw[y * (1 + stride)] = 0;
-        raw.set(rgba.subarray(y * stride, (y + 1) * stride), y * (1 + stride) + 1);
+        raw.set(pixels.subarray(y * stride, (y + 1) * stride), y * (1 + stride) + 1);
     }
     const idat = zlibSync(raw, { level: 6 });
     const ihdr = new Uint8Array(13);
@@ -84,7 +90,7 @@ export function encodeRGBA8PNG(rgba, width, height) {
     ihdrView.setUint32(0, width, false);
     ihdrView.setUint32(4, height, false);
     ihdr[8] = 8;
-    ihdr[9] = 6;
+    ihdr[9] = channels === 4 ? 6 : 2;
     ihdr[10] = 0;
     ihdr[11] = 0;
     ihdr[12] = 0;

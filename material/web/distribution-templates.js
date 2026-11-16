@@ -16,6 +16,6 @@ export function applyDistributionTemplate(document,effectId,templateId){
  if(e.publicDistribution?.id==='D11'&&!template.height&&e.publicDistribution.heightOwned){e.blend.conditions={...e.blend.conditions,...e.publicDistribution.previousHeight};}
  let metadata={version:1,id:template.id};
  if(template.height){e.blend||=defaultBlend();const keys=['height','heightSource','heightStrength','heightBalance','heightSoftness'],previousHeight=e.publicDistribution?.id==='D11'?e.publicDistribution.previousHeight:Object.fromEntries(keys.map(k=>[k,e.blend.conditions[k]]));Object.assign(e.blend.conditions,{height:'cavity',heightSource:'bark',heightStrength:1,heightBalance:.5,heightSoftness:.2});metadata={...metadata,heightOwned:true,previousHeight};}
- if(template.decal){delete e.manualDecal;delete e.legacyBinding;e.params.burlPreference=0;const used=next.surface.effects.filter(v=>v.id!==e.id&&v.type==='burl').reduce((n,v)=>n+v.params.burlCount,0);if(used>=8)throw Error('表面贴花数量已满，请先减少其它贴花层数量。');e.params.burlCount=Math.min(Math.max(1,e.params.burlCount),8-used);}
+ if(template.decal){delete e.manualDecal;delete e.manualDecals;delete e.legacyBinding;e.params.burlPreference=0;const used=next.surface.effects.filter(v=>v.id!==e.id&&v.type==='burl').reduce((n,v)=>n+v.params.burlCount,0);if(used>=8)throw Error('表面贴花数量已满，请先减少其它贴花层数量。');e.params.burlCount=Math.min(Math.max(1,e.params.burlCount),8-used);}
  e.publicDistribution=metadata;next.surface=validateSurface(next.surface,next);return next;
 }

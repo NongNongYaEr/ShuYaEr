@@ -95,6 +95,8 @@ body.catalog-dragging #wbAssetLibrary,#wbAssetLibrary.catalog-over{outline:2px s
 #treeAssemblyOverview .wb-assembly-card>.wb-card-selection-count{grid-row:3;margin:0;font-size:10px;line-height:15px;color:var(--accent-text);white-space:normal}
 #treeAssemblyOverview .wb-card-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:3px;min-width:0}
 #treeAssemblyOverview .wb-card-actions>button,#treeAssemblyOverview .wb-card-menu>summary{font-size:10px;min-height:23px;padding:3px 0;line-height:16px;text-align:center;white-space:nowrap}
+#treeAssemblyOverview .wb-card-actions>[data-assembly-action="apply"]{grid-column:1/-1}
+#treeAssemblyOverview .wb-card-actions>[data-assembly-action="apply"]:enabled{color:var(--accent-text);border-color:var(--selected-line);background:var(--selected-bg)}
 #treeAssemblyOverview .wb-card-menu{position:relative;margin:0;padding:0;border:0;min-width:0;overflow:visible}
 #treeAssemblyOverview .wb-card-menu>summary{list-style:none;border:1px solid var(--line);border-radius:5px;background:var(--surface-2);cursor:pointer}
 #treeAssemblyOverview .wb-card-menu[open]{z-index:20}

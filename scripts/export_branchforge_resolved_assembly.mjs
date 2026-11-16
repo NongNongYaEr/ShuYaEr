@@ -7,9 +7,12 @@ import { checkPveGeometry } from './pve-geometry-quality.mjs';
 import { createPveBarkExporter } from './pve-bark-materials.mjs';
 import {createImportedTrunkSkinExporter} from './imported-trunk-skin.mjs';
 import {createImportedTrunkMaterialExporter} from './imported-trunk-materials.mjs';
+import { remapPveSharedBarkGeometry } from './pve-shared-bark.mjs';
+import { isSharedTreeBarkMaterial } from '../web/whole-tree-shared-bark.js';
+import { baseBranchAtlasMerge, baseBranchAtlasRole } from '../web/base-branch-export-materials.js';
 
 export async function exportResolvedAssembly({ tool, document, skeleton, output, sourceSha256, onQualityWarnings = () => {},
-  asset: suppliedAsset = null, completeVineUnit = false, atlas = null, exportPlan = null, barkExporter = null }) {
+  asset: suppliedAsset = null, completeVineUnit = false, atlas = null, exportPlan = null, barkExporter = null, sharedBark = null }) {
   const imp = p => import(pathToFileURL(path.join(tool, p)).href);
   const k = await imp('web/branch-kernel.js');
   const { normalizeAuthoring } = await imp('web/authoring-state.js');
@@ -23,6 +26,8 @@ export async function exportResolvedAssembly({ tool, document, skeleton, output,
   const buffers = [], chunks = [];
   const bark = barkExporter || createPveBarkExporter(output);
   const importedMaterials=createImportedTrunkMaterialExporter(output);
+  const lightUVs=[Buffer.from('BFLU0001')];
+  let lightOffset=8;
   let offset = 8, vertexCount = 0, triangleCount = 0, asset;
   const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
   try {
@@ -36,7 +41,8 @@ export async function exportResolvedAssembly({ tool, document, skeleton, output,
           if (material.name === 'M_Leaf' || material.sampleLeafMaterial) material.color.set(material.vegetationTint || '#ffffff');
       });
     }
-    const trunkSkin=createImportedTrunkSkinExporter(output,asset);
+    asset.group.updateWorldMatrix(true, true);
+    const trunkSkin=createImportedTrunkSkinExporter(output,asset,skeleton);
     const branchById = new Map(asset.masterBranches.map(b => [b.stableId, b]));
     const vineOwner = completeVineUnit ? { instance_index: 0, source_index: 0, host_branch_id: instanceData[0].branch_id } : null;
     const ownerForBranch = id => {
@@ -58,18 +64,28 @@ export async function exportResolvedAssembly({ tool, document, skeleton, output,
       if (!elementOwners[i]) elementOwners[i] = elementOwners[asset.elements[i].parentIndex];
       if (!elementOwners[i]) throw Error('无法解析枝内几何所属实例: ' + i);
     }
-    asset.group.updateWorldMatrix(true, true);
     asset.group.traverseVisible(mesh => {
       if (!mesh.isMesh) return;
-      const g = mesh.geometry;
+      const useSharedBark = sharedBark && isSharedTreeBarkMaterial(mesh.material);
+      const g = useSharedBark ? remapPveSharedBarkGeometry(mesh, sharedBark.recipe) : mesh.geometry;
       const pos = g.getAttribute('position'), normal = g.getAttribute('normal'), uv = g.getAttribute('uv');
       const tangent = g.getAttribute('tangent'), lookup = g.getAttribute('uv1');
       if (!pos || !normal || !uv || !tangent || Array.isArray(mesh.material)) throw Error('不支持的几何属性: ' + mesh.name);
-      const role = mesh.material.name === 'M_Bark' ? 'bark' : (mesh.material.name === 'M_Leaf' || mesh.material.sampleLeafMaterial) ? 'foliage' : null;
+      const light=mesh.userData.category==='tree_light';
+      const atlasWood = baseBranchAtlasRole(mesh) === 'bark';
+      const sharedUnitAtlas = baseBranchAtlasMerge(mesh, mesh.material);
+      const role = light ? 'light' : (atlasWood || useSharedBark || mesh.material.name === 'M_Bark') ? 'bark'
+        : (mesh.material.name === 'M_Leaf' || mesh.material.sampleLeafMaterial) ? 'foliage' : null;
       if (!role) throw Error('需要定义材质语义: ' + mesh.material.name);
-      const barkBinding = role === 'bark' ? bark.binding(mesh.material) : null;
-      const trunkBinding=importedMaterials.binding(mesh.material);
-      const directId = mesh.userData.stable_id || (typeof mesh.userData.branch_id === 'string' ? mesh.userData.branch_id : '');
+      const barkBinding = role === 'bark' && !sharedBark && !atlasWood ? bark.binding(mesh.material) : null;
+      const trunkBinding = useSharedBark ? sharedBark.binding
+        : sharedUnitAtlas ? importedMaterials.sharedAtlas(mesh.material)
+        : atlasWood ? importedMaterials.atlasBark(mesh.material) : importedMaterials.binding(mesh.material);
+      const lightMount=light&&authoring.imported_trunks?.mounts.find(m=>m.id===authoring.tree_lights.mount);
+      const guide=mesh.userData.treeLightStrip?.guide;
+      const directId = light?(authoring.tree_lights.kind==='procedural'?guide:lightMount?.guide_map[guide])
+        :mesh.userData.stable_id || (typeof mesh.userData.branch_id === 'string' ? mesh.userData.branch_id : '');
+      if(light&&(!directId||!lookup||!trunkBinding))throw Error('灯带缺少控制枝、UV1 或发光材质');
       const directOwner = directId ? ownerForBranch(directId) : null;
       const getOwner = v => {
         if (directOwner) return directOwner;
@@ -104,9 +120,11 @@ export async function exportResolvedAssembly({ tool, document, skeleton, output,
           n.fromBufferAttribute(normal, v).applyMatrix3(normalMatrix).normalize();
           t.set(tangent.getX(v), tangent.getY(v), tangent.getZ(v)).transformDirection(mesh.matrixWorld);
           const texture=mesh.material.sampleLeafMaterial || authoring.leaf_material;
-          const mappedUv=atlas && role==='foliage' ? atlas.uv(texture,uv.getX(v),uv.getY(v)) : [uv.getX(v),uv.getY(v)];
+          const mappedUv=atlas && role==='foliage' && !sharedUnitAtlas ? atlas.uv(texture,uv.getX(v),uv.getY(v)) : [uv.getX(v),uv.getY(v)];
+          // Pack atlases use Three's bottom-left UVs. Imported glTF already
+          // stores top-left UVs; UE reads either override's UV0 verbatim.
           const values = [p.x * 100, -p.y * 100, p.z * 100, n.x, -n.y, n.z,
-            mappedUv[0], trunkBinding?mappedUv[1]:1-mappedUv[1], t.x, -t.y, t.z, tangent.getW(v)];
+            mappedUv[0], trunkBinding && !atlasWood && !sharedUnitAtlas ? mappedUv[1] : 1 - mappedUv[1], t.x, -t.y, t.z, tangent.getW(v)];
           values.forEach((value, c) => {
             if (!Number.isFinite(value)) throw Error('几何含非有限数值');
             vb.writeFloatLE(value, i * 48 + c * 4);
@@ -118,8 +136,20 @@ export async function exportResolvedAssembly({ tool, document, skeleton, output,
         });
         const ib = Buffer.allocUnsafe(bucket.faces.length * 4);
         bucket.faces.forEach((index, i) => ib.writeUInt32LE(index, i * 4));
-        const vertexColors=importedMaterials.vertexColors(mesh,bucket.vertices),trunkSkinBinding=trunkSkin.add(mesh,bucket.vertices,chunks.length);
-        chunks.push({ ...bucket.owner, material_role: role, color_linear: mesh.material.color.toArray(),
+        const vertexColors = useSharedBark ? null : importedMaterials.vertexColors(mesh,bucket.vertices);
+        const trunkSkinBinding = trunkSkin.add(mesh,bucket.vertices,chunks.length);
+        let lightUv;
+        if(light){
+          const bytes=Buffer.alloc(bucket.vertices.length*8);
+          bucket.vertices.forEach((v,i)=>{
+            bytes.writeFloatLE(lookup.getX(v),i*8);
+            bytes.writeFloatLE(lookup.getY(v),i*8+4);
+          });
+          lightUv={offset:lightOffset};
+          lightOffset+=bytes.length;
+          lightUVs.push(bytes);
+        }
+        chunks.push({ ...(lightUv?{light_uv:lightUv}:{}),...bucket.owner, material_role: role, color_linear: useSharedBark ? [1,1,1] : mesh.material.color.toArray(),
           ...(trunkBinding?{imported_trunk_material:trunkBinding}:{}),...(trunkSkinBinding?{imported_trunk_skin:trunkSkinBinding}:{}),...(vertexColors?{vertex_colors:vertexColors}:{}),
           ...(barkBinding ? { bark_material_binding: barkBinding } : {}),
           vertex_offset: offset, vertex_count: bucket.vertices.length,
@@ -127,6 +157,7 @@ export async function exportResolvedAssembly({ tool, document, skeleton, output,
         buffers.push(vb, ib); offset += vb.length + ib.length;
         vertexCount += bucket.vertices.length; triangleCount += bucket.faces.length / 3;
       }
+      if (g !== mesh.geometry) g.dispose();
     });
     if (triangleCount !== asset.report.triangles) throw Error('装配几何三角面丢失');
     const file = 'whole.resolved.bin';
@@ -146,8 +177,15 @@ export async function exportResolvedAssembly({ tool, document, skeleton, output,
       winding_policy: 'reflect_Y_retain_source_indices_UE_clockwise_front_face',
       uv_policy: 'UE_top_left_V_is_one_minus_software_V_sample_without_extra_flip',
       branches: skeleton.branches, sources: skeleton.foliage_sources, instances: instanceData, chunks, summary };
+    if(lightUVs.length>1){
+      const data=Buffer.concat(lightUVs),file='whole.light-uv.bin';
+      fs.writeFileSync(path.join(output,file),data);
+      metadata.tree_light_uv={version:1,file,bytes:data.length,stride:8,
+        sha256:createHash('sha256').update(data).digest('hex'),sha1:createHash('sha1').update(data).digest('hex')};
+    }
     const barkData = bark.finish();
-    const trunkData=importedMaterials.finish();
+    const trunkData=importedMaterials.finish(sharedBark?.record);
+    if (sharedBark) metadata.shared_tree_bark = sharedBark.reference;
     if(trunkData)metadata.imported_trunk_materials=trunkData;const skin=trunkSkin.finish();if(skin){skin.instructions='树干UE导出说明.txt';metadata.imported_trunk_skin=skin;fs.writeFileSync(path.join(output,'树干UE导出说明.txt'),`雕刻 / AI 树干 · UE 5.8 交付
 
 1. 启用本版树鸭儿 UE 插件、Procedural Vegetation Editor、Dynamic Wind 和 Nanite Foliage。

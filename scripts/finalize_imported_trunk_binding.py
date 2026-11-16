@@ -11,7 +11,7 @@ import unreal
 def finalize(manifest, skeletal_mesh_asset_path):
     manifest = Path(manifest).resolve()
     metadata = json.loads(manifest.read_text(encoding='utf-8-sig'))
-    assert metadata.get('imported_trunk_skin', {}).get('version') == 1, 'Missing pinned trunk binding'
+    assert metadata.get('imported_trunk_skin', {}).get('version') in (1, 2), 'Missing pinned trunk binding'
     asset = unreal.load_asset(skeletal_mesh_asset_path)
     assert isinstance(asset, unreal.SkeletalMesh), 'Select the newly exported PVE SkeletalMesh'
     cls = unreal.load_class(None, '/Script/Day30ProceduralVegetationZh.BranchForgeAssemblyLibrary')

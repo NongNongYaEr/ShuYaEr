@@ -1,6 +1,6 @@
 // Uses a separate off-desktop native host and separate project/session storage.
 const fs=require('node:fs'),path=require('node:path'),net=require('node:net'),{spawn}=require('node:child_process'),assert=require('node:assert/strict'),crypto=require('node:crypto');
-const {chromium}=require('playwright');
+const {chromium}=require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 const root=path.resolve(__dirname,'..'),out=path.resolve(process.env.BRANCHFORGE_COMB_OUTPUT||'.runtime/comb-attachment-fix/native');
 const input=path.resolve(process.argv[2]||'.runtime/branch-junction-fix/当前工程_只读副本.branch.json');
 const digest=file=>crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'),delay=ms=>new Promise(r=>setTimeout(r,ms));

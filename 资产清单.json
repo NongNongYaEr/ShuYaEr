@@ -1,7 +1,7 @@
 {
   "trees": 8,
   "branches": 43,
-  "units": 8,
+  "units": 9,
   "prefabs": 1,
   "samples": [
     {
@@ -99,8 +99,21 @@
     "FINISHED_SCENE_FLOWER_SIDE_MATURE_V1",
     "FINISHED_SCENE_FLOWER_TIP_MATURE_V1"
   ],
+  "requiredPlantUnitPackIds": [
+    "CAMPHOR_FINISHED_V1",
+    "AZALEA_FINISHED_V1",
+    "FIDDLE_FIG_FINISHED_V1",
+    "IVY_FINISHED_V1",
+    "BOUGAINVILLEA_FINISHED_V1",
+    "SCENE_GRASS_FINISHED_V1",
+    "SCENE_BROADLEAF_FINISHED_V1",
+    "SCENE_FLOWER_FINISHED_V1",
+    "prepared-902baf08-123e-49ef-918f-37f45bead87c"
+  ],
   "excludedLocalAssets": [
     "prepared-aca902b0-b643-4bfb-9881-6eefd4d9621e",
-    "prepared-38f2336e-adcf-406d-a4a1-15bf5fd91dc1"
+    "prepared-38f2336e-adcf-406d-a4a1-15bf5fd91dc1",
+    "ASSET_3313363ce7794441892e64c16a74de1e",
+    "ASSET_e1ec6cb27dd24097ae70d0ddf9c8e987"
   ]
 }

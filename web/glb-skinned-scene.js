@@ -2,6 +2,7 @@ import * as T from './vendor/three.module.min.js';
 import {mergeGeometries} from './vendor/surface/utils/BufferGeometryUtils.js';
 import {pveGlbMatrix} from './pve-export.js';
 import {createGlbRig} from './glb-rig.js';
+import {createBaseBranchAtlasMaterials} from './base-branch-export-materials.js';
 
 // The caller supplies a dedicated complete export asset, not the live editor.
 // Geometry is copied in its final pose before weights are attached. No sweep,
@@ -14,11 +15,11 @@ export function createSkinnedGlbScene(asset,{connector=null,maxBones=4096,floorZ
  // Apply the common floor offset before binding, so the pot and bind pose share an origin.
  if(floorZ)frame.premultiply(new T.Matrix4().makeTranslation(0,-floorZ,0));
  const inverseGroup=asset.group.matrixWorld.clone().invert(),rig=createGlbRig(asset,frame.clone().multiply(asset.group.matrixWorld),{maxBones}),scene=new T.Scene(),geometries=[],chunks=[],materials=[],groups=[];let merged=null,offset=0,displayColor=false;
- scene.name=asset.group.name;scene.add(rig.root);const position=new T.Vector3();
+ scene.name=asset.group.name;scene.add(rig.root);const position=new T.Vector3(),atlasMaterials=createBaseBranchAtlasMaterials();
  try{asset.group.traverseVisible(object=>{if(!object.isMesh)return;if(object.isSkinnedMesh||object.isInstancedMesh||object.geometry.morphAttributes.position?.length)throw Error('骨骼导出副本含未展开的变形或实例网格');
   const src=object.geometry,attributes=src.attributes,count=attributes.position?.count;if(!count)return;const g=src.clone(),global=new T.Matrix4().multiplyMatrices(frame,object.matrixWorld);geometries.push(g);
   const joint=new Uint16Array(count*4),weight=new Float32Array(count*4),wind=new Float32Array(count*4),color=new Float32Array(count*4);color.fill(1);
-  const slots=Array.isArray(object.material)?object.material:[object.material],slotIndices=slots.map(m=>{if(!materials.includes(m))materials.push(m);return materials.indexOf(m);}),colored=slots.some(m=>m.vertexColors);displayColor||=colored;
+  const slots=Array.isArray(object.material)?object.material:[object.material],slotIndices=slots.map(source=>{const material=atlasMaterials.forMesh(object,source);if(!materials.includes(material))materials.push(material);return materials.indexOf(material);}),colored=slots.some(m=>m.vertexColors);displayColor||=colored;
   for(let n=0;n<count;n++){
    position.fromBufferAttribute(attributes.position,n).applyMatrix4(object.matrixWorld).applyMatrix4(inverseGroup);const values=rig.vertex(object,n,position),total=values.reduce((s,v)=>s+v.weight,0);if(values.length>4||!Number.isFinite(total)||total<1e-12)throw Error('骨骼蒙皮权重无效');
    values.forEach((v,k)=>{if(!Number.isInteger(v.index)||v.index<0||v.index>=rig.bones.length||!Number.isFinite(v.weight)||v.weight<0)throw Error('骨骼蒙皮引用无效');joint[n*4+k]=v.index;weight[n*4+k]=v.weight/total;});
@@ -43,6 +44,6 @@ export function createSkinnedGlbScene(asset,{connector=null,maxBones=4096,floorZ
  if(next!==oldIndices.length)throw Error('骨骼模型材质分组不完整');merged.setIndex(new T.BufferAttribute(reordered,1));if(!displayColor)merged.deleteAttribute('color');
  const mesh=new T.SkinnedMesh(merged,materials);mesh.name=asset.group.name;mesh.userData={branchforge_color_is_display:true,rigged:true};scene.add(mesh);scene.updateMatrixWorld(true);const skeleton=new T.Skeleton(rig.bones);mesh.bind(skeleton);mesh.normalizeSkinWeights();skeleton.update();mesh.computeBoundingBox();mesh.computeBoundingSphere();
  const report={...rig.report,vertices:merged.attributes.position.count,triangles:merged.index.count/3,materials:materials.length,bind_pose:'current_shape',unit:'meter',up:'Y'};
- scene.userData={generator:'BranchForge',rigging:report};let disposed=false;return {scene,mesh,skeleton,rig,report,dispose(){if(disposed)return;disposed=true;geometries.forEach(g=>g.dispose());skeleton.dispose();scene.clear();}};
- }catch(error){geometries.forEach(g=>g.dispose());throw error;}
+ scene.userData={generator:'BranchForge',rigging:report};let disposed=false;return {scene,mesh,skeleton,rig,report,dispose(){if(disposed)return;disposed=true;geometries.forEach(g=>g.dispose());atlasMaterials.dispose();skeleton.dispose();scene.clear();}};
+ }catch(error){geometries.forEach(g=>g.dispose());atlasMaterials.dispose();throw error;}
 }

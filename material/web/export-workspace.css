@@ -31,7 +31,11 @@ body[data-workspace-stage=export].blender-properties-hidden .workspace{grid-temp
 .export-workspace-settings .control-section{padding:0;border:0}.export-workspace-settings h2{font-size:12px;margin:0 0 8px}.export-workspace-settings h2.export-target-title{font-size:16px;margin:0}.export-workspace-settings .control-section h2>span{display:none}.export-workspace-settings .inline-options{margin-top:0;gap:8px}.export-workspace-settings .inline-options label{font-size:11px}.export-workspace-settings .inline-options select{font-size:12px;margin-top:5px;padding:7px 5px}
 .export-workspace-settings .export-tags{margin:8px 0;gap:5px}.export-workspace-settings .export-tags span{font-size:10px}.export-workspace-settings .control-note{font-size:11px;line-height:1.6;margin:6px 0;color:var(--muted)}
 .export-workspace-settings details{border:1px solid var(--line);border-radius:5px;padding:9px}.export-workspace-settings summary{font-size:12px;cursor:pointer}.export-workspace-settings details .control-section{padding-top:12px}.export-workspace-settings .slider-label{font-size:11px;margin-top:9px}.export-workspace-settings .secondary{font-size:11px;margin-top:8px}.export-workspace-settings #exportModelOption{font-size:11px;margin:0}.export-workspace-settings #nearQualitySources{overflow-wrap:anywhere}
-.export-output-info{font-size:11px;color:var(--muted);line-height:1.65;margin:0}.export-output-info[data-fresh=true]{color:var(--text)}.export-workspace-settings .export-return{margin:0;font-size:11px}
+.export-output-info{font-size:11px;color:var(--muted);line-height:1.65;margin:0}.export-output-info[data-fresh=true]{color:var(--text)}
+.export-recovery{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:8px 10px;border:1px solid var(--line);border-radius:5px}
+.export-recovery[hidden]{display:none}
+.export-recovery p{flex:1 1 280px;margin:0;color:#e5ab83;font-size:11px;line-height:1.5;overflow-wrap:anywhere}
+.export-workspace-settings .export-return{margin:0;font-size:11px;white-space:nowrap}
 body[data-workspace-stage=export] .export-footer{padding:12px;display:flex;flex-direction:column;gap:8px;flex:none;background:var(--surface)}
 body[data-workspace-stage=export] .export-footer .primary{min-height:40px;font-size:13px;padding:10px 12px;justify-content:center}
 body[data-workspace-stage=export] .export-footer #exportBottom{min-height:36px;padding:8px 10px;font-size:12px}
@@ -71,7 +75,7 @@ body[data-workspace-stage=export] .export-advanced-content>.control-section{padd
 body[data-workspace-stage=export] .export-advanced-content>#openOutput,body[data-workspace-stage=export] .export-advanced-content>#downloadResult{display:block;margin-top:8px;font-size:11px}
 body[data-workspace-stage=export] .export-output-info{display:none;grid-column:1/-1;margin:0;font-size:11px}
 body[data-workspace-stage=export] .export-output-info[data-warning=true]{display:block;color:#d7be8d}
-body[data-workspace-stage=export] .export-return{grid-column:1/-1;justify-self:start}
+body[data-workspace-stage=export] .export-recovery{grid-column:1/-1}
 body[data-workspace-stage=export] .viewport-toolbar{grid-column:1;grid-row:2;flex-wrap:wrap;align-content:center}
 body[data-workspace-stage=export] #dropZone{grid-column:1;grid-row:3}
 body[data-workspace-stage=export] .baked-inspection-row{grid-column:1;grid-row:4;white-space:nowrap}

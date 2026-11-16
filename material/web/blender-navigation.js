@@ -1,6 +1,49 @@
-// View-only Blender default navigation, in the model's existing Y-up space.
+// View-only navigation in the model's existing Y-up space.
 // This never transforms authored vertices, UVs, material units or export axes.
-export const BLENDER_NAV_HINT='中键旋转 · Shift+中键平移 · Ctrl+中键缩放 · Home 全部 · 小键盘 . 聚焦';
+const hints = {
+  blender: '中键旋转 · Shift+中键平移 · Ctrl+中键缩放',
+  max: 'Alt+中键旋转 · 中键平移',
+  maya: 'Alt+左键旋转 · Alt+中键平移 · Alt+右键缩放',
+};
+export const MATERIAL_VIEWPORT_NAVIGATION_EVENT = 'tree-material:viewport-navigation';
+let navigationMode = 'blender';
+
+export function setMaterialViewportNavigationMode(mode) {
+  if (!Object.hasOwn(hints, mode)) return false;
+  if (mode !== navigationMode) {
+    navigationMode = mode;
+    globalThis.dispatchEvent?.(new Event(MATERIAL_VIEWPORT_NAVIGATION_EVENT));
+  }
+  return true;
+}
+
+export function materialViewportNavigationHint() {
+  return hints[navigationMode] + ' · 滚轮缩放 · Home 全部 · 小键盘 . 聚焦';
+}
+
+export function getMaterialViewportNavigationMode() {
+  return navigationMode;
+}
+
+export function materialViewportNavigationAction(r, event) {
+  if (event.pointerType === 'touch') return null;
+  if (navigationMode === 'maya') {
+    if (!event.altKey || event.ctrlKey || event.metaKey) return null;
+    return ['orbit', 'pan', 'dolly'][event.button] ?? null;
+  }
+  if (navigationMode === 'max') {
+    return event.button === 1 ? (event.altKey ? 'orbit' : 'pan') : null;
+  }
+  const emulateMiddle = r.emulateThreeButton && event.button === 0 && event.altKey
+    && !event.ctrlKey && !event.metaKey;
+  if (event.button !== 1 && !emulateMiddle) return null;
+  if (event.shiftKey) return 'pan';
+  return event.ctrlKey ? 'dolly' : 'orbit';
+}
+
+export function materialPointerAllowsEdit(event) {
+  return event.button === 0 && (!event.altKey || event.ctrlKey || event.metaKey);
+}
 const norm=a=>{const d=Math.hypot(...a)||1;return a.map(v=>v/d);},cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],dot=(a,b)=>a.reduce((n,v,i)=>n+v*b[i],0),tan=Math.tan(Math.PI/9);
 export function cameraBasis(r){const z=norm([Math.sin(r.yaw)*Math.cos(r.pitch),Math.sin(r.pitch),Math.cos(r.yaw)*Math.cos(r.pitch)]),up=Math.abs(z[1])>.999?[0,0,z[1]>0?-1:1]:[0,1,0],right=norm(cross(up,z));return{back:z,right,up:cross(z,right)};}
 export function cameraCenter(r){const m=r.model,center=r.focus||[(m.max[0]-m.min[0])/m.height/2,.5,(m.max[2]-m.min[2])/m.height/2];return center.map((v,i)=>v+(r.pan?.[i]||0));}
@@ -17,8 +60,37 @@ export function viewKey(r,e){const code=e.code||'',ctrl=e.ctrlKey||e.metaKey;if(
 export function installBlenderPointers(r){const canvas=r.canvas,events=new AbortController(),listen=(type,fn,options={})=>canvas.addEventListener(type,fn,{...options,signal:events.signal});let drag=null,stroke=null,lastPaint=-Infinity;
  const release=id=>{try{if(canvas.hasPointerCapture?.(id))canvas.releasePointerCapture(id);}catch{}},capture=id=>{try{canvas.setPointerCapture?.(id);}catch{}},finish=cancel=>{const had=!!(drag||stroke);if(drag){if(cancel)Object.assign(r,drag.before);const id=drag.id;drag=null;release(id);changed(r);}if(stroke){const {kind,id}=stroke;stroke=null;release(id);r[kind==='part'?(cancel?'onPartPaintCancel':'onPartPaintEnd'):(cancel?'onPaintCancel':'onPaintEnd')]?.();}return had;};
  const paint=e=>{if(stroke&&r.materialPaintActive&&r.onMaterialPaintMotion){r.onMaterialPaintMotion(e);return;}if(!stroke||r.editingBlocked||performance.now()-lastPaint<70)return;lastPaint=performance.now();const hit=r.pick(e.clientX,e.clientY);if(hit)r[stroke.kind==='part'?'onPartPaint':'onPaint']?.(hit,e);};
- listen('pointerdown',e=>{if(r.onPointerAction?.(e))return;canvas.focus?.({preventScroll:true});if(e.button===1||(r.emulateThreeButton&&e.button===0&&e.altKey)){e.preventDefault();finish(false);capture(e.pointerId);drag={id:e.pointerId,x:e.clientX,y:e.clientY,startX:e.clientX,startY:e.clientY,mode:e.shiftKey?'pan':e.ctrlKey?'zoom':'orbit',pole:Math.abs(r.pitch)>1.569?Math.sign(r.pitch):0,before:{yaw:r.yaw,pitch:r.pitch,radius:r.radius,pan:[...(r.pan||[0,0,0])],focus:r.focus?.slice()||null}};return;}if(e.button===2){e.preventDefault();if(!finish(true))r.onContextMenu?.(e);return;}if(e.button!==0||r.editingBlocked||e.altKey)return;const hit=r.pick(e.clientX,e.clientY);if(r.tool==='mask'||r.tool==='part'){stroke={kind:r.tool,id:e.pointerId};capture(e.pointerId);r[r.tool==='part'?'onPartPaintStart':'onPaintStart']?.(e);lastPaint=-Infinity;paint(e);}else if(r.tool==='flow'){if(hit)r.onFlowPick?.(hit,e);}else if(r.tool==='uvSeam'){if(hit)r.onUvSeamPick?.(hit,e);}else{r.selectionPoint=hit?.point?.slice()||null;if(hit)r.onPickUV?.(hit,e);changed(r);}});
- listen('pointermove',e=>{r.lastPointer={clientX:e.clientX,clientY:e.clientY};if(r.onPointerMotion?.(e))return;if(stroke){paint(e);return;}if(!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(drag.mode==='pan')panView(r,dx,dy);else if(drag.mode==='zoom')zoomView(r,dy*.01);else{if(drag.pole){const x=e.clientX-drag.startX,y=e.clientY-drag.startY,d=Math.hypot(x,y);if(d){r.yaw=Math.atan2(-x,drag.pole*y);r.pitch=drag.pole*Math.max(-1.55,Math.PI/2-d*.008);}}else{r.yaw-=dx*.008;r.pitch=Math.max(-1.55,Math.min(1.55,r.pitch+dy*.008));}changed(r);}drag.x=e.clientX;drag.y=e.clientY;});
- listen('pointerup',e=>{if(drag&&e.button===1||drag&&r.emulateThreeButton&&e.button===0||stroke&&e.button===0)finish(false);});listen('pointercancel',()=>finish(true));listen('lostpointercapture',()=>{if(drag||stroke)finish(false);});listen('contextmenu',e=>e.preventDefault());listen('auxclick',e=>{if(e.button===1)e.preventDefault();});listen('wheel',e=>{e.preventDefault();if(!r.onWheelAction?.(e))zoomView(r,e.deltaY*.001);},{passive:false});
+ listen('pointerdown',e=>{
+  if(r.onPointerAction?.(e))return;
+  canvas.focus?.({preventScroll:true});
+  const mode=materialViewportNavigationAction(r,e);
+  if(mode){
+   e.preventDefault();finish(false);capture(e.pointerId);
+   drag={id:e.pointerId,button:e.button,x:e.clientX,y:e.clientY,startX:e.clientX,startY:e.clientY,
+    mode,pole:Math.abs(r.pitch)>1.569?Math.sign(r.pitch):0,
+    before:{yaw:r.yaw,pitch:r.pitch,radius:r.radius,pan:[...(r.pan||[0,0,0])],focus:r.focus?.slice()||null}};
+   return;
+  }
+  if(e.button===2){e.preventDefault();if(!finish(true))r.onContextMenu?.(e);return;}
+  if(!materialPointerAllowsEdit(e)||r.editingBlocked)return;
+  const hit=r.pick(e.clientX,e.clientY);
+  if(r.tool==='mask'||r.tool==='part'){
+   stroke={kind:r.tool,id:e.pointerId};capture(e.pointerId);
+   r[r.tool==='part'?'onPartPaintStart':'onPaintStart']?.(e);lastPaint=-Infinity;paint(e);
+  }else if(r.tool==='flow'){if(hit)r.onFlowPick?.(hit,e);}
+  else if(r.tool==='uvSeam'){if(hit)r.onUvSeamPick?.(hit,e);}
+  else{r.selectionPoint=hit?.point?.slice()||null;if(hit)r.onPickUV?.(hit,e);changed(r);}
+ });
+ listen('pointermove',e=>{r.lastPointer={clientX:e.clientX,clientY:e.clientY};if(r.onPointerMotion?.(e))return;if(stroke?.id===e.pointerId){paint(e);return;}if(!drag||drag.id!==e.pointerId)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(drag.mode==='pan')panView(r,dx,dy);else if(drag.mode==='dolly')zoomView(r,dy*.01);else{if(drag.pole){const x=e.clientX-drag.startX,y=e.clientY-drag.startY,d=Math.hypot(x,y);if(d){r.yaw=Math.atan2(-x,drag.pole*y);r.pitch=drag.pole*Math.max(-1.55,Math.PI/2-d*.008);}}else{r.yaw-=dx*.008;r.pitch=Math.max(-1.55,Math.min(1.55,r.pitch+dy*.008));}changed(r);}drag.x=e.clientX;drag.y=e.clientY;});
+ listen('pointerup',e=>{
+  const releasedDrag=drag&&drag.id===e.pointerId&&drag.button===e.button;
+  const releasedStroke=stroke&&stroke.id===e.pointerId&&e.button===0;
+  if(releasedDrag||releasedStroke)finish(false);
+ });
+ listen('pointercancel',e=>{if(drag?.id===e.pointerId||stroke?.id===e.pointerId)finish(true);});
+ listen('lostpointercapture',e=>{if(drag?.id===e.pointerId||stroke?.id===e.pointerId)finish(false);});
+ listen('contextmenu',e=>e.preventDefault());
+ listen('auxclick',e=>{if(e.button===1||materialViewportNavigationAction(r,e))e.preventDefault();});
+ listen('wheel',e=>{e.preventDefault();if(!r.onWheelAction?.(e))zoomView(r,e.deltaY*.001);},{passive:false});
  return{finish:()=>finish(false),cancel:()=>finish(true),dispose(){finish(true);events.abort();}};
 }

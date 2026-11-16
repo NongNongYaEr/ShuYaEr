@@ -54,7 +54,16 @@ export function cloneLayerResources(surface,nodes,{shareNamedAreas=false}={}){
  const leaves=[];function visit(n){if(n.kind==='effect')leaves.push(n.effectId);else n.children.forEach(visit);}nodes.forEach(visit);const sourceEffects=leaves.map(id=>surface.effects.find(e=>e.id===id)),ids=new Map(),uid=id=>{if(!ids.has(id))ids.set(id,crypto.randomUUID());return ids.get(id);};
  const masks=[...new Set(sourceEffects.map(e=>e.maskRef))].map(id=>surface.masks.find(m=>m.id===id)),areaIds=new Set(sourceEffects.map(e=>e.scopeRef).filter(Boolean));for(const m of masks)for(const r of m.items)for(const k of ['areaRef','addRef','eraseRef'])if(r[k])areaIds.add(r[k]);
  sourceEffects.forEach(e=>uid(e.id));masks.forEach(m=>uid(m.id));const copyAreas=[];for(const id of areaIds){const a=surface.areas.find(a=>a.id===id);if(!a)fail('图层引用的区域不存在。');if(shareNamedAreas&&!a.ownedBy)continue;uid(id);const copy=structuredClone(a);copy.id=uid(id);if(a.ownedBy)copy.ownedBy=ids.get(a.ownedBy)||uid(sourceEffects[0].id);copyAreas.push(copy);}
- const copiedMasks=masks.map(m=>{const c=structuredClone(m);c.id=uid(m.id);for(const r of c.items){r.id=crypto.randomUUID();for(const k of ['areaRef','addRef','eraseRef'])if(ids.has(r[k]))r[k]=ids.get(r[k]);}return c;});
+ const sceneInstances=new Map();
+ const copiedMasks=masks.map(m=>{const c=structuredClone(m);c.id=uid(m.id);for(const r of c.items){
+  r.id=crypto.randomUUID();for(const k of ['areaRef','addRef','eraseRef'])if(ids.has(r[k]))r[k]=ids.get(r[k]);
+  if(r.type==='scene-overlay'){
+   const {instance,target}=r.scene;
+   if(!sceneInstances.has(instance))sceneInstances.set(instance,crypto.randomUUID());
+   r.scene.instance=sceneInstances.get(instance);
+   if(ids.has(target))r.scene.target=ids.get(target);
+  }
+ }return c;});
  const effects=sourceEffects.map(e=>{const c=structuredClone(e);c.id=uid(e.id);c.maskRef=uid(e.maskRef);if(c.scopeRef&&ids.has(c.scopeRef))c.scopeRef=ids.get(c.scopeRef);if(c.blend){for(const k of ['sourceId','targetId'])if(ids.has(c.blend.conditions[k]))c.blend.conditions[k]=ids.get(c.blend.conditions[k]);}delete c.legacyBinding;delete c.parentIds;return c;});
  function copyNode(n){if(n.kind==='effect')return leafLayer(uid(n.effectId));return{...structuredClone(n),id:uid(n.id),children:n.children.map(copyNode)};}
  return{effects,masks:copiedMasks,areas:copyAreas,layers:nodes.map(copyNode)};

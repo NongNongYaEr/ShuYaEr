@@ -1,7 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import * as THREE from '../web/vendor/three.module.min.js';
 import {nativeGeometry} from '../web/native-viewport.js';
-import {cloneNativePreviewGeometry,nativePreviewGeometrySource} from '../web/native-preview-geometry.js';
+import {cloneNativePreviewGeometry,nativePreviewGeometrySource,nativePreviewPoseForObject,setNativePreviewPose,setNativePreviewUv,clearNativePreviewUv} from '../web/native-preview-geometry.js';
 const fixture=()=>{const source=new THREE.BufferGeometry().copy(new THREE.BoxGeometry());source.setAttribute('color',new THREE.Float32BufferAttribute(Array.from({length:source.attributes.position.count*4},(_,i)=>i%4===3?.5:.25),4));return {source,preview:cloneNativePreviewGeometry(source)};};
 test('preview clone retains exactly the original native payload while private lookup attributes remain local',()=>{
  const {source,preview}=fixture(),originalKeys=Object.keys(source.attributes);preview.setAttribute('duckEditVertex',new THREE.Float32BufferAttribute(Array.from({length:preview.attributes.position.count},(_,i)=>i),1));assert.equal(nativePreviewGeometrySource(preview),source);assert.deepEqual(nativeGeometry(preview),nativeGeometry(source));assert.notEqual(preview.attributes.position.array,source.attributes.position.array);assert.deepEqual(Object.keys(source.attributes),originalKeys);assert.equal(source.userData.nativeSource,undefined);preview.dispose();assert.deepEqual(Object.keys(source.attributes),originalKeys);source.dispose();
@@ -20,4 +20,18 @@ test('custom clone implementations use their own actual native payload',()=>{
 });
 test('interleaved preview reuse is exact and is revoked when its storage layout changes',()=>{
  const source=new THREE.BufferGeometry(),data=new THREE.InterleavedBuffer(new Float32Array([1,2,3,99,4,5,6,98]),4);source.setAttribute('position',new THREE.InterleavedBufferAttribute(data,3,0));const preview=cloneNativePreviewGeometry(source);assert.equal(nativePreviewGeometrySource(preview),source);assert.deepEqual(nativeGeometry(preview),nativeGeometry(source));preview.attributes.position.data.stride=5;assert.equal(nativePreviewGeometrySource(preview),preview);assert.notDeepEqual(nativeGeometry(preview).vertices,nativeGeometry(source).vertices);source.dispose();preview.dispose();
+});
+test('a native pose is used only for its original baked geometry and UV channel',()=>{
+ const source=new THREE.BoxGeometry(),matrix=new THREE.Matrix4().makeTranslation(1,2,3),baked=source.clone().applyMatrix4(matrix),mesh=new THREE.Mesh(baked);
+ setNativePreviewPose(mesh,source,matrix);
+ assert.equal(nativePreviewPoseForObject(mesh).geometry,source);
+ setNativePreviewUv(mesh,baked.attributes.uv.clone());
+ assert.equal(nativePreviewPoseForObject(mesh),null);
+ clearNativePreviewUv(mesh);
+ assert.equal(nativePreviewPoseForObject(mesh).matrix,matrix);
+ baked.attributes.position.needsUpdate=true;
+ assert.equal(nativePreviewPoseForObject(mesh),null);
+ setNativePreviewPose(mesh,source,matrix);
+ mesh.geometry=source;
+ assert.equal(nativePreviewPoseForObject(mesh),null);
 });

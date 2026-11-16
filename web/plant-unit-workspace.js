@@ -1,16 +1,30 @@
 import {VIEWPORT_NAVIGATION_HINT} from './viewport-navigation.js';
-import { UNIT_ROLES, normalizePlantUnitPack, normalizeUnitAssembly, plantPackFromBuiltin, plantPackFromDocument, legacyPlantAssembly, documentWithUnitAssembly } from './plant-unit-data.js';
+import { UNIT_ROLES, appendPlantBaseBranchVariant, samePlantUnitAtlas, normalizePlantUnitPack, normalizeUnitAssembly, plantPackFromBuiltin, plantPackFromDocument, legacyPlantAssembly, documentWithUnitAssembly } from './plant-unit-data.js';
 import { createPlantUnitStore } from './plant-unit-store.js';
 import { importPlantGlb, imageFileData, samePlantTexture } from './plant-unit-import.js';
 import { createPlantUnitPreview } from './plant-unit-preview.js';
 import {isPackageAsset} from './plant-pack-client.js';
-import {generatePlantUnitThumbnail,savePlantUnitThumbnail} from './plant-unit-thumbnails.js';
+import {ensurePlantUnitThumbnail,generatePlantUnitThumbnail,savePlantUnitThumbnail} from './plant-unit-thumbnails.js';
 import {resourceIcon as icon,trapResourceDialogFocus,syncResourceOverlay} from './resource-ui.js';
 import {createUnitPreparation} from './unit-preparation.js';
+import {createBaseBranchWorkbench} from './base-branch-workbench.js';
+import {DISTRIBUTION} from './distribution-config.js';
 
 const $ = id => document.getElementById(id);
 const stage = value => document.dispatchEvent(new CustomEvent('branch-workflow-show', { detail: value }));
 const roleOptions = Object.entries(UNIT_ROLES).map(([id, name]) => `<option value="${id}">${name}</option>`).join('');
+const packCount = pack => pack.units.length + (pack.base_branches?.length || 0);
+const practicePack = DISTRIBUTION.baseBranchExample.pack;
+const copyPackIdentity = pack => ({ id: 'plant-' + crypto.randomUUID(), name: pack.name.slice(0, 150) + ' · 我的副本', revision: 1 });
+const isReadOnlyPack = id => id === practicePack.id || isPackageAsset(id);
+function retainBaseBranchVariants(output, previous) {
+  const branches = output.base_branches || [];
+  const ids = new Set(branches.map(branch => branch.id));
+  const retained = (previous?.base_branches || []).filter(branch => branch.variant_from && !ids.has(branch.id));
+  if (!retained.length) return branches;
+  if (!samePlantUnitAtlas(output.material, previous.material)) throw Error('新版图集与已保存的造型变体不一致，请另存为新套装。');
+  return [...branches, ...retained];
+}
 const download = (data, name) => {
   const url = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
   const a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -19,14 +33,18 @@ const download = (data, name) => {
 export function createPlantUnitWorkspace(api, section) {
   const store = createPlantUnitStore();
   let catalog = [], saved = [], pack = null, selected = '', dirty = false, busy = false, preview = null;
-  let thumbnails = new Map(), config = normalizeUnitAssembly({ entries: [] }), sourceStamp = '', renderToken = 0;
-  let sourceLeaves = null, refreshPending = false, preserveDropLibrary = false;
+  let thumbnails = new Map(), thumbnailPack = null, config = normalizeUnitAssembly({ entries: [] }), sourceStamp = '', renderToken = 0;
+  let sourceLeaves = null, refreshPending = false, preserveDropLibrary = false, activeBase = '';
   let context = {}, branchDraft = null, checkpoint = null, returnFocus = null, editorPack = null;
   const pendingFields=new Set();
   const panel = document.createElement('section'); panel.id = 'branchUnitAssemblyPanel'; panel.className = 'pu-assembly';
-  panel.innerHTML = `<h3>单元枝 · 叶花果装配</h3><p class="vine-note">将单元卡拖到右侧枝干上，松手新增一个叶片、花或果实；也可拖入下方组合槽配置自动生成。</p>
+  panel.innerHTML = `<h3>单元枝 · 叶花果装配</h3>
+    <label>组装方式<select id="unitAssemblyMode"><option value="PROCEDURAL">生成枝组装</option><option value="BASE_BRANCH">基础枝组装</option></select></label>
     <label>植物素材套装<select id="unitAssemblyPack"><option value="">请选择植物</option></select></label>
     <div class="wb-row"><button id="unitOpenWorkbench" type="button">叶花果资产工作台</button><button id="unitRefreshPack" type="button">读取库中新版</button></div>
+    <section id="baseBranchAssemblyControls" hidden></section>
+    <div id="proceduralUnitAssemblyControls">
+    <p class="vine-note">将单元卡拖到右侧枝干上，松手新增一个叶片、花或果实；也可拖入下方组合槽配置自动生成。</p>
     <p id="unitAssemblyMaterial" class="vine-note"></p><div id="unitAssemblyLibrary" class="pu-unit-grid"></div>
     <div id="unitAssemblySlots"></div>
     <div class="field-grid"><label>叶片密度（片 / 米）<input id="unitAssemblyDensity" type="number" min="0" max="400" step="1" value="12"></label>
@@ -34,17 +52,28 @@ export function createPlantUnitWorkspace(api, section) {
     <label>叶片区间起点（%）<input id="unitAssemblyStart" type="number" min="0" max="99" value="15"></label><label>叶片区间终点（%）<input id="unitAssemblyEnd" type="number" min="1" max="100" value="100"></label>
     <label>花果点缀量<input id="unitAssemblyOrganAmount" type="number" min="0" max="1" step=".05" value=".35"></label><label>花果位置<select id="unitAssemblyHabit"><option value="AXILLARY">叶腋</option><option value="PENDANT">下垂</option><option value="TERMINAL">枝梢</option></select></label></div>
     <p class="vine-note">尺寸按完整单元最长边计算（含叶柄 / 花梗）；生成时保留自然大小变化。卡片权重控制该类单元的选用比例。应用组合会恢复校准尺寸，额外缩放可在“调整”中设置整体倍率。</p>
-    <button id="unitAssemblyApply" type="button" class="accent">应用到当前单元枝</button><p id="unitAssemblyStatus" class="vine-note" role="status"></p>
+    <button id="unitAssemblyApply" type="button" class="accent">应用到当前单元枝</button><p id="unitAssemblyStatus" class="vine-note" role="status"></p></div>
     <button id="unitAssemblySaveBranch" type="button">去保存单元枝素材</button>`;
   section.append(panel);
+  const baseBranch = createBaseBranchWorkbench({ ...api, saveBaseBranchVariant, showAssembly: () => stage('ASSEMBLE') }, $('baseBranchAssemblyControls'));
+  function refreshAssemblyMode() {
+    const showBase = api.isBranch() && $('unitAssemblyMode').value === 'BASE_BRANCH';
+    $('proceduralUnitAssemblyControls').hidden = showBase;
+    baseBranch.refresh(pack, showBase, pack && thumbnailPack === pack ? thumbnails : null);
+  }
+  $('unitAssemblyMode').onchange = refreshAssemblyMode;
+  document.addEventListener('branch-workflow-show', event => {
+    if (String(event.detail).toUpperCase() !== 'ASSEMBLE') baseBranch.suspend();
+    else queueMicrotask(baseBranch.showOverlay);
+  });
   const dialog = document.createElement('dialog'); dialog.id = 'plantUnitDialog';dialog.classList.add('library-polished','pu-workbench-v2');dialog.setAttribute('aria-labelledby','unitWorkbenchTitle');
   dialog.innerHTML = `<header class="pu-header"><img src="/brand/category-units-v1.png" alt="" class="pu-brand-art"><div><small>素材制作 · 叶片 / 花 / 果实</small><h2 id="unitWorkbenchTitle">叶花果工作台</h2></div><button id="unitWorkbenchClose" type="button">${icon('arrow-left')}<span>返回创作</span></button></header>
     <div class="pu-pack-bar"><label>当前套装<input id="unitPackName" maxlength="80" required aria-label="植物名称"></label><span id="unitPackState" role="status"></span><button id="unitPackExport" type="button">${icon('resource-export')}导出套装</button></div>
     <div class="pu-workspace"><aside class="pu-pack-sidebar" aria-label="套装与单元列表"><details id="unitPackBrowser"><summary>${icon('library-big')}<span id="unitPackBrowserName">选择植物套装</span>${icon('chevron-down')}</summary><div class="pu-pack-browser-body"><div class="wb-row"><button id="unitPackNew" type="button">${icon('plus')}新建套装</button><button id="unitPackImport" type="button">${icon('resource-import')}导入套装</button></div><input id="unitPackSearch" type="search" placeholder="搜索植物套装" aria-label="搜索植物"><div id="unitPackList"></div></div></details>
-      <div class="pu-library-toolbar"><h3>套装单元</h3><button id="unitRefreshThumbnails" type="button" aria-label="刷新套装预览" title="刷新套装预览">${icon('refresh-cw')}</button><input id="unitLibrarySearch" type="search" placeholder="查找单元" aria-label="查找单元"><select id="unitLibraryRole" aria-label="单元类型筛选"><option value="">全部类型</option>${roleOptions}</select><p id="unitLibraryCount"></p></div><div id="unitPackGrid" class="pu-unit-grid"></div></aside>
-    <main class="pu-preview-stage"><div class="pu-model-heading"><div><small id="unitPreviewRole">单元预览</small><h3 id="unitPreviewName">选择一个单元</h3></div><button id="unitPreviewReset" type="button" title="复位视角">${icon('scan')}复位视角</button></div><div class="pu-preview-tools" role="group" aria-label="模型显示方式"><button type="button" data-preview-mode="material" aria-pressed="true">材质</button><button type="button" data-preview-mode="solid" aria-pressed="false">白模</button><button type="button" data-preview-mode="wireframe" aria-pressed="false">线框</button></div><div id="unitPreviewCanvas"></div><div id="unitPreviewEmpty" class="pu-preview-empty" hidden>${icon('resource-units')}<strong>从一个真实模型开始</strong><p>导入叶片、花或果实，检查姿态与校准尺寸。</p><button type="button" id="unitPreviewImport">${icon('plus')}导入模型单元</button></div><p class="pu-preview-help">${VIEWPORT_NAVIGATION_HINT}</p></main>
+      <div class="pu-library-toolbar"><h3>套装单元</h3><button id="unitRefreshThumbnails" type="button" aria-label="刷新套装预览" title="刷新套装预览">${icon('refresh-cw')}</button><input id="unitLibrarySearch" type="search" placeholder="查找单元" aria-label="查找单元"><select id="unitLibraryRole" aria-label="单元类型筛选"><option value="">全部类型</option>${roleOptions}<option value="BASE_BRANCH">基础枝</option></select><p id="unitLibraryCount"></p></div><div id="unitPackGrid" class="pu-unit-grid"></div></aside>
+    <main class="pu-preview-stage"><div class="pu-model-heading"><div><small id="unitPreviewRole">单元预览</small><h3 id="unitPreviewName">选择一个单元</h3></div><button id="unitPreviewReset" type="button" title="复位视角">${icon('scan')}复位视角</button></div><div class="pu-preview-tools" role="group" aria-label="模型显示方式"><button type="button" data-preview-mode="material" aria-pressed="true">材质</button><button type="button" data-preview-mode="solid" aria-pressed="false">白模</button><button type="button" data-preview-mode="wireframe" aria-pressed="false">线框</button></div><div id="unitPreviewCanvas"></div><div id="unitPreviewEmpty" class="pu-preview-empty" hidden>${icon('resource-units')}<strong>从一个真实模型开始</strong><p>导入叶片、花或果实，检查姿态与校准尺寸。</p><button type="button" id="unitPreviewImport">${icon('plus')}导入模型单元</button></div><p class="pu-preview-help" data-viewport-navigation-hint>${VIEWPORT_NAVIGATION_HINT}</p></main>
     <aside class="pu-inspector" aria-label="素材编辑"><div class="pu-inspector-tabs" role="tablist" aria-label="素材编辑分类"><button type="button" id="unitTabProperties" role="tab" aria-selected="true" aria-controls="unitPanelProperties" data-unit-tab="Properties">${icon('sliders-horizontal')}属性</button><button type="button" id="unitTabMaterial" role="tab" aria-selected="false" aria-controls="unitPanelMaterial" data-unit-tab="Material" tabindex="-1">${icon('layers')}材质</button><button type="button" id="unitTabImport" role="tab" aria-selected="false" aria-controls="unitPanelImport" data-unit-tab="Import" tabindex="-1">${icon('resource-import')}导入</button></div>
-    <section id="unitPanelProperties" class="pu-editor-section" role="tabpanel" aria-labelledby="unitTabProperties"><h3>单位属性</h3><p>校准素材本身的名称、类型与自然尺寸。</p><label>单元名称<input id="unitEditName" maxlength="80" required></label><label>单元类型<select id="unitEditRole">${roleOptions}</select></label><label>基准尺寸 <small>cm · 含叶柄 / 花梗的最长边</small><input id="unitEditSize" type="number" min=".1" max="100" step=".001" required></label><div class="pu-source-info"><strong>模型来源</strong><p id="unitPreviewInfo"></p><p id="unitPackSource"></p></div><button id="unitRemove" type="button" class="pu-remove">${icon('trash-2')}移除此单元</button></section>
+    <section id="unitPanelProperties" class="pu-editor-section" role="tabpanel" aria-labelledby="unitTabProperties"><h3>单位属性</h3><p>校准素材本身的名称、类型与自然尺寸。</p><label>单元名称<input id="unitEditName" maxlength="80" required></label><label>单元类型<select id="unitEditRole">${roleOptions}<option value="BASE_BRANCH" hidden disabled>基础枝</option></select></label><label>基准尺寸 <small>cm · 含叶柄 / 花梗的最长边</small><input id="unitEditSize" type="number" min=".1" max="100" step=".001" required></label><div class="pu-source-info"><strong>模型来源</strong><p id="unitPreviewInfo"></p><p id="unitPackSource"></p></div><button id="unitRemove" type="button" class="pu-remove">${icon('trash-2')}移除此单元</button></section>
     <section id="unitPanelMaterial" class="pu-editor-section" role="tabpanel" aria-labelledby="unitTabMaterial" hidden><h3>套装共享材质</h3><p id="unitPackMaterialStatus"></p><div class="pu-map-preview"><img id="unitPackAtlas" alt="当前植物共享颜色图集" hidden><span id="unitPackAtlasEmpty">尚未配置颜色贴图</span></div><button id="unitPackColor" type="button">${icon('image')}更换颜色 / 透明贴图</button><div class="pu-normal-row"><span id="unitPackNormalStatus"></span><button id="unitPackNormal" type="button">法线贴图</button><button id="unitPackClearNormal" type="button" title="移除法线">${icon('x')}</button></div><div class="field-grid"><label>透明裁切<input id="unitPackCutoff" type="number" min="0" max="1" step=".01"></label><label>粗糙度<input id="unitPackRoughness" type="number" min="0" max="1" step=".01"></label></div><div class="pu-editor-note">${icon('layers')}<p>材质修改会用于本套装的全部单元。已有单元枝保留所用版本，读取新版并应用后才更新。</p></div></section>
     <section id="unitPanelImport" class="pu-editor-section" role="tabpanel" aria-labelledby="unitTabImport" hidden><h3>添加真实模型</h3><p>每个 GLB 对应一个单元，可一次选择多个文件。</p><label>导入类型<select id="unitImportRole">${roleOptions}</select></label><label>Blender 生长方向<select id="unitImportAxis"><option value="Y">+Y</option><option value="-Y">−Y</option><option value="Z">+Z</option><option value="-Z">−Z</option><option value="X">+X</option><option value="-X">−X</option></select></label><label class="pu-checkbox"><input id="unitImportReuse" type="checkbox">复用当前共享材质，仅读取网格与 UV</label><button id="unitGlbImport" type="button" class="pu-import-primary">${icon('plus')}选择 GLB 单元</button><ol class="pu-import-steps"><li>从 Blender 导出静态 GLB，内嵌贴图。</li><li>保持同一套装的共享图集与 UV。</li><li>导入后检查生长方向及厘米尺寸。</li></ol><p>贴图保留原分辨率，套装最多 64 个单元。</p></section>
     <div class="pu-assembly-action" id="unitAssemblyAction" hidden><button id="unitAddFromEditor" type="button">${icon('plus')}加入当前单元枝组合</button><small>返回装配后，点击“应用到当前单元枝”。</small></div></aside></div>
@@ -54,14 +83,19 @@ export function createPlantUnitWorkspace(api, section) {
   document.body.append(dialog);
   trapResourceDialogFocus(dialog);
   const prepareButton=document.createElement('button');prepareButton.type='button';prepareButton.id='unitPrepareGlb';prepareButton.className='pu-import-primary';prepareButton.innerHTML=icon('scissors')+'整包 GLB 拆分整理';
-  $('unitGlbImport').before(prepareButton);const prepareNote=document.createElement('p');prepareNote.className='pu-prepare-note';prepareNote.textContent='一份 GLB 包含多片叶子或多簇花果？进入整理台框选拆分、定底点和朝向，共用原图集。';prepareButton.before(prepareNote);
+  $('unitGlbImport').before(prepareButton);const prepareNote=document.createElement('p');prepareNote.className='pu-prepare-note';prepareNote.textContent='整包 GLB 中的基础枝和叶花果可以分别框选拆分、定底点与朝向，共用原图集。';prepareButton.before(prepareNote);
   const preparation=createUnitPreparation({onSave:async (output,preparationContext)=>{
     if(busy)throw Error('叶花果工作台正在处理，请稍后重试');busy=true;dialog.setAttribute('aria-busy','true');
-    try{const previous=await store.get(output.id),next=normalizePlantUnitPack({...output,revision:(previous?.revision||0)+1}),thumbnail=await generatePlantUnitThumbnail(next);await store.put(next,{thumbnail});if(preparationContext?.source==='resource-center')return next;pack=next;dirty=false;config=normalizeUnitAssembly({entries:[],pack_id:pack.id,pack_name:pack.name});selected=pack.units[0]?.id||'';saved=await store.list();$('unitLibrarySearch').value='';$('unitLibraryRole').value='';rememberClean();try{await redraw();}catch(error){status('套装已保存，预览需重新打开：'+error.message,true);}status('已收入本机内容库 · '+pack.name+' · '+pack.units.length+' 单元 · V'+pack.revision);return next;
+    try{
+      const {pack:previous,expectedRevision}=await store.getForWrite(output.id);
+      const next=normalizePlantUnitPack({...output,base_branches:retainBaseBranchVariants(output,previous),revision:(previous?.revision||0)+1});
+      const thumbnail=await generatePlantUnitThumbnail(next);
+      await store.put(next,{thumbnail,expectedRevision});
+      saved=await store.list();if(preparationContext?.source==='resource-center')return next;pack=next;dirty=false;config=normalizeUnitAssembly({entries:[],pack_id:pack.id,pack_name:pack.name});selected=pack.units[0]?.id||'';$('unitLibrarySearch').value='';$('unitLibraryRole').value='';rememberClean();try{await redraw();}catch(error){status('套装已保存，预览需重新打开：'+error.message,true);}status('已收入本机内容库 · '+pack.name+' · '+packCount(pack)+' 单元 · V'+pack.revision);return next;
     }finally{busy=false;dialog.removeAttribute('aria-busy');updateState();}
   }});
   prepareButton.onclick=safe(async()=>{if(await ensureClean())await preparation.open();});
-  const prepareTop=document.createElement('button');prepareTop.type='button';prepareTop.id='unitPrepareGlbTop';prepareTop.innerHTML=icon('scissors')+'整包 GLB 整理';prepareTop.title='拆出叶花果、设置挂接底点、朝向与自然尺寸';$('unitPackExport').before(prepareTop);prepareTop.onclick=prepareButton.onclick;
+  const prepareTop=document.createElement('button');prepareTop.type='button';prepareTop.id='unitPrepareGlbTop';prepareTop.innerHTML=icon('scissors')+'整包 GLB 整理';prepareTop.title='拆分基础枝和叶花果、设置挂接底点、朝向与自然尺寸';$('unitPackExport').before(prepareTop);prepareTop.onclick=prepareButton.onclick;
   const openGlobal = document.createElement('button'); openGlobal.id = 'openPlantUnitWorkbench'; openGlobal.textContent = '叶花果资产';
   document.querySelector('.branch-workspace-bar').append(openGlobal);
   function status(message, error = false) { $('unitPackStatus').textContent = message; $('unitPackStatus').classList.toggle('pu-error', error); }
@@ -104,27 +138,74 @@ export function createPlantUnitWorkspace(api, section) {
   for(const button of dialog.querySelectorAll('[data-preview-mode]'))button.onclick=()=>{preview?.setMode(button.dataset.previewMode);for(const b of dialog.querySelectorAll('[data-preview-mode]'))b.setAttribute('aria-pressed',String(b===button));};
   $('unitPreviewReset').onclick=()=>preview?.reset();$('unitPreviewImport').onclick=()=>{showTab('Import');$('unitGlbImport').focus();};
   for(const id of ['unitPackName','unitEditName','unitEditRole','unitEditSize','unitPackCutoff','unitPackRoughness'])$(id).addEventListener('input',()=>{if(pack&&!busy){pendingFields.add(id);dirty=true;updateState();}});
-  function entries() { const rows = new Map(catalog.map(e => [e.id, e])); for (const e of saved) rows.set(e.id, { ...rows.get(e.id), ...e }); if (pack && !rows.has(pack.id)) rows.set(pack.id, { id: pack.id, name: pack.name, count: pack.units.length }); return [...rows.values()]; }
+  function entries() { const rows = new Map(catalog.map(e => [e.id, e])); for (const e of saved) rows.set(e.id, { ...rows.get(e.id), ...e }); rows.set(practicePack.id, practicePack); if (pack && !rows.has(pack.id)) rows.set(pack.id, { id: pack.id, name: pack.name, count: packCount(pack) }); return [...rows.values()]; }
   function renderPackList() {
     const rows = entries(), search = $('unitPackSearch').value.trim().toLowerCase();
-    $('unitAssemblyPack').replaceChildren(new Option('请选择植物', ''), ...rows.map(e => new Option(`${e.name} · ${e.count} 单元`, e.id)));
+    const ordered = [practicePack, ...rows.filter(e => e.id !== practicePack.id)];
+    $('unitAssemblyPack').replaceChildren(new Option('请选择植物', ''), ...ordered.map(e => new Option(`${e.name} · ${e.count} 单元`, e.id)));
     if (pack) $('unitAssemblyPack').value = pack.id;
+    refreshAssemblyMode();
     $('unitPackList').replaceChildren();
-    for (const e of rows.filter(e => !search || e.name.toLowerCase().includes(search))) {
+    for (const e of ordered.filter(e => !search || e.name.toLowerCase().includes(search))) {
       const b = document.createElement('button'); b.type = 'button'; b.className = 'pu-pack-item'; b.classList.toggle('active', e.id === pack?.id);
-      const name = document.createElement('strong'), note = document.createElement('small'); name.textContent = e.name; note.textContent = `${e.count} 单元 · ${e.local ? '本地套装' : e.file ? 'Blender 配套素材' : '当前草稿'}`;
+      const name = document.createElement('strong'), note = document.createElement('small'); name.textContent = e.name; note.textContent = `${e.count} 单元 · ${e.id === practicePack.id ? '已拆分，可直接组装' : e.local ? '本地套装' : e.file ? 'Blender 配套素材' : '当前草稿'}`;
       if(e.thumbnail){const image=new Image();image.src=e.thumbnail;image.alt=e.name+' · 真实模型预览';b.append(image);}b.append(name, note); b.onclick = safe(async()=>{if(await selectPack(e.id)!==false)$('unitPackBrowser').open=false;}); $('unitPackList').append(b);
     }
   }
-  async function save() {
+  async function save({replaceFromImport=false}={}) {
     commitFields(true);
     if (!pack) throw Error('请先新建或选择植物');
-    if (!dirty && saved.some(e => e.id === pack.id)) {if(pack.units.length&&store.kind==='disk'&&!saved.find(e=>e.id===pack.id)?.thumbnail){await savePlantUnitThumbnail(pack.id,await generatePlantUnitThumbnail(pack));saved=await store.list();renderPackList();}return;}
-    const next = normalizePlantUnitPack({ ...pack, ...(isPackageAsset(pack.id)?{id:'plant-'+crypto.randomUUID(),name:pack.name+' · 我的副本',revision:1}:{revision: pack.revision + (saved.some(e => e.id === pack.id) ? 1 : 0)}) });
-    const thumbnail=next.units.length?await generatePlantUnitThumbnail(next):'',result=await store.put(next,{thumbnail}); pack = next; dirty = false; saved = await store.list();rememberClean(); renderPackList();renderMaterial();updateState(); status(`已保存 ${pack.name} · ${pack.units.length} 单元 · v${pack.revision} · ${store.kind === 'disk' ? '电脑共享素材库' : '当前浏览器库'}`+(result?.thumbnailError?'；预览保存失败，可刷新重试：'+result.thumbnailError:''));
+    const saveAsCopy=isReadOnlyPack(pack.id);
+    if (!saveAsCopy && !dirty && saved.some(e => e.id === pack.id)) {if(packCount(pack)&&store.kind==='disk'&&!saved.find(e=>e.id===pack.id)?.thumbnail){await savePlantUnitThumbnail(pack.id,await generatePlantUnitThumbnail(pack));saved=await store.list();renderPackList();}return;}
+    const {pack:previous,expectedRevision}=saveAsCopy ? {pack:null,expectedRevision:0} : await store.getForWrite(pack.id);
+    if (previous && !replaceFromImport && pack.revision !== previous.revision) throw Error('套装已有新版，请读取库中新版后重试。');
+    const next = normalizePlantUnitPack({ ...pack, ...(saveAsCopy?copyPackIdentity(pack):{revision:previous ? previous.revision+1 : pack.revision}),
+      base_branches: replaceFromImport ? retainBaseBranchVariants(pack,previous) : pack.base_branches });
+    const thumbnail=packCount(next)?await generatePlantUnitThumbnail(next):'',result=await store.put(next,{thumbnail,expectedRevision}); if(thumbnailPack===pack)thumbnailPack=next;pack = next; dirty = false; saved = await store.list();rememberClean(); renderPackList();renderMaterial();updateState(); status(`已保存 ${pack.name} · ${packCount(pack)} 单元 · v${pack.revision} · ${store.kind === 'disk' ? '电脑共享素材库' : '当前浏览器库'}`+(result?.thumbnailError?'；预览保存失败，可刷新重试：'+result.thumbnailError:''));
   }
-  $('unitRefreshThumbnails').onclick=safe(redraw);$('unitLibraryRole').onchange=renderGrids;$('unitLibrarySearch').oninput=renderGrids;
+  async function saveBaseBranchVariant(sourcePack, candidate) {
+    if (busy || dialog.open || !api.isBranch() || pack?.id !== sourcePack?.id) throw Error('基础枝套装已切换，请返回造型后重试。');
+    busy = true;
+    try {
+      await ready;
+      const writable = isReadOnlyPack(sourcePack.id) ? null : await store.getForWrite(sourcePack.id);
+      const copied = !writable?.pack;
+      const latest = copied ? sourcePack : normalizePlantUnitPack(writable.pack);
+      const next = await appendPlantBaseBranchVariant(sourcePack, latest, candidate, copied ? copyPackIdentity(sourcePack) : {});
+      const variant = next.base_branches.find(branch => branch.id === candidate.id);
+      await store.put(next, {expectedRevision: copied ? 0 : writable.expectedRevision});
+      pack = next;
+      selected = variant.id;
+      dirty = false;
+      config = normalizeUnitAssembly({...config, pack_id: next.id, pack_name: next.name, revision: next.revision});
+      const summary = {id:next.id,name:next.name,revision:next.revision,count:packCount(next),local:true};
+      saved = [...saved.filter(row => row.id !== next.id), summary];
+      $('unitLibrarySearch').value = '';
+      $('unitLibraryRole').value = '';
+      rememberClean();
+      renderPackList();
+      void redraw().catch(error => status('基础枝已保存，预览需重新打开：' + error.message,true));
+      if (store.kind === 'disk') {
+        void ensurePlantUnitThumbnail(summary, {isWanted:()=>saved.includes(summary)}).then(image => {
+          if (!image || !saved.includes(summary)) return;
+          summary.thumbnail = image;
+          renderPackList();
+        }).catch(() => {});
+      }
+      return {pack: next, variant, copied};
+    } finally {
+      busy = false;
+      updateState();
+      if (refreshPending && !dialog.open) { refreshPending = false; queueMicrotask(refresh); }
+    }
+  }
+  $('unitRefreshThumbnails').onclick=safe(()=>redraw({regenerateThumbnails:true}));$('unitLibraryRole').onchange=renderGrids;$('unitLibrarySearch').oninput=renderGrids;
   async function readPack(id) {
+    if(id===practicePack.id){
+      const response=await fetch(new URL(practicePack.url,import.meta.url));
+      if(!response.ok)throw Error('内置测试套装读取失败，请检查软件文件。');
+      return normalizePlantUnitPack({...await response.json(),id:practicePack.id,name:practicePack.name});
+    }
     const local = await store.get(id); if (local) return normalizePlantUnitPack(local);
     const entry = catalog.find(e => e.id === id); if (!entry) throw Error('素材库中没有这套植物，请导入套装文件');
     const response = await fetch('/assets/plants/' + entry.file); if (!response.ok) throw Error('读取植物素材失败');
@@ -142,11 +223,18 @@ export function createPlantUnitWorkspace(api, section) {
     }
     selected = pack.units[0]?.id || '';$('unitLibrarySearch').value='';$('unitLibraryRole').value=''; await redraw();rememberClean(); status(`已载入 ${pack.name} · 选择单元，检查模型与校准尺寸`);return true;
   }
-  async function redraw() {
-    if (!pack){++renderToken;thumbnails.clear();$('unitPackGrid').replaceChildren();$('unitAssemblyLibrary').replaceChildren();$('unitPackName').value='';$('unitLibraryCount').textContent='0 款单元';renderPackList();renderSlots();inspect('');updateState();return;} const token = ++renderToken;
+  async function redraw({regenerateThumbnails=false}={}) {
+    if (!pack){++renderToken;thumbnails=new Map();thumbnailPack=null;$('unitPackGrid').replaceChildren();$('unitAssemblyLibrary').replaceChildren();$('unitPackName').value='';$('unitLibraryCount').textContent='0 款单元';renderPackList();renderSlots();inspect('');updateState();return;}
+    const token = ++renderToken, source = pack;
     preview ||= createPlantUnitPreview($('unitPreviewCanvas'));
-    const images = await preview.load(pack); if (token !== renderToken) return;
-    thumbnails = images; renderPackList(); renderMaterial(); renderGrids(); renderSlots(); renderControls(); inspect(selected);updateState();
+    const cardsPublished = !dialog.open && $('unitAssemblyMode').value === 'BASE_BRANCH' && thumbnailPack !== source;
+    if (cardsPublished) renderPackList();
+    const images = await preview.load(source, {yieldThumbnails:!dialog.open,regenerateThumbnails});
+    if (token !== renderToken || source !== pack) return;
+    thumbnails = images; thumbnailPack = source;
+    if (cardsPublished) refreshAssemblyMode();
+    else renderPackList();
+    renderMaterial(); renderGrids(); renderSlots(); renderControls(); inspect(selected);updateState();
   }
   function renderMaterial() {
     if (!pack) return;
@@ -155,40 +243,45 @@ export function createPlantUnitWorkspace(api, section) {
     $('unitPackName').value = pack.name; $('unitPackSource').textContent = pack.source ? '来源：' + pack.source : '自定义 GLB 素材';
     const img = $('unitPackAtlas'); img.hidden = !pack.material.color; if (pack.material.color) img.src = pack.material.color; else img.removeAttribute('src');
     $('unitPackAtlasEmpty').hidden=!!pack.material.color;$('unitPackNormalStatus').textContent=pack.material.normal?(pack.material.normal_name||'已配置法线贴图'):'未配置法线贴图';
-    const text = pack.material.color ? `${pack.material.color_name || '共享颜色图集'} · ${pack.units.length} 单元共用` : '尚未配置颜色贴图，请导入贴图后再应用到单元枝';
+    const text = pack.material.color ? `${pack.material.color_name || '共享颜色图集'} · ${packCount(pack)} 单元共用` : '尚未配置颜色贴图，请导入贴图后再应用到单元枝';
     $('unitPackMaterialStatus').textContent = text; $('unitAssemblyMaterial').textContent = `${pack.name} · ${text}`;
     $('unitPackCutoff').value = pack.material.cutoff; $('unitPackRoughness').value = pack.material.roughness;
     $('unitImportReuse').disabled = !pack.material.color;
   }
-  function card(unit, assembly = false) {
-    const article = document.createElement('article'); article.className = 'pu-unit-card'; article.dataset.unitId = unit.id; article.draggable = true;
+  function card(unit, assembly = false, base = false) {
+    const article = document.createElement('article'); article.className = 'pu-unit-card'; article.dataset.unitId = unit.id; article.draggable = !base;
     if(!assembly){article.classList.toggle('is-current',unit.id===selected);article.setAttribute('aria-current',String(unit.id===selected));}
     const image = document.createElement('img'); image.draggable = false; image.alt = unit.name + '共享材质预览'; if (thumbnails.has(unit.id)) image.src = thumbnails.get(unit.id);
     const name = document.createElement('strong'); name.textContent = unit.name;name.title=unit.name;
-    const note = document.createElement('small'); note.textContent = `${UNIT_ROLES[unit.role]} · ${(unit.size_m * 100).toFixed(1)} cm`;
-    const add = document.createElement('button'); add.type = 'button'; add.textContent = assembly ? '＋ 加入组合' : '预览 / 编辑';
+    const note = document.createElement('small'); note.textContent = `${base ? '基础枝' : UNIT_ROLES[unit.role]} · ${(unit.size_m * 100).toFixed(1)} cm`;
+    const add = document.createElement('button'); add.type = 'button'; add.textContent = assembly ? '＋ 加入组合' : base ? '预览基础枝' : '预览 / 编辑';
     add.onclick = () => {if(busy)return;if(assembly)addUnit(unit.id);else{commitFields();inspect(unit.id);}};
     article.append(image, name, note, add); article.ondblclick = safe(async () => { if (!dialog.open) await beginOpen({source:'assembly'}); preview.resize(); inspect(unit.id); });
-    article.ondragstart = e => { if (assembly && !api.startUnitDrag(pack, unit, preview.material, async commit => { busy = true; try { await commit(); } finally { busy = false; refreshPending = false; preserveDropLibrary = true; refresh(); } })) { e.preventDefault(); return; } e.dataTransfer.setData('application/x-branchforge-plant-unit', JSON.stringify({ pack_id: pack.id, unit_id: unit.id })); e.dataTransfer.effectAllowed = 'copy'; };
+    article.ondragstart = e => { if (assembly && (busy || !api.startUnitDrag(pack, unit, preview.material, async commit => { busy = true; try { await commit(); } finally { busy = false; refreshPending = false; preserveDropLibrary = true; refresh(); } }))) { e.preventDefault(); return; } e.dataTransfer.setData('application/x-branchforge-plant-unit', JSON.stringify({ pack_id: pack.id, unit_id: unit.id })); e.dataTransfer.effectAllowed = 'copy'; };
     return article;
   }
   function renderGrids() {
     if (!pack) return;
-    const search=$('unitLibrarySearch').value.trim().toLowerCase(),filtered=pack.units.filter(u=>(!$('unitLibraryRole').value||u.role===$('unitLibraryRole').value)&&(!search||u.name.toLowerCase().includes(search)));
-    $('unitLibraryCount').textContent=`显示 ${filtered.length} / ${pack.units.length} 款单元`;
-    $('unitPackGrid').replaceChildren(...filtered.map(u=>card(u)));
-    if(!filtered.length){const empty=document.createElement('p');empty.className='pu-list-empty';empty.textContent=pack.units.length?'没有匹配的单元，请调整筛选。':'还没有单元，到右侧“导入”添加模型。';$('unitPackGrid').append(empty);}
-    if(!filtered.some(u=>u.id===selected))inspect(filtered[0]?.id||'');
+    const search=$('unitLibrarySearch').value.trim().toLowerCase(),role=$('unitLibraryRole').value;
+    const named=unit=>!search||unit.name.toLowerCase().includes(search);
+    const filtered=pack.units.filter(unit=>(!role||unit.role===role)&&named(unit));
+    const bases=(!role||role==='BASE_BRANCH')?(pack.base_branches||[]).filter(named):[];
+    const total=packCount(pack);
+    $('unitLibraryCount').textContent=`显示 ${filtered.length+bases.length} / ${total} 款单元`;
+    $('unitPackGrid').replaceChildren(...filtered.map(unit=>card(unit)),...bases.map(base=>card(base,false,true)));
+    if(!filtered.length&&!bases.length){const empty=document.createElement('p');empty.className='pu-list-empty';empty.textContent=total?'没有匹配的单元，请调整筛选。':'还没有单元，到右侧“导入”添加模型。';$('unitPackGrid').append(empty);}
+    if(![...filtered,...bases].some(unit=>unit.id===selected))inspect((filtered[0]||bases[0])?.id||'');
     $('unitAssemblyLibrary').replaceChildren(...pack.units.map(u=>card(u,true)));
   }
   function inspect(id) {
     for(const key of ['unitEditName','unitEditSize','unitEditRole'])pendingFields.delete(key);
-    selected = id; const unit = pack?.units.find(u => u.id === id);
+    const base = pack?.base_branches?.find(item => item.id === id);
+    selected = id; const unit = base || pack?.units.find(u => u.id === id);
     for(const card of $('unitPackGrid').querySelectorAll('.pu-unit-card')){const current=card.dataset.unitId===id;card.classList.toggle('is-current',current);card.setAttribute('aria-current',String(current));}
-    for (const key of ['unitEditName', 'unitEditRole', 'unitEditSize', 'unitAddFromEditor', 'unitRemove']) $(key).disabled = !unit;
-    $('unitPreviewName').textContent=unit?.name||'选择一个单元';$('unitPreviewRole').textContent=unit?UNIT_ROLES[unit.role]+' · '+(unit.size_m*100).toFixed(1)+' cm':'模型预览';$('unitPreviewEmpty').hidden=!!unit;
+    for (const key of ['unitEditName', 'unitEditRole', 'unitEditSize', 'unitAddFromEditor', 'unitRemove']) $(key).disabled = !unit || Boolean(base);
+    $('unitPreviewName').textContent=unit?.name||'选择一个单元';$('unitPreviewRole').textContent=unit?(base?'基础枝':UNIT_ROLES[unit.role])+' · '+(unit.size_m*100).toFixed(1)+' cm':'模型预览';$('unitPreviewEmpty').hidden=!!unit;
     $('unitPreviewInfo').textContent = unit ? `${unit.geometry.index.length / 3} 三角面 · ${unit.source_file || '配套单元网格'} · 与其他单元共用材质` : '导入单元后可在这里检查网格、贴图和尺寸';
-    if (unit) { $('unitEditName').value = unit.name; $('unitEditRole').value = unit.role; $('unitEditSize').value = +(unit.size_m * 100).toFixed(3); }else{$('unitEditName').value='';$('unitEditSize').value='';}
+    if (unit) { $('unitEditName').value = unit.name; $('unitEditRole').value = base ? 'BASE_BRANCH' : unit.role; $('unitEditSize').value = +(unit.size_m * 100).toFixed(3); }else{$('unitEditName').value='';$('unitEditSize').value='';}
     preview?.show(unit);
   }
   function addUnit(id, targetRole = null) {
@@ -232,7 +325,7 @@ export function createPlantUnitWorkspace(api, section) {
   async function beginOpen(options={},id=null){
     if(!dialog.open){
       context=options;returnFocus=document.activeElement;
-      if(options.source==='resource-center'&&api.isBranch()){branchDraft={pack,config,selected,dirty,checkpoint,thumbnails};pack=null;dirty=false;checkpoint=null;config=normalizeUnitAssembly({entries:[]});}
+      if(options.source==='resource-center'&&api.isBranch()){branchDraft={pack,config,selected,dirty,checkpoint,thumbnails,thumbnailPack};pack=null;dirty=false;checkpoint=null;config=normalizeUnitAssembly({entries:[]});}
     }
     try{
       if(id){if(await selectPack(id)===false)return;}
@@ -243,7 +336,7 @@ export function createPlantUnitWorkspace(api, section) {
   }
   const open = safe(options=>beginOpen(options||{}));
   openGlobal.onclick=()=>open({source:api.isBranch()?'assembly':'editor'});$('unitOpenWorkbench').onclick=()=>open({source:'assembly'});
-  function restoreBranchDraft(){if(!branchDraft)return;({pack,config,selected,dirty,checkpoint,thumbnails}=branchDraft);branchDraft=null;renderPackList();renderGrids();renderSlots();renderControls();updateState();}
+  function restoreBranchDraft(){if(!branchDraft)return;({pack,config,selected,dirty,checkpoint,thumbnails,thumbnailPack}=branchDraft);branchDraft=null;renderPackList();renderGrids();renderSlots();renderControls();updateState();}
   async function close(){
     if(!await ensureClean())return;const onReturn=context.onReturn;dialog.close();syncResourceOverlay();context={};
     restoreBranchDraft();
@@ -271,7 +364,7 @@ export function createPlantUnitWorkspace(api, section) {
   $('unitPackFile').onchange = safe(async () => {
     const file = $('unitPackFile').files[0]; $('unitPackFile').value = ''; if (!file) return; if (file.size > 120 * 1024 * 1024) throw Error('套装文件请控制在 120 MB 内');
     const raw = JSON.parse(await file.text()); if (raw.format !== 'BranchForgePlantUnits') throw Error('请选择 .plantunits.json 素材套装文件');
-    const imported = normalizePlantUnitPack(raw); if (!await ensureClean())return; pack = imported; dirty = true; config = normalizeUnitAssembly({ entries: [] }); selected = pack.units[0]?.id; await save(); await redraw();$('unitPackBrowser').open=false;showTab('Properties');
+    const imported = normalizePlantUnitPack(raw); if (!await ensureClean())return; pack = imported; dirty = true; config = normalizeUnitAssembly({ entries: [] }); selected = pack.units[0]?.id; await save({replaceFromImport:true}); await redraw();$('unitPackBrowser').open=false;showTab('Properties');
   });
   for (const [button, input, key] of [['unitPackColor', 'unitPackColorFile', 'color'], ['unitPackNormal', 'unitPackNormalFile', 'normal']]) {
     $(button).onclick = () => { if (pack) $(input).click(); };
@@ -282,7 +375,7 @@ export function createPlantUnitWorkspace(api, section) {
   $('unitGlbImport').onclick = () => { if (pack && !busy) $('unitGlbFiles').click(); };
   $('unitGlbFiles').onchange = safe(async () => {
     const files = [...$('unitGlbFiles').files]; $('unitGlbFiles').value = ''; if (!pack || !files.length) return;
-    if (pack.units.length + files.length > 64) throw Error('每套植物最多 64 个单元');
+    if (packCount(pack) + files.length > 64) throw Error('每套植物最多 64 个单元');
     const imported = [], reuse = $('unitImportReuse').checked && !!pack.material.color;
     let material = pack.material;
     for (let i = 0; i < files.length; i++) {
@@ -299,19 +392,63 @@ export function createPlantUnitWorkspace(api, section) {
   $('unitAssemblyApply').onclick = safe(async () => {
     if (!api.isBranch()) throw Error('请先切换到枝条工作台，再应用叶花果组合');
     if (!pack) throw Error('请选择植物素材套装'); readControls(); await api.flush();
-    const next = documentWithUnitAssembly(api.capture(), pack, config); await api.applyPlantAssets(next);
+    const next = documentWithUnitAssembly(api.capture(), pack, config);
+    next.authoring.base_branch_assembly = null;
+    await api.applyPlantAssets(next);
     $('unitAssemblyStatus').textContent = `已应用 ${config.entries.length} 款单元 · ${pack.name} · 共享贴图已随单元枝保存`;
     api.toast('已更新当前单元枝叶花果，可继续调整并保存为单元枝素材');
   });
-  $('unitAssemblySaveBranch').onclick = () => { stage('ASSETS'); $('wbAssetName')?.focus(); };
+  $('unitAssemblySaveBranch').onclick = () => { baseBranch.suspend(); stage('ASSETS'); $('wbAssetName')?.focus(); };
   const ready = Promise.all([fetch('/assets/plant-unit-catalog.json').then(r => { if (!r.ok) throw Error('配套素材目录读取失败'); return r.json(); }), store.list()])
     .then(([builtins, locals]) => { catalog = builtins; saved = locals; renderPackList(); renderSlots(); })
     .catch(e => { status(e.message, true); api.toast(e.message, true); });
   function refresh() {
     panel.hidden = !api.isBranch(); $('unitAssemblyApply').disabled = !api.isBranch();
-    if (!api.isBranch()) { sourceLeaves = null; sourceStamp = ''; return; }
+    if (!api.isBranch()) { activeBase = ''; sourceLeaves = null; sourceStamp = ''; baseBranch.suspend(); return; }
     if (busy||dialog.open) { refreshPending = true; return; }
     const a = api.getAuthoring(), settings = api.getSettings();
+    const currentBase = a.base_branch_assembly;
+    if (currentBase) {
+      const id = currentBase.pack_id || 'EMBEDDED_' + currentBase.base.id;
+      const key = id + ':' + currentBase.base.id + ':' + currentBase.revision;
+      if (activeBase !== key) {
+        activeBase = key;
+        $('unitAssemblyMode').value = 'BASE_BRANCH';
+        sourceLeaves = null;
+        sourceStamp = '';
+        if (pack?.id !== id || pack.revision < currentBase.revision || !pack.base_branches?.some(base => base.id === currentBase.base.id)) {
+          const embedded = normalizePlantUnitPack({ id, name: currentBase.pack_name || currentBase.base.name, revision: currentBase.revision,
+            units: currentBase.units, material: currentBase.material, base_branches: [currentBase.base] });
+          pack = embedded;
+          dirty = false;
+          selected = currentBase.base.id;
+          renderPackList();
+          safe(async () => {
+            let libraryPack;
+            if (currentBase.pack_id) {
+              try { libraryPack = await readPack(id); } catch { /* Embedded assembly still supplies the original material and geometry. */ }
+            }
+            if (activeBase !== key || pack !== embedded || !api.isBranch()) return;
+            if (libraryPack?.revision >= currentBase.revision && libraryPack.base_branches?.some(branch => branch.id === currentBase.base.id)) {
+              pack = libraryPack;
+              config = normalizeUnitAssembly({...config,pack_id:id,pack_name:pack.name,revision:pack.revision});
+            }
+            rememberClean();
+            await redraw();
+          })();
+        }
+        config = normalizeUnitAssembly({ entries: [], pack_id: pack.id, pack_name: pack.name });
+        renderSlots();
+        renderControls();
+      }
+      refreshAssemblyMode();
+      return;
+    }
+    if (activeBase) {
+      activeBase = '';
+      $('unitAssemblyMode').value = 'PROCEDURAL';
+    }
+    refreshAssemblyMode();
     const leaves = api.getLeafSources?.();
     const stamp = JSON.stringify([a.workbench?.name, a.plant_unit_assembly, settings.leaf_density, settings.leaf_scale, settings.leaf_aspect, settings.leaf_zone_start,
       a.foliage_range, a.tree_organs.mode, a.tree_organs.amount, a.tree_organs.habit, a.tree_organs.scale,
@@ -334,13 +471,13 @@ export function createPlantUnitWorkspace(api, section) {
         pack = recovered.pack; config = recovered.config; dirty = false; selected = pack.units[0]?.id; safe(redraw)();
         $('unitAssemblyStatus').textContent = `已读取旧单元枝实际使用的 ${config.entries.length} 款叶花果；原网格、贴图和枝条保持原样。库中未启用的花果可另行加入组合。`;
       } else {
-        pack = null; dirty = false; selected = ''; thumbnails.clear(); config = normalizeUnitAssembly({ entries: [], density: settings.leaf_density });
+        pack = null; dirty = false; selected = ''; thumbnails = new Map(); thumbnailPack = null; config = normalizeUnitAssembly({ entries: [], density: settings.leaf_density });
         renderPackList(); renderSlots(); renderControls(); inspect('');
         $('unitAssemblyLibrary').replaceChildren(); $('unitPackGrid').replaceChildren(); $('unitAssemblyMaterial').textContent = '';
         $('unitAssemblyStatus').textContent = '当前单元枝没有内嵌叶花果单元，请选择植物素材套装';
       }
     }
   }
-  return { refresh, open,preparation,openPreparation:safe(async(options={})=>{if(dialog.open&&!await ensureClean())return;await preparation.open({source:'resource-center',returnLabel:'返回资源中心',onSaved:async next=>{options.beforeOpenPack?.();await safe(()=>beginOpen({source:'resource-center',onReturn:options.onReturn},next.id))();}});}),async reload(){saved=await store.list();renderPackList();},openPack:safe((id,options={})=>beginOpen(options,id)), get pack() { return pack; }, get config() { return config; }, get preview() { return preview; }, get busy() { return busy; }, ready };
+  return { refresh, open,baseBranch,preparation,openPreparation:safe(async(options={})=>{if(dialog.open&&!await ensureClean())return;await preparation.open({source:'resource-center',returnLabel:'返回资源中心',onSaved:async next=>{options.beforeOpenPack?.();await safe(()=>beginOpen({source:'resource-center',onReturn:options.onReturn},next.id))();}});}),async reload(){saved=await store.list();renderPackList();},openPack:safe((id,options={})=>beginOpen(options,id)), get pack() { return pack; }, get config() { return config; }, get preview() { return preview; }, get busy() { return busy; }, ready };
 }
 

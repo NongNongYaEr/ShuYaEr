@@ -1,6 +1,6 @@
 // Runs only our separately built desktop host with an isolated WebView/session.
 const fs=require('node:fs'),path=require('node:path'),net=require('node:net'),{spawn}=require('node:child_process'),assert=require('node:assert/strict'),crypto=require('node:crypto');
-const {chromium}=require('playwright');
+const {chromium}=require('C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 const root=path.resolve(process.env.BRANCHFORGE_TEST_APP_ROOT||path.join(__dirname,'..')),out=path.resolve(process.env.BRANCHFORGE_NATIVE_OUTPUT||'.runtime/native-editor-acceptance-v1');
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
 (async()=>{

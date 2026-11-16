@@ -8,15 +8,59 @@ const clamp=x=>Math.max(0,Math.min(255,x));
 // the filtered coverage, while the underlying material textures keep full detail.
 export class SurfaceEdgeFilter{
  constructor(raster,working,{pathCacheBudget=32*1024*1024}={}){this.target=raster;this.working=working;this.grids=new Map();this.cache=new Map();this.pathCacheBudget=Math.max(0,Math.min(32*1024*1024,pathCacheBudget));}
- process(values,raw,actualHeightMeters){const p=validateEdgeTreatment(raw);if(!edgeTreatmentActive(p))return{values,metadata:null};const target=this.target,size=Math.min(target.size,p.resolution);target.prepareSmoothing();let grid=this.grids.get(size);if(!grid){grid=new PixelMaskRasterizer(target.topology,this.working,size,{padding:2,channels:1});grid.prepareSmoothing();this.grids.set(size,grid);while(this.grids.size>2)this.grids.delete(this.grids.keys().next().value);}
+ process(values,raw,actualHeightMeters,onProgress=null){const p=validateEdgeTreatment(raw);if(!edgeTreatmentActive(p))return{values,metadata:null};const target=this.target,size=Math.min(target.size,p.resolution);target.prepareSmoothing();let grid=this.grids.get(size);if(!grid){grid=new PixelMaskRasterizer(target.topology,this.working,size,{padding:2,channels:1});grid.prepareSmoothing();this.grids.set(size,grid);while(this.grids.size>2)this.grids.delete(this.grids.keys().next().value);}
   let hash=2166136261,missing=0,covered=0;const input=new Float32Array(size*size);for(let face=0;face<grid.triangles.length;face++){const t=grid.triangles[face];if(!t)continue;grid.walk(t,t.bounds,(i,a,b,c)=>{if(grid.owners[i]!==face)return;const v=target.sampleSurface({face,bary:[a,b,c]},values);input[i]=v??0;if(v==null)missing++;covered++;hash=Math.imul(hash^Math.round(input[i]*65536),16777619);});}
   const blurCm=p.version===2?p.blurCm*Math.sqrt(p.amount):p.blurCm,spreadCm=p.version===2?p.spreadCm*p.amount:p.spreadCm;const key=JSON.stringify([size,p.version,blurCm,spreadCm,actualHeightMeters,hash>>>0]);const cached=this.cache.get(key);let filtered=cached&&cached.input.every((v,i)=>v===input[i])?cached.filtered:null;const scale=target.topology.height/actualHeightMeters;let traceMisses=0,samples=0;
   const pass=(before,radius,kind)=>{const after=new Float32Array(before.length);for(let face=0;face<grid.triangles.length;face++){const t=grid.triangles[face];if(!t)continue;grid.walk(t,t.bounds,(i,a,b,c)=>{if(grid.owners[i]!==face)return;const point=[0,1,2].map(k=>t.p[0][k]*a+t.p[1][k]*b+t.p[2][k]*c),old=before[i];let value=kind==='blur'?old*4:old;for(const[x,y]of directions){const offset=t.T.map((v,k)=>(v*x+t.B[k]*y)*radius),sample=grid.sampleSurface(grid.traceSurface(face,point,offset),before);samples++;if(sample==null)traceMisses++;const v=sample??old;value=kind==='blur'?value+v:kind==='grow'?Math.max(value,v):Math.min(value,v);}after[i]=kind==='blur'?value/12:value;});}return after;};
-  const gaussian=(before,radius)=>{const after=new Float32Array(before.length),pathKey=JSON.stringify([size,radius]);let paths=this.gaussianPaths;
-   if(!paths||paths.key!==pathKey||paths.grid!==grid){const owned=grid.owners.reduce((n,f)=>n+(f>=0),0),capacity=Math.min(owned*64,Math.floor(this.pathCacheBudget/28));paths=this.gaussianPaths={key:pathKey,grid,faces:new Int32Array(capacity).fill(-2),bary:new Float64Array(capacity*3)};}let pathIndex=0;
-   for(let face=0;face<grid.triangles.length;face++){const t=grid.triangles[face];if(!t)continue;grid.walk(t,t.bounds,(i,a,b,c)=>{if(grid.owners[i]!==face)return;const point=[t.p[0][0]*a+t.p[1][0]*b+t.p[2][0]*c,t.p[0][1]*a+t.p[1][1]*b+t.p[2][1]*c,t.p[0][2]*a+t.p[1][2]*b+t.p[2][2]*c];let sum=0,weight=0;for(const[x,y]of gaussianPairs)for(let sign=-1;sign<=1;sign+=2){let location;const index=pathIndex++,cached=index<paths.faces.length?paths.faces[index]:-2;
-    if(cached===-1)location=null;else if(cached>=0){const at=index*3;location={face:cached,bary:paths.bary.subarray(at,at+3)};}else{const offset=[(t.T[0]*x+t.B[0]*y)*radius*sign,(t.T[1]*x+t.B[1]*y)*radius*sign,(t.T[2]*x+t.B[2]*y)*radius*sign];location=grid.traceSurface(face,point,offset);if(index<paths.faces.length){paths.faces[index]=location?.face??-1;if(location)paths.bary.set(location.bary,index*3);}}
-    const value=grid.sampleSurface(location,before);samples++;if(value==null){traceMisses++;continue;}sum+=value;weight++;}after[i]=weight?sum/weight:before[i];});}return after;};
+  const gaussian=(before,radius)=>{
+   const after=new Float32Array(before.length),pathKey=JSON.stringify([size,radius]);
+   let paths=this.gaussianPaths;
+   if(!paths||paths.key!==pathKey||paths.grid!==grid){
+    const capacity=Math.min(covered*64,Math.floor(this.pathCacheBudget/28));
+    paths=this.gaussianPaths={key:pathKey,grid,faces:new Int32Array(capacity).fill(-2),bary:new Float64Array(capacity*3)};
+   }
+   const point=[0,0,0],offset=[0,0,0],traced={face:-1,bary:[0,0,0]};
+   const progressStride=Math.max(1,Math.ceil(covered/10));
+   let pathIndex=0,processed=0,nextProgress=progressStride;
+   for(let face=0;face<grid.triangles.length;face++){
+    const t=grid.triangles[face];if(!t)continue;
+    grid.walk(t,t.bounds,(i,a,b,c)=>{
+     if(grid.owners[i]!==face)return;
+     for(let axis=0;axis<3;axis++)point[axis]=t.p[0][axis]*a+t.p[1][axis]*b+t.p[2][axis]*c;
+     let sum=0,weight=0;
+     for(const [x,y] of gaussianPairs)for(let sign=-1;sign<=1;sign+=2){
+      const index=pathIndex++,cached=index<paths.faces.length?paths.faces[index]:-2;
+      let location=null;
+      if(cached>=0){
+       const at=index*3;
+       traced.face=cached;
+       traced.bary[0]=paths.bary[at];
+       traced.bary[1]=paths.bary[at+1];
+       traced.bary[2]=paths.bary[at+2];
+       location=traced;
+      }else if(cached===-2){
+       for(let axis=0;axis<3;axis++)offset[axis]=(t.T[axis]*x+t.B[axis]*y)*radius*sign;
+       location=grid.traceSurface(face,point,offset,traced);
+       if(index<paths.faces.length){
+        paths.faces[index]=location?.face??-1;
+        if(location)paths.bary.set(location.bary,index*3);
+       }
+      }
+      const value=grid.sampleSurface(location,before);
+      samples++;
+      if(value==null){traceMisses++;continue;}
+      sum+=value;
+      weight++;
+     }
+     after[i]=weight?sum/weight:before[i];
+     if(onProgress&&++processed>=nextProgress){
+      onProgress(processed/covered);
+      nextProgress=Math.min(covered,nextProgress+progressStride);
+     }
+    });
+   }
+   return after;
+  };
   if(!filtered){filtered=input;if(spreadCm!==0)for(let step=0;step<4;step++)filtered=pass(filtered,Math.abs(spreadCm)/100*scale/4,spreadCm>0?'grow':'shrink');if(blurCm>0){if(p.version===2)filtered=gaussian(filtered,blurCm/100*scale);else for(let step=0;step<2;step++)filtered=pass(filtered,blurCm/100*scale/2,'blur');}this.cache.set(key,{input,filtered});while(this.cache.size>4)this.cache.delete(this.cache.keys().next().value);}
   const output=values.slice();for(let face=0;face<target.triangles.length;face++){const t=target.triangles[face];if(!t)continue;target.walk(t,t.bounds,(i,a,b,c)=>{if(target.owners[i]!==face)return;const v=grid.sampleSurface({face,bary:[a,b,c]},filtered);if(v!=null)output[i]=Math.round(clamp(p.version===2?v:values[i]+(v-values[i])*p.amount));});}
   for(let i=0;i<output.length;i++){const j=target.nearest[i];if(j>=0&&j!==i)output[i]=output[j];}
